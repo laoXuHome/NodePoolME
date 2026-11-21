@@ -69,20 +69,20 @@ onMounted(load)
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">节点标签</h2>
     <div class="np-page-desc">
-      每个标签对应一个检测目标与一个延迟上限。命中即在节点名中间段加入该组名（如「机场｜GPT·YouTube｜节点名」），不决定是否下发；是否下发由「系统设置 → 延迟检测」的延迟上限决定。
+      每个标签对应一个检测目标与一个延迟上限。「名称」只在本页面内部使用；真正进入节点名中间段的是「标识」（如「机场｜GPT·TG｜节点名」）。命中标签不影响是否下发，下发只看「系统设置 → 延迟检测」的延迟上限。
     </div>
 
     <div class="np-toolbar">
       <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新增检测组</el-button>
       <el-button @click="load"><el-icon><Refresh /></el-icon>刷新</el-button>
       <div class="np-flex" />
-      <span class="np-muted">顺序决定名称中间段的排列：{{ items.filter(i => i.enabled).map(i => i.name).join(' · ') || '（无启用标签）' }}</span>
+      <span class="np-muted">顺序决定节点名中间段的排列：{{ items.filter(i => i.enabled).map(i => i.ident).join(' · ') || '（无启用标签）' }}</span>
     </div>
 
     <div class="np-card">
       <el-table :data="items">
-        <el-table-column prop="name" label="名称" width="130" />
-        <el-table-column label="标识" width="80">
+        <el-table-column prop="name" label="名称（内部）" width="150" />
+        <el-table-column label="标识（节点名）" width="120">
           <template #default="{ row }"><el-tag effect="dark" size="small">{{ row.ident }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="url" label="检测 URL" min-width="220" show-overflow-tooltip />
@@ -119,12 +119,12 @@ onMounted(load)
       <el-form label-width="110px">
         <el-row :gutter="12">
           <el-col :span="14">
-            <el-form-item label="名称">
+            <el-form-item label="名称（内部）">
               <el-input v-model="form.name" placeholder="例如：ChatGPT 或 自定义 CL" />
             </el-form-item>
           </el-col>
           <el-col :span="10">
-            <el-form-item label="代号（内部用）">
+            <el-form-item label="标识（进入节点名）">
               <el-input v-model="form.ident" placeholder="例如 G / TG / CL" maxlength="12" />
             </el-form-item>
           </el-col>
