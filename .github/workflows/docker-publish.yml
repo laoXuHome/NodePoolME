@@ -34,6 +34,7 @@ jobs:
           python tests/test_schedule.py
           python tests/test_nodes_api.py
           python tests/test_parser_compat.py
+          python tests/test_airport_schedule.py
 
   build:
     needs: test

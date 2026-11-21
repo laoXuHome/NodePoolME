@@ -169,7 +169,7 @@ async def update_airport(airport_id: int, payload: AirportPatch):
             airport[key] = data[key].strip()
     if "enabled" in data and data["enabled"] is not None:
         airport["enabled"] = int(bool(data["enabled"]))
-    if "interval_minutes" in data and data["interval_minutes"]:
+    if data.get("interval_minutes") is not None:
         airport["interval_minutes"] = int(data["interval_minutes"])
     db.execute(
         """UPDATE airports SET name=?, url=?, enabled=?, interval_minutes=?, daily_time=?, updated_at=?

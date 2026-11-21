@@ -108,10 +108,13 @@ onMounted(load)
           <template #default="{ row }"><span class="np-mono">{{ row.url_masked }}</span></template>
         </el-table-column>
         <el-table-column prop="node_count" label="节点" width="80" />
-        <el-table-column label="拉取周期" width="130">
+        <el-table-column label="拉取周期" width="150">
           <template #default="{ row }">
             <span v-if="row.daily_time">每天 {{ row.daily_time }}</span>
-            <span v-else>每 {{ row.interval_minutes }} 分钟</span>
+            <span v-else-if="row.interval_minutes > 0">每 {{ row.interval_minutes }} 分钟</span>
+            <el-tooltip v-else content="定时与间隔都为 0：不会自动拉取，只能点「立即拉取」">
+              <el-tag type="info" size="small">仅手动</el-tag>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column label="最近成功" width="170">
@@ -151,14 +154,17 @@ onMounted(load)
         <el-form-item label="订阅地址">
           <el-input v-model="form.url" type="textarea" :rows="3" placeholder="https://example.com/api/v1/client/subscribe?token=..." />
         </el-form-item>
-        <el-form-item label="拉取周期">
-          <el-input-number v-model="form.interval_minutes" :min="1" :max="1440" />
-          <span class="np-muted" style="margin-left:8px">分钟（按小时/分钟间隔）</span>
+        <el-form-item label="间隔拉取">
+          <el-input-number v-model="form.interval_minutes" :min="0" :max="1440" />
+          <span class="np-muted" style="margin-left:8px">分钟；填 0 表示不按间隔拉取</span>
         </el-form-item>
-        <el-form-item label="每天定时">
-          <el-input v-model="form.daily_time" placeholder="留空则使用间隔；如 03:30" style="width:180px" />
-          <span class="np-muted" style="margin-left:8px">填写后每天该时刻拉取一次</span>
+        <el-form-item label="定时拉取">
+          <el-input v-model="form.daily_time" placeholder="如 03:30，留空则不按时刻拉取" style="width:220px" />
+          <span class="np-muted" style="margin-left:8px">每天该时刻拉取一次</span>
         </el-form-item>
+        <div class="np-muted" style="margin:-6px 0 14px 96px">
+          两者可以同时生效（谁先到谁先拉）；<b>间隔填 0 且定时留空</b> 时该机场完全不会自动拉取，只在你点「立即拉取」（或首次配置后手动触发）时才拉。检测批次不会触发机场拉取，只读本地缓存。
+        </div>
         <el-form-item label="启用">
           <el-switch v-model="form.enabled" />
         </el-form-item>

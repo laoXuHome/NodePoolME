@@ -17,7 +17,7 @@ class AirportIn(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     url: str = Field(min_length=4, max_length=2048)
     enabled: bool = True
-    interval_minutes: int = Field(default=60, ge=1, le=1440)
+    interval_minutes: int = Field(default=60, ge=0, le=1440)   # 0 = manual only
     daily_time: Optional[str] = None
 
 
@@ -25,7 +25,7 @@ class AirportPatch(BaseModel):
     name: Optional[str] = Field(default=None, max_length=60)
     url: Optional[str] = Field(default=None, max_length=2048)
     enabled: Optional[bool] = None
-    interval_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+    interval_minutes: Optional[int] = Field(default=None, ge=0, le=1440)
     daily_time: Optional[str] = None
 
 

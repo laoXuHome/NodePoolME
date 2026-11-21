@@ -174,6 +174,10 @@ def due_airports(now: datetime | None = None) -> list[dict]:
     now = now or datetime.now().astimezone()
     due = []
     for airport in all_airports(enabled_only=True):
+        daily = (airport.get("daily_time") or "").strip()
+        interval = int(airport.get("interval_minutes") or 0)
+        if not daily and interval <= 0:
+            continue   # both schedules off: manual fetch only
         last_attempt = airport["last_attempt_at"]
         if not last_attempt:
             due.append(airport)
@@ -186,20 +190,18 @@ def due_airports(now: datetime | None = None) -> list[dict]:
         if last.tzinfo is None:
             last = last.astimezone()
 
-        daily = (airport.get("daily_time") or "").strip()
         if daily:
             try:
                 hour, _, minute = daily.partition(":")
                 slot = now.replace(hour=int(hour), minute=int(minute or 0), second=0, microsecond=0)
             except ValueError:
                 slot = None
-            if slot is not None:
-                # run once per day, at or after the configured wall clock time
-                if now >= slot and last < slot:
-                    due.append(airport)
+            if slot is not None and now >= slot and last < slot:
+                # daily slot wins, once per day, at or after the configured wall clock time
+                due.append(airport)
                 continue
 
         elapsed = (now - last).total_seconds() / 60
-        if elapsed >= airport["interval_minutes"]:
+        if interval and elapsed >= interval:
             due.append(airport)
     return due
