@@ -28,6 +28,7 @@ jobs:
         run: |
           python tests/test_parsers.py
           python tests/test_node_params.py
+          python tests/test_publish.py
 
   build:
     needs: test

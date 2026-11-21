@@ -197,7 +197,7 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
             fh.write(content)
         os.replace(tmp, target)
         written[fmt] = str(target)
-    meta = {
+    manifest = {
         "name": sub_name,
         "nodes": len(nodes),
         "updated_at": _fmt_ts(),
@@ -208,12 +208,12 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
     }
     tmp = config.SUB_DIR / ".meta.json.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(meta, fh, ensure_ascii=False, indent=2)
+        json.dump(manifest, fh, ensure_ascii=False, indent=2)
     os.replace(tmp, config.SUB_DIR / "meta.json")
-    db.set_setting("sub_last_generated_at", meta["updated_at"])
+    db.set_setting("sub_last_generated_at", manifest["updated_at"])
     db.set_setting("sub_node_count", str(len(nodes)))
     db.append_log("INFO", "publish", f"subscription published ({len(nodes)} nodes, reason={reason})")
-    return meta
+    return manifest
 
 
 def meta() -> dict:
