@@ -23,7 +23,7 @@ async function load() {
 async function runNow() {
   try {
     await api.post('/api/run', { force: true })
-    ElMessage.success('检测批次已启动，进度会自动刷新')
+    ElMessage.success('已启动：延迟检测 + 全部标签检测，完成后自动替换订阅')
     await load()
   } catch (err) {
     ElMessage.error(err.message)
@@ -92,7 +92,7 @@ onUnmounted(() => clearInterval(timer.value))
             <el-tag v-if="data?.runtime.running" type="warning" size="small">运行中</el-tag>
             <el-tag v-else type="success" size="small">空闲</el-tag>
             <div class="np-flex" />
-            <el-button size="small" type="primary" :disabled="data?.runtime.running" @click="runNow">立即检测</el-button>
+            <el-button size="small" type="primary" :disabled="data?.runtime.running" @click="runNow">立即检测并下发</el-button>
           </div>
           <div v-if="data">
             <el-progress v-if="data.runtime.running" :percentage="data.runtime.progress"
