@@ -288,8 +288,8 @@ def _node_names() -> dict[int, str]:
 @api.get("/nodes", dependencies=protected)
 async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str | None = None,
                      region: str | None = None, status: str | None = None, group_id: int | None = None,
-                     passed: str | None = None, limit: int = 200, offset: int = 0,
-                     sort: str = "latency"):
+                     passed: str | None = None, publishable: str | None = None,
+                     limit: int = 200, offset: int = 0, sort: str = "latency"):
     nodes = db.rows(
         """SELECT n.*, a.name AS airport_name FROM nodes n
            JOIN airports a ON a.id = n.airport_id"""
@@ -314,8 +314,17 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
             node["latency"] = latency
             node["publishable"] = bool(probe and probe["ok"]
                                       and (not ceiling or (probe["latency_ms"] or 0) <= ceiling))
+            if node["publishable"]:
+                node["publish_reason"] = "下发"
+            elif not probe:
+                node["publish_reason"] = "无延迟探测记录"
+            elif not probe["ok"]:
+                node["publish_reason"] = f"探测失败：{probe['error_type'] or 'unknown'}"
+            else:
+                node["publish_reason"] = f"延迟 {latency}ms 超过上限 {ceiling}ms"
         else:
             node["publishable"] = bool(passed_idents)
+            node["publish_reason"] = "延迟检测未启用" if node["publishable"] else "未命中任何标签"
         node["results"] = {
             str(gid): {**res, "ident": groups.get(gid, {}).get("ident", "?")}
             for gid, res in per_group.items() if gid in groups
@@ -345,6 +354,8 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
             if passed is None:
                 return group_id in node["results"]
             return bool(res and bool(res.get("ok")) == want)
+        if publishable in ("1", "0"):
+            return node.get("publishable", False) == (publishable == "1")
         if passed == "qualified":
             return node.get("publishable", False)
         return True
@@ -383,6 +394,16 @@ async def node_detail(node_id: int):
         db.get("latency_test_enabled", "1") == "1" and latest and latest["ok"]
         and (not ceiling or (latest["latency_ms"] or 0) <= ceiling)
     )
+    if node["publishable"]:
+        node["publish_reason"] = "下发"
+    elif db.get("latency_test_enabled", "1") != "1":
+        node["publish_reason"] = "延迟检测未启用"
+    elif not latest:
+        node["publish_reason"] = "无延迟探测记录"
+    elif not latest["ok"]:
+        node["publish_reason"] = f"探测失败：{latest['error_type'] or 'unknown'}"
+    else:
+        node["publish_reason"] = f"延迟 {latest['latency_ms']}ms 超过上限 {ceiling}ms"
     return node
 
 

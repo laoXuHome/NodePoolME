@@ -9,7 +9,7 @@ const loading = ref(false)
 const groups = ref([])
 const airports = ref([])
 const filters = ref({ q: '', airport_id: null, protocol: '', region: '', status: '', group_id: null,
-                     passed: '', sort: 'latency', limit: 50 })
+                     passed: '', publishable: '', sort: 'latency', limit: 50 })
 const page = ref(1)
 const detail = ref(null)
 const detailOpen = ref(false)
@@ -39,7 +39,7 @@ async function loadMeta() {
 function search() { page.value = 1; load() }
 function reset() {
   filters.value = { q: '', airport_id: null, protocol: '', region: '', status: '', group_id: null,
-                    passed: '', sort: 'latency', limit: 50 }
+                    passed: '', publishable: '', sort: 'latency', limit: 50 }
   page.value = 1
   load()
 }
@@ -92,8 +92,12 @@ onMounted(async () => { await loadMeta(); await load() })
       <el-select v-model="filters.group_id" placeholder="检测组" clearable style="width:130px" @change="search">
         <el-option v-for="g in groups" :key="g.id" :label="`${g.name} (${g.ident})`" :value="g.id" />
       </el-select>
-      <el-select v-model="filters.passed" placeholder="检测结果" clearable style="width:130px" @change="search">
-        <el-option label="仅合格节点" value="qualified" />
+      <el-select v-model="filters.publishable" placeholder="下发结果" clearable style="width:130px" @change="search">
+        <el-option label="仅下发节点" value="1" />
+        <el-option label="仅不下发" value="0" />
+      </el-select>
+      <el-select v-model="filters.passed" placeholder="标签结果" clearable style="width:130px" @change="search">
+        <el-option label="仅命中标签" value="qualified" />
       </el-select>
       <el-select v-model="filters.sort" style="width:130px" @change="search">
         <el-option label="按延迟" value="latency" />
@@ -131,11 +135,13 @@ onMounted(async () => { await loadMeta(); await load() })
             <el-tag :type="latencyType(row.latency)" size="small" effect="plain">{{ latencyText(row.latency) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="下发" width="88">
+        <el-table-column label="下发" width="110">
           <template #default="{ row }">
-            <el-tag size="small" effect="plain" :type="row.publishable ? 'success' : 'info'">
-              {{ row.publishable ? '下发' : '不下发' }}
-            </el-tag>
+            <el-tooltip :content="row.publish_reason || '—'" placement="top">
+              <el-tag size="small" effect="plain" :type="row.publishable ? 'success' : 'info'">
+                {{ row.publishable ? '下发' : '不下发' }}
+              </el-tag>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="96">
@@ -164,7 +170,7 @@ onMounted(async () => { await loadMeta(); await load() })
         <el-descriptions-item label="服务器">{{ detail.server }}:{{ detail.port }}</el-descriptions-item>
         <el-descriptions-item label="地区">{{ detail.region || '—' }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detail.status }}</el-descriptions-item>
-        <el-descriptions-item label="是否下发">{{ detail.publishable ? '下发到 /sub/all' : '不下发' }}</el-descriptions-item>
+        <el-descriptions-item label="是否下发">{{ detail.publishable ? '下发到 /sub/all' : `不下发（${detail.publish_reason || '—'}）` }}</el-descriptions-item>
         <el-descriptions-item label="连续失败">{{ detail.fail_count }}</el-descriptions-item>
         <el-descriptions-item label="最近检测">{{ formatTs(detail.last_tested_at) }}</el-descriptions-item>
         <el-descriptions-item label="指纹" :span="2"><span class="np-mono">{{ detail.fingerprint }}</span></el-descriptions-item>

@@ -30,6 +30,10 @@ class RuntimeState:
         self.fetching: set[int] = set()
         self.last_cycle_at: datetime | None = None
         self.background_task = None
+        self.group_progress: list[dict] = []
+        self.block_index = 0
+        self.blocks = 0
+        self.block_size = 0
 
     def as_dict(self) -> dict:
         return {
@@ -45,6 +49,10 @@ class RuntimeState:
             "last_cycle_at": self.last_cycle_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_cycle_at else None,
             "engine": engine_mod.engine_manager.name,
             "fetching": sorted(self.fetching),
+            "group_progress": self.group_progress,
+            "block_index": self.block_index,
+            "blocks": self.blocks,
+            "block_size": self.block_size,
         }
 
 
@@ -135,6 +143,10 @@ async def _latency_task(nodes: list[dict], probe: dict, batch_id: int, global_se
                 outcome = await engine_mod.engine_manager.test(node, probe)
             _record_latency(node, batch_id, outcome)
             counters["done"] += 1
+            counters["groups"][probe["name"]] = counters["groups"].get(probe["name"], 0) + 1
+            for item in state.group_progress:
+                if item["name"] == probe["name"]:
+                    item["done"] = counters["groups"][probe["name"]]
             counters["ok"] += 1 if outcome.ok else 0
             if counters["done"] % 10 == 0 and state.batch_id == batch_id:
                 state.done = counters["done"]
@@ -202,6 +214,10 @@ async def _test_one(node: dict, group: dict, batch_id: int | None, global_sem, g
                 _record(node, group, batch_id, outcome, manage_status=manage_status)
                 counters["done"] += 1
                 counters["ok"] += 1 if outcome.ok else 0
+                counters["groups"][group["name"]] = counters["groups"].get(group["name"], 0) + 1
+                for item in state.group_progress:
+                    if item["name"] == group["name"]:
+                        item["done"] = counters["groups"][group["name"]]
                 if counters["done"] % 10 == 0 and state.batch_id == batch_id:
                     state.done = counters["done"]
                     db.execute("UPDATE batches SET processed_count=? WHERE id=?",
@@ -296,7 +312,15 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
         db.append_log("INFO", "test",
                       f"batch #{batch_id} started: {len(nodes)} nodes x {units} units"
                       f" ({len(groups)} groups{' + latency probe' if probe else ''})")
-        counters = {"done": 0, "ok": 0}
+        counters = {"done": 0, "ok": 0, "groups": {}}
+        state.group_progress = [
+            {"name": item["name"], "ident": item["ident"], "done": 0, "total": len(nodes)}
+            for item in ([{"name": probe["name"], "ident": "L"}] if probe else [])
+            + [{"name": g["name"], "ident": g["ident"]} for g in groups]
+        ]
+        state.blocks = (len(nodes) + BLOCK_SIZE - 1) // BLOCK_SIZE
+        state.block_index = 0
+        state.block_size = 0
         global_sem = asyncio.Semaphore(max(1, db.get_int("global_concurrency", 10)))
         mask = db.get_int("dispersion_mask", 24)
         ip_sems: dict = {}
@@ -305,7 +329,9 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
             for offset in range(0, len(nodes), BLOCK_SIZE):
                 block = nodes[offset:offset + BLOCK_SIZE]
                 block = disperse(block, mask)
-                state.phase = f"binding block {offset // BLOCK_SIZE + 1}"
+                state.block_index = offset // BLOCK_SIZE + 1
+                state.block_size = len(block)
+                state.phase = f"binding block {state.block_index}/{state.blocks}"
                 await engine_mod.engine_manager.prepare(block)
                 state.phase = "testing"
                 tasks = []

@@ -30,6 +30,16 @@ async function runNow() {
   }
 }
 
+function roundDone(name) {
+  const item = (data.value?.runtime?.group_progress || []).find((g) => g.name === name)
+  return item ? `${item.done}/${item.total}` : '—'
+}
+function roundPercent(name) {
+  const item = (data.value?.runtime?.group_progress || []).find((g) => g.name === name)
+  if (!item || !item.total) return 0
+  return Math.round(item.done / item.total * 100)
+}
+
 onMounted(() => {
   load()
   timer.value = setInterval(() => { if (!document.hidden) load() }, 15000)
@@ -81,6 +91,7 @@ onUnmounted(() => clearInterval(timer.value))
             <div class="np-muted" style="margin:10px 0 14px">
               引擎 {{ data.runtime.engine }} · 批次 #{{ data.runtime.batch_id || '—' }} ·
               进度 {{ data.runtime.done }}/{{ data.runtime.total }} ·
+              块 {{ data.runtime.block_index || 0 }}/{{ data.runtime.blocks || 0 }}（{{ data.runtime.block_size || 0 }} 节点）·
               {{ data.runtime.phase }} · 上次启动 {{ formatTs(data.runtime.last_cycle_at) }}
             </div>
             <div class="np-muted" style="margin:0 0 10px">
@@ -94,7 +105,15 @@ onUnmounted(() => clearInterval(timer.value))
               <el-table-column prop="name" label="检测组" />
               <el-table-column prop="ident" label="标识" width="80" />
               <el-table-column prop="url" label="目标" show-overflow-tooltip />
-              <el-table-column prop="passed" label="通过节点" width="100" />
+              <el-table-column label="本轮进度" width="190">
+                <template #default="{ row }">
+                  <div class="np-flex" style="gap:8px">
+                    <el-progress :percentage="roundPercent(row.name)" :stroke-width="8" style="flex:1" />
+                    <span class="np-muted">{{ roundDone(row.name) }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="passed" label="累计通过" width="100" />
               <el-table-column label="状态" width="90">
                 <template #default="{ row }">
                   <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
