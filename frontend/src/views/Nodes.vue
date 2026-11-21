@@ -131,6 +131,13 @@ onMounted(async () => { await loadMeta(); await load() })
             <el-tag :type="latencyType(row.latency)" size="small" effect="plain">{{ latencyText(row.latency) }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="下发" width="88">
+          <template #default="{ row }">
+            <el-tag size="small" effect="plain" :type="row.publishable ? 'success' : 'info'">
+              {{ row.publishable ? '下发' : '不下发' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="96">
           <template #default="{ row }">
             <el-tag size="small" :type="row.status === 'available' ? 'success' : row.status === 'unavailable' ? 'danger' : 'info'">
@@ -157,6 +164,7 @@ onMounted(async () => { await loadMeta(); await load() })
         <el-descriptions-item label="服务器">{{ detail.server }}:{{ detail.port }}</el-descriptions-item>
         <el-descriptions-item label="地区">{{ detail.region || '—' }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detail.status }}</el-descriptions-item>
+        <el-descriptions-item label="是否下发">{{ detail.publishable ? '下发到 /sub/all' : '不下发' }}</el-descriptions-item>
         <el-descriptions-item label="连续失败">{{ detail.fail_count }}</el-descriptions-item>
         <el-descriptions-item label="最近检测">{{ formatTs(detail.last_tested_at) }}</el-descriptions-item>
         <el-descriptions-item label="指纹" :span="2"><span class="np-mono">{{ detail.fingerprint }}</span></el-descriptions-item>
@@ -164,8 +172,25 @@ onMounted(async () => { await loadMeta(); await load() })
           <div class="np-code" style="max-height:150px">{{ JSON.stringify(detail.params, null, 2) }}</div>
         </el-descriptions-item>
       </el-descriptions>
+      <div class="np-section-title" style="margin-top:16px">延迟检测（下发依据）</div>
+      <el-table :data="detail?.latency_history || []" size="small" max-height="180">
+        <el-table-column label="时间" width="160">
+          <template #default="{ row }">{{ formatTs(row.ts) }}</template>
+        </el-table-column>
+        <el-table-column label="结果" width="80">
+          <template #default="{ row }">
+            <el-tag :type="row.ok ? 'success' : 'danger'" size="small">{{ row.ok ? '通过' : '失败' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="latency_ms" label="延迟(ms)" width="95" />
+        <el-table-column label="错误">
+          <template #default="{ row }">
+            <span class="np-muted">{{ row.error_type || '—' }} {{ row.message || '' }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
       <div class="np-section-title" style="margin-top:16px">
-        检测历史
+        标签历史
         <div class="np-flex" />
         <el-button size="small" type="primary" :loading="testing" @click="testNode">立即检测此节点</el-button>
       </div>

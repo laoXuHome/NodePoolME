@@ -17,7 +17,7 @@ const menus = [
   { path: '/dashboard', label: '仪表盘', icon: 'Odometer' },
   { path: '/airports', label: '机场管理', icon: 'OfficeBuilding' },
   { path: '/nodes', label: '节点池', icon: 'Connection' },
-  { path: '/groups', label: '检测管理', icon: 'Aim' },
+  { path: '/groups', label: '节点标签', icon: 'Aim' },
   { path: '/subscription', label: '订阅输出', icon: 'Link' },
   { path: '/settings', label: '系统设置', icon: 'Setting' }
 ]

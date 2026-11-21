@@ -103,6 +103,13 @@ async def dashboard():
         "subscription": builder.meta(),
         "logs": logs,
         "stats": stats,
+        "latency_probe": {
+            "enabled": db.get("latency_test_enabled", "1") == "1",
+            "url": db.get("latency_test_url"),
+            "status": db.get("latency_test_status"),
+            "ceiling": ceiling,
+            "passed": probe_passed,
+        },
     }
 
 
@@ -365,6 +372,12 @@ async def node_detail(node_id: int):
            WHERE r.node_id=? ORDER BY r.id DESC LIMIT 60""", (node_id,))
     node["latency_history"] = db.rows(
         "SELECT * FROM latency_results WHERE node_id=? ORDER BY id DESC LIMIT 60", (node_id,))
+    latest = node["latency_history"][0] if node["latency_history"] else None
+    ceiling = db.get_int("sub_max_latency", 500)
+    node["publishable"] = bool(
+        db.get("latency_test_enabled", "1") == "1" and latest and latest["ok"]
+        and (not ceiling or (latest["latency_ms"] or 0) <= ceiling)
+    )
     return node
 
 

@@ -30,6 +30,7 @@ jobs:
           python tests/test_node_params.py
           python tests/test_publish.py
           python tests/test_latency_gate.py
+          python tests/test_dashboard_contract.py
 
   build:
     needs: test

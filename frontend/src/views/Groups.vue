@@ -67,9 +67,9 @@ onMounted(load)
 
 <template>
   <div class="np-page" v-loading="loading">
-    <h2 class="np-page-title">检测管理</h2>
+    <h2 class="np-page-title">节点标签</h2>
     <div class="np-page-desc">
-      默认检测组为 ChatGPT/G、Telegram/TG、YouTube/Y。可新增自定义检测组，成功条件支持状态码、响应内容与延迟组合。
+      每个标签对应一个检测目标与一个延迟上限。命中即在节点名中加入该代号，不决定是否下发；是否下发由「系统设置 → 延迟检测」决定。默认标签 ChatGPT/G、Telegram/TG、YouTube/Y。
     </div>
 
     <div class="np-toolbar">

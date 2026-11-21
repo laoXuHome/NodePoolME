@@ -56,7 +56,7 @@ onUnmounted(() => clearInterval(timer.value))
       <div class="np-stat">
         <div class="label">可下发节点</div>
         <div class="value">{{ data.nodes_qualified }}</div>
-        <div class="hint">延迟 ≤ {{ data.latency_probe.ceiling || '不限' }}ms 才进入 /sub/all</div>
+        <div class="hint">延迟 ≤ {{ data.latency_probe?.ceiling || '不限' }}ms 才进入 /sub/all</div>
       </div>
       <div class="np-stat">
         <div class="label">统一订阅</div>
@@ -84,10 +84,10 @@ onUnmounted(() => clearInterval(timer.value))
               {{ data.runtime.phase }} · 上次启动 {{ formatTs(data.runtime.last_cycle_at) }}
             </div>
             <div class="np-muted" style="margin:0 0 10px">
-              延迟检测 {{ data.latency_probe.enabled ? '启用' : '停用' }} ·
-              <span class="np-mono">{{ data.latency_probe.url }}</span> ·
-              期望 {{ data.latency_probe.status }} · 上限 {{ data.latency_probe.ceiling || '不限' }}ms ·
-              通过 {{ data.latency_probe.passed }} 个节点
+              延迟检测 {{ data.latency_probe?.enabled ? '启用' : '停用' }} ·
+              <span class="np-mono">{{ data.latency_probe?.url }}</span> ·
+              期望 {{ data.latency_probe?.status }} · 上限 {{ data.latency_probe?.ceiling || '不限' }}ms ·
+              通过 {{ data.latency_probe?.passed }} 个节点
             </div>
             <el-table :data="data.groups" size="small">
               <el-table-column prop="name" label="检测组" />
