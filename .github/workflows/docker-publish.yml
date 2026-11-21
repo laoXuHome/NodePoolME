@@ -36,7 +36,7 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
@@ -76,3 +76,18 @@ jobs:
             MIHOMO_VERSION=v1.19.34
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Bundle amd64 image for offline install
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${{ steps.meta.outputs.version }}"
+          IMG="ghcr.io/laoxuhome/nodepoolme:${TAG}"
+          docker pull --platform linux/amd64 "$IMG"
+          docker save "$IMG" | gzip -9 > "/tmp/nodepoolme-${TAG}-amd64.tar.gz"
+          ls -lh /tmp/nodepoolme-*.tar.gz
+
+      - name: Attach bundle to release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" /tmp/nodepoolme-*.tar.gz --clobber
