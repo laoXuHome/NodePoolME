@@ -277,6 +277,13 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
         state.total = len(nodes) * units
         state.done = 0
         state.current_groups = ([probe["name"]] if probe else []) + [g["name"] for g in groups]
+        # A pull in flight rewrites the node pool; let it finish before we snapshot candidates
+        waited = 0
+        while state.fetching and waited < 120:
+            await asyncio.sleep(1)
+            waited += 1
+        if state.fetching:
+            db.append_log("WARN", "test", "batch started while a fetch is still running")
         state.last_cycle_at = datetime.now()
         batch_id = db.execute(
             "INSERT INTO batches (started_at, status, target_count, groups, note) VALUES (?,?,?,?,?)",
@@ -371,6 +378,8 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None) -> 
 
 
 async def fetch_now(airport_id: int, trigger: str = "manual") -> dict:
+    if state.running:
+        return {"ok": False, "error": "a test cycle is running; retry when it finishes"}
     airport = fetcher.airport_by_id(airport_id)
     if not airport:
         return {"ok": False, "error": "airport not found"}
@@ -383,7 +392,7 @@ async def fetch_now(airport_id: int, trigger: str = "manual") -> dict:
 
 # ---------------------------------------------------------------------------- scheduler jobs
 async def job_fetch() -> None:
-    if state.fetching:
+    if state.fetching or state.running:
         return
     due = fetcher.due_airports()
     if not due:
@@ -413,6 +422,44 @@ async def job_cycle() -> None:
         db.append_log("ERROR", "test", f"cycle crashed: {exc}")
 
 
+async def job_publish() -> None:
+    """Daily publish: force a full latency + label cycle, then write the subscription."""
+    if db.get("sub_publish_enabled", "0") != "1":
+        return
+    hhmm = db.get("sub_publish_time", "04:30") or "04:30"
+    try:
+        hour, minute = (int(x) for x in hhmm.split(":"))
+    except ValueError:
+        return
+    now = datetime.now()
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    offset = (now - target).total_seconds()
+    if offset < 0 or offset > 900:   # run within 15 minutes after the configured time
+        return
+    today = now.strftime("%Y-%m-%d")
+    if db.get("sub_last_auto_publish") == today:
+        return
+    if state.running:
+        db.append_log("WARN", "publish", "scheduled publish skipped: a cycle is already running")
+        return
+    db.append_log("INFO", "publish", f"scheduled publish started ({hhmm})")
+    result = await run_cycle(force=True, reason="scheduled publish")
+    if result.get("ok") and result.get("published"):
+        db.set_setting("sub_last_auto_publish", today)
+        db.append_log("INFO", "publish", "scheduled publish done")
+        return
+    if not result.get("ok"):
+        error = result.get("error", "")
+        if "empty" in error or "no enabled" in error:
+            db.set_setting("sub_last_auto_publish", today)
+            db.append_log("WARN", "publish", f"scheduled publish skipped: {error}")
+        else:
+            db.append_log("ERROR", "publish", f"scheduled publish failed, retrying next minute: {error}")
+        return
+    db.set_setting("sub_last_auto_publish", today)
+    db.append_log("WARN", "publish", "scheduled cycle finished but the subscription was not published")
+
+
 async def job_maintenance() -> None:
     days = db.get_int("history_days", 30)
     cutoff = (datetime.now() - timedelta(days=max(7, min(days, 365)))).strftime("%Y-%m-%d %H:%M:%S")
@@ -429,6 +476,8 @@ def start_scheduler() -> None:
                       coalesce=True, next_run_time=datetime.now() + timedelta(seconds=10))
     scheduler.add_job(job_cycle, "interval", minutes=1, id="cycle", max_instances=1,
                       coalesce=True, next_run_time=datetime.now() + timedelta(seconds=40))
+    scheduler.add_job(job_publish, "interval", minutes=1, id="publish", max_instances=1,
+                      coalesce=True, next_run_time=datetime.now() + timedelta(seconds=50))
     scheduler.add_job(job_maintenance, "interval", hours=6, id="maintenance", max_instances=1)
     scheduler.start()
     db.append_log("INFO", "scheduler", "scheduler started")

@@ -31,6 +31,7 @@ jobs:
           python tests/test_publish.py
           python tests/test_latency_gate.py
           python tests/test_dashboard_contract.py
+          python tests/test_schedule.py
 
   build:
     needs: test

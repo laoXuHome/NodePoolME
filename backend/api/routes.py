@@ -110,6 +110,11 @@ async def dashboard():
             "ceiling": ceiling,
             "passed": probe_passed,
         },
+        "publish_schedule": {
+            "enabled": db.get("sub_publish_enabled", "0") == "1",
+            "time": db.get("sub_publish_time", "04:30"),
+            "last_auto": db.get("sub_last_auto_publish"),
+        },
     }
 
 
@@ -493,7 +498,8 @@ SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "su
                 "request_interval_min_ms", "request_interval_max_ms", "test_timeout",
                 "test_interval_minutes", "fail_threshold", "history_days", "dispersion_mask",
                 "sub_name", "latency_test_enabled", "latency_test_url", "latency_test_status",
-                "latency_test_timeout", "sub_max_latency"]
+                "latency_test_timeout", "sub_max_latency",
+                "sub_publish_enabled", "sub_publish_time"]
 
 
 @api.get("/settings", dependencies=protected)

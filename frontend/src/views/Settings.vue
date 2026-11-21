@@ -43,7 +43,9 @@ async function save() {
       latency_test_url: form.value.latency_test_url,
       latency_test_status: form.value.latency_test_status,
       latency_test_timeout: Number(form.value.latency_test_timeout),
-      sub_max_latency: Number(form.value.sub_max_latency)
+      sub_max_latency: Number(form.value.sub_max_latency),
+      sub_publish_enabled: !!Number(form.value.sub_publish_enabled),
+      sub_publish_time: form.value.sub_publish_time
     })
     ElMessage.success('设置已保存')
     await load()
@@ -127,6 +129,15 @@ onMounted(load)
               </el-col>
             </el-row>
             <div class="np-muted">每轮对全部节点执行一次；延迟不超过上限的节点才进入 <span class="np-mono">/sub/all</span>。检测组（G/TG/Y 及自定义）只决定节点名里的代号，不决定是否下发。上限填 0 表示不限制。</div>
+            <el-divider />
+            <el-form-item label="定时下发">
+              <el-switch v-model="form.sub_publish_enabled" active-value="1" inactive-value="0" />
+            </el-form-item>
+            <el-form-item label="下发时间">
+              <el-time-picker v-model="form.sub_publish_time" format="HH:mm" value-format="HH:mm"
+                              placeholder="04:30" style="width:200px" />
+            </el-form-item>
+            <div class="np-muted">到点后先对全部节点重新跑一遍延迟检测和节点标签，检测期间暂停机场拉取，完成后才原子替换订阅；15 分钟内未成功会在下一分钟重试。</div>
           </el-form>
         </div>
 

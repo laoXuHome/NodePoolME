@@ -87,7 +87,8 @@ onUnmounted(() => clearInterval(timer.value))
               延迟检测 {{ data.latency_probe?.enabled ? '启用' : '停用' }} ·
               <span class="np-mono">{{ data.latency_probe?.url }}</span> ·
               期望 {{ data.latency_probe?.status }} · 上限 {{ data.latency_probe?.ceiling || '不限' }}ms ·
-              通过 {{ data.latency_probe?.passed }} 个节点
+              通过 {{ data.latency_probe?.passed }} 个节点 ·
+              定时下发 {{ data.publish_schedule?.enabled ? data.publish_schedule.time : '未启用' }}
             </div>
             <el-table :data="data.groups" size="small">
               <el-table-column prop="name" label="检测组" />

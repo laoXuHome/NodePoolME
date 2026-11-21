@@ -1,0 +1,78 @@
+"""Scheduled publish: fires once inside the window, and never while a cycle is running."""
+import asyncio
+import os
+import sys
+import tempfile
+from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+_TMP = tempfile.mkdtemp(prefix="np-schedule-")
+os.environ["NODEPOOL_DATA_DIR"] = _TMP
+os.environ["NODEPOOL_CONFIG_DIR"] = os.path.join(_TMP, "config")
+os.environ["NODEPOOL_LOG_DIR"] = os.path.join(_TMP, "logs")
+os.environ["NODEPOOL_BACKUP_DIR"] = os.path.join(_TMP, "backup")
+os.environ["NODEPOOL_TEST_ENGINE"] = "tcp"
+
+from backend.database import db  # noqa: E402
+from backend.scheduler import manager  # noqa: E402
+
+
+def test_disabled_does_nothing():
+    db.init_db()
+    db.set_setting("sub_publish_enabled", "0")
+    asyncio.run(manager.job_publish())
+    assert db.get("sub_last_auto_publish") is None
+
+
+def test_runs_once_in_window():
+    db.init_db()
+    now = datetime.now().strftime("%H:%M")
+    db.set_setting("sub_publish_enabled", "1")
+    db.set_setting("sub_publish_time", now)
+    asyncio.run(manager.job_publish())
+    assert db.get("sub_last_auto_publish") == datetime.now().strftime("%Y-%m-%d")
+    # second call within the same day must be a no-op
+    before = db.get("sub_last_auto_publish")
+    asyncio.run(manager.job_publish())
+    assert db.get("sub_last_auto_publish") == before
+
+
+def test_skips_while_cycle_running():
+    db.init_db()
+    db.set_setting("sub_publish_enabled", "1")
+    db.set_setting("sub_publish_time", datetime.now().strftime("%H:%M"))
+    db.execute("DELETE FROM settings WHERE key='sub_last_auto_publish'")
+    manager.state.running = True
+    try:
+        asyncio.run(manager.job_publish())
+    finally:
+        manager.state.running = False
+    assert db.get("sub_last_auto_publish") is None
+
+
+def test_fetch_blocked_during_cycle():
+    db.init_db()
+    db.set_setting("sub_publish_enabled", "0")
+    manager.state.running = True
+    try:
+        result = asyncio.run(manager.fetch_now(999))
+    finally:
+        manager.state.running = False
+    assert result["ok"] is False and "running" in result["error"]
+
+
+def test_bad_time_format_rejected():
+    from backend.models.schemas import SettingsIn
+    try:
+        SettingsIn(sub_publish_time="25:99")
+    except Exception:
+        return
+    raise AssertionError("25:99 should be rejected")
+
+
+if __name__ == "__main__":
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
+            print("PASS", name)

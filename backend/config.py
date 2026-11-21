@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NodePoolME"
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 
 DATA_DIR = Path(os.getenv("NODEPOOL_DATA_DIR", "./data")).resolve()
 CONFIG_DIR = Path(os.getenv("NODEPOOL_CONFIG_DIR", str(DATA_DIR / "config"))).resolve()
@@ -71,6 +71,8 @@ DEFAULT_SETTINGS = {
     "latency_test_url": "http://www.google.com/generate_204",
     "latency_test_status": "200-399",
     "latency_test_timeout": "8",
+    "sub_publish_enabled": "0",
+    "sub_publish_time": "04:30",
     "sub_max_nodes": "0",
     "sub_min_groups": "1",
     "sub_include_unavailable": "0",

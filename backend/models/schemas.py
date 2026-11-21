@@ -62,6 +62,8 @@ class SubSettings(BaseModel):
     sub_token: Optional[str] = None
     regenerate_token: bool = False
     sub_max_latency: Optional[int] = Field(default=None, ge=0, le=60000)
+    sub_publish_enabled: Optional[bool] = None
+    sub_publish_time: Optional[str] = Field(default=None, pattern=r"^[0-2][0-9]:[0-5][0-9]$")
     sub_max_nodes: Optional[int] = Field(default=None, ge=0)
     sub_min_groups: Optional[int] = Field(default=None, ge=1, le=20)
     sub_include_unavailable: Optional[bool] = None
@@ -84,6 +86,8 @@ class SettingsIn(BaseModel):
     latency_test_status: Optional[str] = None
     latency_test_timeout: Optional[int] = Field(default=None, ge=1, le=60)
     sub_max_latency: Optional[int] = Field(default=None, ge=0, le=60000)
+    sub_publish_enabled: Optional[bool] = None
+    sub_publish_time: Optional[str] = Field(default=None, pattern=r"^[0-2][0-9]:[0-5][0-9]$")
 
 
 class RunIn(BaseModel):
