@@ -68,6 +68,7 @@ def collect_nodes() -> tuple[list[dict], dict]:
 
     latests = latest_latency()
     max_latency = db.get_int("sub_max_latency", 500)
+    required_tags = [t for t in (db.get("sub_required_tags") or "").split(",") if t]
     max_nodes = db.get_int("sub_max_nodes", 0)
 
 
@@ -95,6 +96,13 @@ def collect_nodes() -> tuple[list[dict], dict]:
         if max_latency and latency > max_latency:
             skipped["slow"] += 1
             continue
+        if required_tags:
+            node_idents = {g["ident"] for g in passed}
+            missing = [t for t in required_tags if t not in node_idents]
+            if missing:
+                skipped.setdefault("tag_filter", 0)
+                skipped["tag_filter"] += 1
+                continue
         # Names read as  机场｜GPT·YT·TG｜节点名  (the short ident, not the group's full name)
         idents = [g["ident"] for g in passed]
         display = (f"{airport['name']}｜{'·'.join(idents)}｜{node['raw_name']}" if idents

@@ -357,7 +357,8 @@ def _node_names() -> dict[int, str]:
 @api.get("/nodes", dependencies=protected)
 async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str | None = None,
                      region: str | None = None, status: str | None = None, group_id: int | None = None,
-                     passed: str | None = None, publishable: str | None = None,
+                     tags: str | None = None, passed: str | None = None,
+                     publishable: str | None = None,
                      limit: int = 200, offset: int = 0, sort: str = "latency"):
     nodes = db.rows(
         """SELECT n.*, a.name AS airport_name FROM nodes n
@@ -369,6 +370,7 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
     results = builder.latest_results()
     latests = builder.latest_latency()
     ceiling = db.get_int("sub_max_latency", 500)
+    required_idents = [t for t in (db.get("sub_required_tags") or "").split(",") if t]
     idents = _node_names()
     items = []
     for node in nodes:
@@ -383,28 +385,39 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
         latency = (probe["latency_ms"] if probe and probe["ok"] and probe.get("latency_ms")
                    else (node["latency"] or 0))
         node["latency"] = latency
-        node["publishable"] = bool(latency) and (not ceiling or latency <= ceiling)
+        required_tags = required_idents
+        missing_tags = [t for t in required_tags if t not in passed_idents]
+        node["missing_tags"] = missing_tags
+        node["publishable"] = (bool(latency) and (not ceiling or latency <= ceiling)
+                               and not missing_tags)
         if node["publishable"]:
             node["publish_reason"] = "下发"
         elif not latency:
             node["publish_reason"] = "无可用延迟数据"
-        else:
+        elif ceiling and latency > ceiling:
             node["publish_reason"] = f"延迟 {latency}ms 超过上限 {ceiling}ms"
+        else:
+            node["publish_reason"] = f"缺少标签：{'、'.join(missing_tags)}"
         node["results"] = {
             str(gid): {**res, "ident": groups.get(gid, {}).get("ident", "?")}
             for gid, res in per_group.items() if gid in groups
         }
         node["passed_count"] = len(passed_idents)
+        node["passed_idents_count"] = len(passed_idents)
         items.append(node)
 
+    hit_mode = (passed or "").strip().lower() in ("0", "no", "fail", "miss", "missed")
+    tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
+
     def keep(node: dict) -> bool:
+        """All filters are ANDed; no branch may short-circuit another one."""
         if q:
-            hay = f"{node['display_name']} {node['raw_name']} {node['server']} {node['protocol']}".lower()
-            if q.lower() not in hay:
+            hay = f"{node['display_name']} {node['raw_name']} {node['server']} {node['protocol']}"
+            if q.lower() not in hay.lower():
                 return False
         if airport_id and node["airport_id"] != airport_id:
             return False
-        if protocol and node["protocol"] != protocol:
+        if protocol and (node["protocol"] or "").lower() != protocol.lower():
             return False
         if region and (node["region"] or "").upper() != region.upper():
             return False
@@ -412,15 +425,23 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
             return False
         if group_id:
             res = node["results"].get(str(group_id))
-            # Selecting a group alone means "nodes that hit this tag".
-            want = False if passed in ("0", "no", "fail", "miss") else True
-            if res is None:
+            ok = bool(res.get("ok")) if res else False
+            # hit_mode means "the user asked for misses"; a node without a record counts as miss
+            if ok == hit_mode:
                 return False
-            return bool(res.get("ok")) == want
-        if publishable in ("1", "0"):
-            return node.get("publishable", False) == (publishable == "1")
-        if passed == "qualified":
-            return node.get("publishable", False)
+        if tag_list:
+            node_idents = set(idents.get(node["id"], []))
+            if hit_mode:
+                if node_idents & set(tag_list):
+                    return False
+            elif not all(t in node_idents for t in tag_list):
+                return False
+        if passed == "qualified" and not node["passed_idents_count"]:
+            return False
+        if passed == "untagged" and node["passed_idents_count"]:
+            return False
+        if publishable in ("1", "0") and node["publishable"] != (publishable == "1"):
+            return False
         return True
 
     items = [n for n in items if keep(n)]
@@ -453,18 +474,22 @@ async def node_detail(node_id: int):
         "SELECT * FROM latency_results WHERE node_id=? ORDER BY id DESC LIMIT 60", (node_id,))
     latest = node["latency_history"][0] if node["latency_history"] else None
     ceiling = db.get_int("sub_max_latency", 500)
-    node["publishable"] = bool(
-        latest and latest["ok"]
-        and (not ceiling or (latest["latency_ms"] or 0) <= ceiling)
-    )
+    latency = (latest["latency_ms"] if latest and latest["ok"] and latest["latency_ms"]
+               else (node["latency"] or 0))
+    node["latency"] = latency
+    required = [t for t in (db.get("sub_required_tags") or "").split(",") if t]
+    node_idents = set(_node_names().get(node_id, []))
+    missing = [t for t in required if t not in node_idents]
+    node["missing_tags"] = missing
+    node["publishable"] = bool(latency) and (not ceiling or latency <= ceiling) and not missing
     if node["publishable"]:
         node["publish_reason"] = "下发"
-    elif not latest:
-        node["publish_reason"] = "无延迟探测记录"
-    elif not latest["ok"]:
-        node["publish_reason"] = f"探测失败：{latest['error_type'] or 'unknown'}"
+    elif not latency:
+        node["publish_reason"] = "无可用延迟数据"
+    elif ceiling and latency > ceiling:
+        node["publish_reason"] = f"延迟 {latency}ms 超过上限 {ceiling}ms"
     else:
-        node["publish_reason"] = f"延迟 {latest['latency_ms']}ms 超过上限 {ceiling}ms"
+        node["publish_reason"] = f"缺少标签：{'、'.join(missing)}"
     return node
 
 
@@ -588,7 +613,7 @@ SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "su
                 "sub_name", "latency_test_url", "latency_test_status",
                 "latency_test_timeout", "sub_max_latency",
                 "sub_publish_enabled", "sub_publish_time", "sub_publish_mode",
-                "sub_publish_interval_minutes"]
+                "sub_publish_interval_minutes", "sub_required_tags"]
 
 
 @api.get("/settings", dependencies=protected)
@@ -613,6 +638,14 @@ async def get_settings():
 @api.patch("/settings", dependencies=protected)
 async def update_settings(payload: SettingsIn):
     data = payload.dict(exclude_unset=True)
+    if "sub_required_tags" in data:
+        wanted = data.pop("sub_required_tags") or []
+        enabled = db.rows("SELECT ident FROM test_groups WHERE enabled=1")
+        valid = {g["ident"] for g in enabled}
+        unknown = [t for t in wanted if t not in valid]
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"unknown or disabled tag: {', '.join(unknown)}")
+        data["sub_required_tags"] = ",".join(wanted)
     for key, value in data.items():
         if value is None:
             continue

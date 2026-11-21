@@ -12,6 +12,8 @@ const password = ref({ old_password: '', new_password: '' })
 const file = ref(null)
 const uploading = ref(false)
 const backupBusy = ref(false)
+const groups = ref([])
+const requiredTags = ref([])
 
 async function load() {
   loading.value = true
@@ -19,6 +21,8 @@ async function load() {
     const res = await api.get('/api/settings')
     form.value = res.settings
     system.value = res.system
+    requiredTags.value = String(res.settings.sub_required_tags || '').split(',').filter(Boolean)
+    groups.value = await api.get('/api/groups')
     logs.value = await api.get('/api/logs?limit=120')
   } catch (e) { ElMessage.error(e.message) }
   finally { loading.value = false }
@@ -45,7 +49,8 @@ async function save() {
       sub_publish_enabled: !!Number(form.value.sub_publish_enabled),
       sub_publish_time: form.value.sub_publish_time,
       sub_publish_mode: form.value.sub_publish_mode,
-      sub_publish_interval_minutes: Number(form.value.sub_publish_interval_minutes)
+      sub_publish_interval_minutes: Number(form.value.sub_publish_interval_minutes),
+      sub_required_tags: requiredTags.value
     })
     ElMessage.success('设置已保存')
     await load()
@@ -125,6 +130,16 @@ onMounted(load)
                 </el-form-item>
               </el-col>
             </el-row>
+            <el-form-item label="必带标签">
+              <el-checkbox-group v-model="requiredTags">
+                <el-checkbox v-for="g in groups.filter(x => x.enabled)" :key="g.ident" :value="g.ident">
+                  {{ g.ident }}
+                </el-checkbox>
+              </el-checkbox-group>
+            </el-form-item>
+            <div class="np-muted">
+              不勾选 = 不做标签约束，只按延迟下发；勾选多个 = 必须同时命中全部勾选标签（AND）才下发。
+            </div>
             <div class="np-muted">每次检测都会对全部节点执行一次（无开关）；延迟不超过上限的节点才进入 <span class="np-mono">/sub/all</span>。检测组（GPT/TG/YT 及自定义）只决定节点名里的代号，不决定是否下发。上限填 0 表示不限制。<br />检测超时为全局值：延迟探测与所有标签检测共用这一个超时。</div>
             <el-divider />
             <el-form-item label="定时下发">

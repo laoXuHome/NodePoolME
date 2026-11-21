@@ -41,7 +41,11 @@ def test_manual_only_never_auto_fetches():
     manual_daily_zero = _add(0, "", old)
     interval = _add(30, None, old)
     interval_recent = _add(30, None, fresh)
-    daily = _add(0, "03:30", (now - timedelta(days=1)).isoformat())
+    slot_dt = now - timedelta(minutes=10)
+    if slot_dt.date() != now.date():
+        slot_dt = now.replace(hour=0, minute=0)  # just after midnight: use 00:00 today
+    slot = slot_dt.strftime("%H:%M")
+    daily = _add(0, slot, (now - timedelta(days=1)).isoformat())
 
     due = _due_ids(now)
     assert manual_old not in due and manual_never not in due and manual_daily_zero not in due

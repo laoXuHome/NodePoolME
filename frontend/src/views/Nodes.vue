@@ -9,7 +9,7 @@ const loading = ref(false)
 const groups = ref([])
 const airports = ref([])
 const filters = ref({ q: '', airport_id: null, protocol: '', region: '', group_id: null,
-                     passed: '', publishable: '', sort: 'latency', limit: 50 })
+                     tags: [], passed: '', publishable: '', sort: 'latency', limit: 50 })
 const page = ref(1)
 const detail = ref(null)
 const detailOpen = ref(false)
@@ -22,7 +22,10 @@ async function load() {
   loading.value = true
   try {
     const params = new URLSearchParams()
-    Object.entries(filters.value).forEach(([k, v]) => { if (v !== '' && v !== null) params.set(k, v) })
+    Object.entries(filters.value).forEach(([k, v]) => {
+      if (v === '' || v === null || (Array.isArray(v) && !v.length)) return
+      params.set(k, Array.isArray(v) ? v.join(',') : v)
+    })
     params.set('offset', String((page.value - 1) * filters.value.limit))
     const res = await api.get(`/api/nodes?${params.toString()}`)
     items.value = res.items
@@ -39,7 +42,7 @@ async function loadMeta() {
 function search() { page.value = 1; load() }
 function reset() {
   filters.value = { q: '', airport_id: null, protocol: '', region: '', group_id: null,
-                    passed: '', publishable: '', sort: 'latency', limit: 50 }
+                    tags: [], passed: '', publishable: '', sort: 'latency', limit: 50 }
   page.value = 1
   load()
 }
@@ -89,15 +92,20 @@ onMounted(async () => { await loadMeta(); await load() })
       <el-select v-model="filters.protocol" placeholder="协议" clearable style="width:130px" @change="search">
         <el-option v-for="p in protocolOptions" :key="p" :label="p" :value="p" />
       </el-select>
-      <el-select v-model="filters.group_id" placeholder="检测组" clearable style="width:130px" @change="search">
-        <el-option v-for="g in groups" :key="g.id" :label="`${g.name} (${g.ident})`" :value="g.id" />
+      <el-select v-model="filters.group_id" placeholder="检测组" clearable style="width:140px" @change="search">
+        <el-option v-for="g in groups.filter(x => x.enabled)" :key="g.id" :label="`${g.ident} · ${g.name}`" :value="g.id" />
+      </el-select>
+      <el-select v-model="filters.tags" placeholder="标签（须同时命中）" multiple collapse-tags clearable style="width:190px" @change="search">
+        <el-option v-for="g in groups.filter(x => x.enabled)" :key="g.ident" :label="g.ident" :value="g.ident" />
       </el-select>
       <el-select v-model="filters.publishable" placeholder="下发结果" clearable style="width:130px" @change="search">
         <el-option label="仅下发节点" value="1" />
         <el-option label="仅不下发" value="0" />
       </el-select>
-      <el-select v-model="filters.passed" placeholder="标签结果" clearable style="width:130px" @change="search">
-        <el-option label="仅命中标签" value="qualified" />
+      <el-select v-model="filters.passed" placeholder="组结果/标签" clearable style="width:150px" @change="search">
+        <el-option label="未命中所选组" value="miss" />
+        <el-option label="至少有一个标签" value="qualified" />
+        <el-option label="没有任何标签" value="untagged" />
       </el-select>
       <el-select v-model="filters.sort" style="width:130px" @change="search">
         <el-option label="按延迟" value="latency" />
