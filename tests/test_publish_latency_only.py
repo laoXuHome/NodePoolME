@@ -32,7 +32,7 @@ def test_unavailable_node_with_good_latency_is_published():
     db.set_setting("sub_max_latency2", 500)
     selected, stats = builder.collect_nodes()
     assert len(selected) == 1, (selected, stats)
-    assert selected[0]["display_name"] == "A｜n1" or "n1" in selected[0]["display_name"]
+    assert selected[0]["display_name"] == "A⁃n1" or "n1" in selected[0]["display_name"]
 
 
 if __name__ == "__main__":

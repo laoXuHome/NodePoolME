@@ -391,8 +391,10 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
     for node in nodes:
         per_group = results.get(node["id"], {})
         passed_idents = idents.get(node["id"], [])
-        display = (f"{node['airport_name']}｜{'·'.join(passed_idents)}｜{node['raw_name']}"
-                   if passed_idents else f"{node['airport_name']}｜未通过｜{node['raw_name']}")
+        display = (f"{node['airport_name']}{builder.NAME_SEP}"
+                   f"{builder.TAG_SEP.join(passed_idents)}{builder.NAME_SEP}{node['raw_name']}"
+                   if passed_idents
+                   else f"{node['airport_name']}{builder.NAME_SEP}未通过{builder.NAME_SEP}{node['raw_name']}")
         node["display_name"] = display
         probe = latests.get(node["id"]) or {}
         targets = probe.get("targets") or {}

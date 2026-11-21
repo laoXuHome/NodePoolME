@@ -69,14 +69,14 @@ onMounted(load)
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">节点标签</h2>
     <div class="np-page-desc">
-      每个标签对应一个检测目标与一个延迟上限（命中即打标）。超时统一走系统设置里的全局检测超时，标签本身不再单独配置超时和周期。「名称」只在本页面内部使用；真正进入节点名中间段的是「标识」（如「机场｜GPT·TG｜节点名」）。命中标签不影响是否下发，下发只看「系统设置 → 延迟检测」的延迟上限。
+      每个标签对应一个检测目标与一个延迟上限（命中即打标）。超时统一走系统设置里的全局检测超时，标签本身不再单独配置超时和周期。「名称」只在本页面内部使用；真正进入节点名中间段的是「标识」（如「机场⁃GPTᐧTG⁃节点名」）。命中标签不影响是否下发，下发只看「系统设置 → 延迟检测」的延迟上限。
     </div>
 
     <div class="np-toolbar">
       <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新增检测组</el-button>
       <el-button @click="load"><el-icon><Refresh /></el-icon>刷新</el-button>
       <div class="np-flex" />
-      <span class="np-muted">顺序决定节点名中间段的排列：{{ items.filter(i => i.enabled).map(i => i.ident).join(' · ') || '（无启用标签）' }}</span>
+      <span class="np-muted">顺序决定节点名中间段的排列：{{ items.filter(i => i.enabled).map(i => i.ident).join('ᐧ') || '（无启用标签）' }}</span>
     </div>
 
     <div class="np-card">

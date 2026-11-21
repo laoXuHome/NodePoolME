@@ -34,6 +34,10 @@ def latest_results() -> dict[int, dict[int, dict]]:
     return out
 
 
+NAME_SEP = "⁃"   # outer separator: 机场⁃标签⁃节点名
+TAG_SEP = "ᐧ"    # inner separator between tag idents
+
+
 def latest_latency() -> dict[int, dict]:
     """node_id -> dual-target summary.
 
@@ -142,10 +146,10 @@ def collect_nodes() -> tuple[list[dict], dict]:
                 skipped.setdefault("tag_filter", 0)
                 skipped["tag_filter"] += 1
                 continue
-        # Names read as  机场｜GPT·YT·TG｜节点名  (the short ident, not the group's full name)
+        # Names read as  机场⁃GPTᐧYTᐧTG⁃节点名  (the short ident, not the group's full name)
         idents = [g["ident"] for g in passed]
-        display = (f"{airport['name']}｜{'·'.join(idents)}｜{node['raw_name']}" if idents
-                   else f"{airport['name']}｜{node['raw_name']}")
+        display = (f"{airport['name']}{NAME_SEP}{TAG_SEP.join(idents)}{NAME_SEP}{node['raw_name']}"
+                   if idents else f"{airport['name']}{NAME_SEP}{node['raw_name']}")
         selected.append({**node, "display_name": display, "passed": passed,
                          "latency": latency, "params": db.loads(node["params"], {})})
 
