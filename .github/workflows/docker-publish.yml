@@ -37,6 +37,8 @@ jobs:
           python tests/test_airport_schedule.py
           python tests/test_settings_bool.py
           python tests/test_airport_toggle.py
+          python tests/test_sub_route_queryless.py
+          python tests/test_group_global.py
 
   build:
     needs: test

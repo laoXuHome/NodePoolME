@@ -246,25 +246,18 @@ async def _group_task(group: dict, nodes: list[dict], batch_id: int, global_sem,
 
 # ---------------------------------------------------------------------------- cycles
 def due_groups(force: bool = False, ids: list[int] | None = None) -> list[dict]:
+    """All enabled groups run together in every cycle.
+
+    The per-group cadence field is no longer used: the batch cadence is global
+    (`test_interval_minutes` / publish schedule) and the timeout is global too.
+    """
     groups = db.rows("SELECT * FROM test_groups WHERE enabled=1 ORDER BY sort_order, id")
     if ids:
         groups = [g for g in groups if g["id"] in ids]
-    if force:
-        return groups
-    now = datetime.now()
-    due = []
+    timeout = db.get_int("latency_test_timeout", 8)
     for group in groups:
-        if not group["last_run_at"]:
-            due.append(group)
-            continue
-        try:
-            last = datetime.fromisoformat(group["last_run_at"])
-        except ValueError:
-            due.append(group)
-            continue
-        if (now - last) >= timedelta(minutes=max(1, group["interval_minutes"])):
-            due.append(group)
-    return due
+        group["timeout"] = timeout
+    return groups
 
 
 async def run_cycle(force: bool = False, group_ids: list[int] | None = None,

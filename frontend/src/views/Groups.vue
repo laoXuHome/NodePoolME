@@ -7,8 +7,8 @@ const items = ref([])
 const loading = ref(false)
 const dialog = ref(false)
 const editing = ref(null)
-const blank = () => ({ name: '', ident: '', url: '', method: 'GET', timeout: 8, expect_status: '200-399',
-                       expect_body: '', max_latency: 0, interval_minutes: 30, enabled: true, sort_order: 10 })
+const blank = () => ({ name: '', ident: '', url: '', method: 'GET', expect_status: '200-399',
+                       expect_body: '', max_latency: 0, enabled: true, sort_order: 10 })
 const form = ref(blank())
 
 async function load() {
@@ -24,9 +24,9 @@ async function submit() {
   if (!form.value.name || !form.value.ident || !form.value.url) return ElMessage.warning('名称、标识、检测 URL 必填')
   const payload = {
     name: form.value.name, ident: form.value.ident, url: form.value.url, method: form.value.method,
-    timeout: form.value.timeout, expect_status: form.value.expect_status,
+    expect_status: form.value.expect_status,
     expect_body: form.value.expect_body, max_latency: form.value.max_latency,
-    interval_minutes: form.value.interval_minutes, enabled: form.value.enabled,
+    enabled: form.value.enabled,
     sort_order: form.value.sort_order
   }
   try {
@@ -69,7 +69,7 @@ onMounted(load)
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">节点标签</h2>
     <div class="np-page-desc">
-      每个标签对应一个检测目标与一个延迟上限。「名称」只在本页面内部使用；真正进入节点名中间段的是「标识」（如「机场｜GPT·TG｜节点名」）。命中标签不影响是否下发，下发只看「系统设置 → 延迟检测」的延迟上限。
+      每个标签对应一个检测目标与一个延迟上限（命中即打标）。超时统一走系统设置里的全局检测超时，标签本身不再单独配置超时和周期。「名称」只在本页面内部使用；真正进入节点名中间段的是「标识」（如「机场｜GPT·TG｜节点名」）。命中标签不影响是否下发，下发只看「系统设置 → 延迟检测」的延迟上限。
     </div>
 
     <div class="np-toolbar">
@@ -94,8 +94,6 @@ onMounted(load)
             <div class="np-mono" v-if="row.max_latency">延迟 ≤ {{ row.max_latency }}ms</div>
           </template>
         </el-table-column>
-        <el-table-column prop="timeout" label="超时" width="70" />
-        <el-table-column prop="interval_minutes" label="周期(分)" width="96" />
         <el-table-column prop="passed" label="通过" width="80" />
         <el-table-column label="最近运行" width="160">
           <template #default="{ row }">{{ formatTs(row.last_run_at) }}</template>
@@ -142,14 +140,10 @@ onMounted(load)
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="超时(s)">
-              <el-input-number v-model="form.timeout" :min="1" :max="60" style="width:100%" />
-            </el-form-item>
+
           </el-col>
           <el-col :span="8">
-            <el-form-item label="周期(分)">
-              <el-input-number v-model="form.interval_minutes" :min="1" :max="1440" style="width:100%" />
-            </el-form-item>
+
           </el-col>
         </el-row>
         <el-form-item label="预期状态码">

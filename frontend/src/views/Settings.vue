@@ -34,7 +34,6 @@ async function save() {
       subnet_concurrency: Number(form.value.subnet_concurrency),
       request_interval_min_ms: Number(form.value.request_interval_min_ms),
       request_interval_max_ms: Number(form.value.request_interval_max_ms),
-      test_timeout: Number(form.value.test_timeout),
       test_interval_minutes: Number(form.value.test_interval_minutes),
       fail_threshold: Number(form.value.fail_threshold),
       history_days: Number(form.value.history_days),
@@ -116,7 +115,7 @@ onMounted(load)
                 </el-form-item>
               </el-col>
               <el-col :span="8">
-                <el-form-item label="超时(s)">
+                <el-form-item label="检测超时(全局, s)">
                   <el-input-number v-model="form.latency_test_timeout" :min="1" :max="60" style="width:100%" />
                 </el-form-item>
               </el-col>
@@ -126,7 +125,7 @@ onMounted(load)
                 </el-form-item>
               </el-col>
             </el-row>
-            <div class="np-muted">每次检测都会对全部节点执行一次（无开关）；延迟不超过上限的节点才进入 <span class="np-mono">/sub/all</span>。检测组（G/TG/Y 及自定义）只决定节点名里的代号，不决定是否下发。上限填 0 表示不限制。</div>
+            <div class="np-muted">每次检测都会对全部节点执行一次（无开关）；延迟不超过上限的节点才进入 <span class="np-mono">/sub/all</span>。检测组（GPT/TG/YT 及自定义）只决定节点名里的代号，不决定是否下发。上限填 0 表示不限制。<br />检测超时为全局值：延迟探测与所有标签检测共用这一个超时。</div>
             <el-divider />
             <el-form-item label="定时下发">
               <el-switch v-model="form.sub_publish_enabled" active-value="1" inactive-value="0" />
@@ -185,9 +184,6 @@ onMounted(load)
               </el-col>
             </el-row>
             <el-row :gutter="12">
-              <el-col :span="12">
-                <el-form-item label="检测超时(s)"><el-input-number v-model="form.test_timeout" :min="1" :max="60" style="width:100%" /></el-form-item>
-              </el-col>
               <el-col :span="12">
                 <el-form-item label="检测批次间隔(分)"><el-input-number v-model="form.test_interval_minutes" :min="1" :max="1440" style="width:100%" /></el-form-item>
               </el-col>

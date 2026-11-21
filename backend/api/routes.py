@@ -286,8 +286,9 @@ async def create_group(payload: GroupIn):
         """INSERT INTO test_groups (name, ident, url, method, timeout, expect_status, expect_body,
            max_latency, interval_minutes, enabled, sort_order, is_default, created_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (payload.name, payload.ident.strip(), payload.url, payload.method.upper(), payload.timeout,
-         payload.expect_status, payload.expect_body, payload.max_latency, payload.interval_minutes,
+        (payload.name, payload.ident.strip(), payload.url, payload.method.upper(),
+         db.get_int("latency_test_timeout", 8),
+         payload.expect_status, payload.expect_body, payload.max_latency, 30,
          int(payload.enabled), payload.sort_order, 0, db.now()),
     )
     db.append_log("INFO", "group", f"test group {payload.name}/{payload.ident} created")
@@ -300,6 +301,9 @@ async def update_group(group_id: int, payload: GroupPatch):
     if not group:
         raise HTTPException(status_code=404, detail="group not found")
     data = payload.dict(exclude_unset=True)
+    # timeout and cadence are global now: ignore whatever the client still sends
+    data.pop("timeout", None)
+    data.pop("interval_minutes", None)
     if "ident" in data and data["ident"]:
         if db.row("SELECT id FROM test_groups WHERE ident=? AND id<>?", (data["ident"], group_id)):
             raise HTTPException(status_code=400, detail="ident already used by another group")
