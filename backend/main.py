@@ -1,0 +1,93 @@
+"""Application entry point: API, scheduler, bundled frontend."""
+import logging
+import logging.handlers
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from backend import config
+from backend.api import routes
+from backend.database import db
+from backend.scheduler import manager
+from backend.testers import engine as engine_mod
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+log = logging.getLogger("nodepool")
+
+
+def setup_logging() -> None:
+    config.LOG_DIR.mkdir(parents=True, exist_ok=True)
+    handler = logging.handlers.RotatingFileHandler(
+        config.LOG_DIR / "nodepool.log", maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    root = logging.getLogger()
+    if not any(isinstance(h, logging.handlers.RotatingFileHandler) for h in root.handlers):
+        root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    setup_logging()
+    db.init_db()
+    db.append_log("INFO", "system", f"NodePool {config.VERSION} starting, data dir {config.DATA_DIR}")
+    await engine_mod.engine_manager.start()
+    manager.start_scheduler()
+    log.info("NodePool started (engine=%s)", engine_mod.engine_manager.name)
+    try:
+        yield
+    finally:
+        manager.stop_scheduler()
+        await engine_mod.engine_manager.stop()
+        db.append_log("INFO", "system", "NodePool stopped")
+
+
+app = FastAPI(title="NodePoolME", version=config.VERSION, lifespan=lifespan,
+              docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+app.include_router(routes.api)
+app.include_router(routes.sub_router)
+
+
+@app.exception_handler(Exception)
+async def unhandled(request: Request, exc: Exception):
+    db.append_log("ERROR", "api", f"{request.method} {request.url.path}: {type(exc).__name__}: {exc}")
+    return JSONResponse(status_code=500, content={"detail": "internal error"})
+
+
+if (STATIC_DIR / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+
+
+@app.get("/")
+@app.get("/index.html")
+async def index():
+    file = STATIC_DIR / "index.html"
+    if file.exists():
+        return FileResponse(file)
+    return JSONResponse({"app": "NodePoolME", "api": "/api", "docs": "/api/docs",
+                         "note": "frontend bundle not built"})
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    icon = STATIC_DIR / "favicon.ico"
+    if icon.exists():
+        return FileResponse(icon)
+    return JSONResponse(status_code=204, content=None)
+
+
+@app.get("/{path:path}")
+async def spa(path: str):
+    """Fallback so the Vue router works for deep links."""
+    if path.startswith(("api/", "sub/", "assets/", "healthz")):
+        return JSONResponse(status_code=404, content={"detail": "not found"})
+    file = STATIC_DIR / "index.html"
+    if file.exists():
+        return FileResponse(file)
+    return JSONResponse(status_code=404, content={"detail": "not found"})

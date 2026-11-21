@@ -1,0 +1,14 @@
+node_modules/
+backend/static/*
+!backend/static/.gitkeep
+data/
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+tests/__pycache__/
+*.db
+*.db-wal
+*.db-shm
+tools/.np_gh*

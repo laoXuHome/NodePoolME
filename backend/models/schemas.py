@@ -1,0 +1,90 @@
+"""Request/response models."""
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+
+class LoginIn(BaseModel):
+    password: str
+
+
+class PasswordIn(BaseModel):
+    old_password: str
+    new_password: str = Field(min_length=6, max_length=128)
+
+
+class AirportIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    url: str = Field(min_length=4, max_length=2048)
+    enabled: bool = True
+    interval_minutes: int = Field(default=60, ge=1, le=1440)
+    daily_time: Optional[str] = None
+
+
+class AirportPatch(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=60)
+    url: Optional[str] = Field(default=None, max_length=2048)
+    enabled: Optional[bool] = None
+    interval_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+    daily_time: Optional[str] = None
+
+
+class GroupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    ident: str = Field(min_length=1, max_length=12)
+    url: str = Field(min_length=8, max_length=500)
+    method: str = "GET"
+    timeout: float = Field(default=8, ge=1, le=60)
+    expect_status: str = "200-399"
+    expect_body: str = ""
+    max_latency: int = Field(default=0, ge=0, le=60000)
+    interval_minutes: int = Field(default=30, ge=1, le=1440)
+    enabled: bool = True
+    sort_order: int = 10
+
+
+class GroupPatch(BaseModel):
+    name: Optional[str] = None
+    ident: Optional[str] = None
+    url: Optional[str] = None
+    method: Optional[str] = None
+    timeout: Optional[float] = Field(default=None, ge=1, le=60)
+    expect_status: Optional[str] = None
+    expect_body: Optional[str] = None
+    max_latency: Optional[int] = Field(default=None, ge=0, le=60000)
+    interval_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+    enabled: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+class SubSettings(BaseModel):
+    sub_name: Optional[str] = None
+    sub_token: Optional[str] = None
+    regenerate_token: bool = False
+    sub_max_latency: Optional[int] = Field(default=None, ge=0, le=60000)
+    sub_max_nodes: Optional[int] = Field(default=None, ge=0)
+    sub_min_groups: Optional[int] = Field(default=None, ge=1, le=20)
+    sub_include_unavailable: Optional[bool] = None
+
+
+class SettingsIn(BaseModel):
+    global_concurrency: Optional[int] = Field(default=None, ge=1, le=300)
+    group_concurrency: Optional[int] = Field(default=None, ge=1, le=100)
+    ip_concurrency: Optional[int] = Field(default=None, ge=1, le=10)
+    subnet_concurrency: Optional[int] = Field(default=None, ge=1, le=20)
+    request_interval_min_ms: Optional[int] = Field(default=None, ge=0, le=10000)
+    request_interval_max_ms: Optional[int] = Field(default=None, ge=0, le=10000)
+    test_timeout: Optional[int] = Field(default=None, ge=1, le=60)
+    test_interval_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+    fail_threshold: Optional[int] = Field(default=None, ge=1, le=20)
+    history_days: Optional[int] = Field(default=None, ge=7, le=365)
+    dispersion_mask: Optional[int] = None
+
+
+class RunIn(BaseModel):
+    force: bool = False
+    group_ids: Optional[list[int]] = None
+
+
+class NodeTestIn(BaseModel):
+    group_ids: Optional[list[int]] = None

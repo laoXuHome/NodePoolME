@@ -1,0 +1,58 @@
+:root {
+  --np-bg: #0f1420;
+  --np-panel: #171e2e;
+  --np-accent: #4f8cff;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #f5f7fb;
+  color: #1f2937;
+}
+#app { min-height: 100vh; }
+
+.np-page { padding: 20px 24px 40px; }
+.np-card { background: #fff; border-radius: 12px; box-shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 6px 20px rgba(16, 24, 40, .04); }
+.np-page-title { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+.np-page-desc { color: #6b7280; font-size: 13px; margin-bottom: 18px; }
+.np-section-title { font-weight: 600; font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+.np-muted { color: #8a94a6; font-size: 12px; }
+.np-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.np-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+.np-stat { padding: 16px 18px; background: #fff; border-radius: 12px; border: 1px solid #eef1f6; }
+.np-stat .label { color: #6b7280; font-size: 12px; }
+.np-stat .value { font-size: 26px; font-weight: 650; margin-top: 6px; color: #111827; }
+.np-stat .hint { font-size: 12px; color: #8a94a6; margin-top: 4px; }
+.np-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+.np-flex { flex: 1; }
+.tag-ok { color: #067647; background: #ecfdf3; border-color: #abefc6; }
+.tag-bad { color: #b42318; background: #fef3f2; border-color: #fecdca; }
+.np-empty { padding: 36px; text-align: center; color: #98a2b3; }
+.np-code {
+  background: #0f1420; color: #cbd5e1; border-radius: 10px; padding: 14px 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  max-height: 460px; overflow: auto; white-space: pre; line-height: 1.6;
+}
+.np-log { font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.9; }
+.np-log .lv-WARN { color: #b54708; }
+.np-log .lv-ERROR { color: #b42318; }
+.np-log .lv-INFO { color: #067647; }
+
+.layout-sidebar {
+  background: var(--np-bg);
+  color: #cbd5e1;
+  width: 208px;
+}
+.brand { padding: 22px 20px 16px; }
+.brand .name { font-size: 17px; font-weight: 700; color: #fff; letter-spacing: .3px; }
+.brand .sub { font-size: 11px; color: #7c8aa5; margin-top: 3px; letter-spacing: .08em; }
+.el-menu { border-right: none !important; background: transparent; }
+.el-menu-item { color: #aab4c8 !important; }
+.el-menu-item.is-active { color: #fff !important; background: rgba(79, 140, 255, .16) !important; }
+.header-bar {
+  display: flex; align-items: center; gap: 12px; padding: 0 24px; height: 60px;
+  background: #fff; border-bottom: 1px solid #eef1f6;
+}
+.header-bar .title { font-weight: 600; }

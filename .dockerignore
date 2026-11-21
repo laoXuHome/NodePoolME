@@ -1,0 +1,16 @@
+.git
+.gitignore
+.github
+node_modules
+frontend/node_modules
+frontend/dist
+backend/static
+.venv
+__pycache__
+*.pyc
+data
+tests
+*.db
+.env
+.DS_Store
+README.md
