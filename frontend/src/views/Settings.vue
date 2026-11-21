@@ -229,7 +229,10 @@ onMounted(load)
         <div class="np-card" style="padding:20px">
           <div class="np-section-title">运行信息</div>
           <el-descriptions :column="1" size="small" border>
-            <el-descriptions-item label="版本">{{ system.version }}</el-descriptions-item>
+            <el-descriptions-item label="版本">
+              {{ system.version }} ·
+              <a href="https://github.com/laoXuHome/NodePoolME" target="_blank" rel="noopener">GitHub 仓库 ↗</a>
+            </el-descriptions-item>
             <el-descriptions-item label="检测引擎">{{ system.engine }}</el-descriptions-item>
             <el-descriptions-item label="调度器">{{ system.scheduler ? '运行中' : '已停止' }}</el-descriptions-item>
             <el-descriptions-item label="拉取 UA">

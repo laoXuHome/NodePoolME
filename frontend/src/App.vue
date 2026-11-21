@@ -9,6 +9,7 @@ const router = useRouter()
 const authed = computed(() => state.loggedIn)
 const ready = ref(false)
 const version = computed(() => state.version || '1.0.0')
+const repoUrl = 'https://github.com/laoXuHome/NodePoolME'
 
 const isLogin = computed(() => route.name === 'login')
 const title = computed(() => route.meta.title || 'NodePoolME')
@@ -63,8 +64,10 @@ function onMenu(path) { router.push(path) }
           <span>{{ m.label }}</span>
         </el-menu-item>
       </el-menu>
-      <div style="padding:18px 20px;font-size:11px;color:#5f6c86;position:absolute;bottom:0">
-        v{{ version }} · 本地缓存优先
+      <div style="padding:14px 20px;font-size:11px;color:#5f6c86;position:absolute;bottom:0">
+        <div>v{{ version }} · 本地缓存优先</div>
+        <a :href="repoUrl" target="_blank" rel="noopener"
+           style="color:#7aa2ff;text-decoration:none;display:inline-block;margin-top:4px">GitHub 仓库 ↗</a>
       </div>
     </el-aside>
     <el-container direction="vertical">
