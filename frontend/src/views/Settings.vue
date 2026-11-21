@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { api, formatTs, prettyBytes } from '../api'
+import { api, formatTs, prettyBytes, logLevelLabel, logSourceLabel } from '../api'
 
 const form = ref({})
 const system = ref({})
@@ -245,8 +245,8 @@ onMounted(load)
           <div class="np-log" style="max-height:320px;overflow:auto">
             <div v-for="log in logs" :key="log.id">
               <span class="np-muted">{{ formatTs(log.ts) }}</span>
-              <span :class="`lv-${log.level}`"> [{{ log.level }}]</span>
-              <span class="np-muted">{{ log.source }}</span>
+              <span :class="`lv-${log.level}`"> [{{ logLevelLabel(log.level) }}]</span>
+              <span class="np-muted">{{ logSourceLabel(log.source) }}</span>
               {{ log.message }}
             </div>
             <div v-if="!logs.length" class="np-empty">暂无日志</div>

@@ -35,16 +35,16 @@ def setup_logging() -> None:
 async def lifespan(app: FastAPI):
     setup_logging()
     db.init_db()
-    db.append_log("INFO", "system", f"NodePool {config.VERSION} starting, data dir {config.DATA_DIR}")
+    db.append_log("INFO", "系统", f"NodePool {config.VERSION} 启动，数据目录 {config.DATA_DIR}")
     await engine_mod.engine_manager.start()
     manager.start_scheduler()
-    log.info("NodePool started (engine=%s)", engine_mod.engine_manager.name)
+    log.info("NodePool 已启动（内核：%s）", engine_mod.engine_manager.name)
     try:
         yield
     finally:
         manager.stop_scheduler()
         await engine_mod.engine_manager.stop()
-        db.append_log("INFO", "system", "NodePool stopped")
+        db.append_log("INFO", "系统", "NodePool 已停止")
 
 
 app = FastAPI(title="NodePoolME", version=config.VERSION, lifespan=lifespan,
@@ -56,7 +56,7 @@ app.include_router(routes.sub_router)
 
 @app.exception_handler(Exception)
 async def unhandled(request: Request, exc: Exception):
-    db.append_log("ERROR", "api", f"{request.method} {request.url.path}: {type(exc).__name__}: {exc}")
+    db.append_log("ERROR", "接口", f"{request.method} {request.url.path} 未处理异常：{type(exc).__name__}: {exc}")
     return JSONResponse(status_code=500, content={"detail": "internal error"})
 
 

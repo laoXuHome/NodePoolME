@@ -100,6 +100,7 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
             raise ValueError(f"no supported node parsed ({'; '.join(errors) or 'unknown content'})")
         stats = _upsert(airport_id, list(uniq.values()))
         duration = int((time.perf_counter() - started) * 1000)
+        trig_cn = {"schedule": "定时拉取", "manual": "手动拉取", "startup": "启动拉取"}.get(trigger, trigger)
         db.execute(
             "UPDATE airports SET last_success_at=?, last_status='ok', last_error=NULL, updated_at=? WHERE id=?",
             (db.now(), db.now(), airport_id),
@@ -107,21 +108,21 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
         db.execute(
             "INSERT INTO fetch_logs (airport_id, ts, ok, node_count, duration_ms, message) VALUES (?,?,?,?,?,?)",
             (airport_id, db.now(), 1, stats["total"], duration,
-             f"{trigger}: {stats['inserted']} new, {stats['updated']} updated; "
-             f"parsed {parse_stats['parsed']}/{parse_stats['total']}"
-             + (f", duplicate {duplicates}" if duplicates else "")
-             + (f", skipped {', '.join(f'{k}×{v}' for k, v in parse_stats['unsupported'].items())}"
+             f"{trig_cn}：新增 {stats['inserted']}，更新 {stats['updated']}；"
+             f"解析 {parse_stats['parsed']}/{parse_stats['total']}"
+             + (f"，去重 {duplicates}" if duplicates else "")
+             + (f"，跳过 {', '.join(f'{k}×{v}' for k, v in parse_stats['unsupported'].items())}"
                 if parse_stats["unsupported"] else "")
-             + f", UA {config.HTTP_UA}"),
+             + f"，UA {config.HTTP_UA}"),
         )
         unsupported = parse_stats["unsupported"]
         if unsupported:
             errors = [f"{sum(unsupported.values())} nodes skipped: "
                       + ", ".join(f"{k}×{v}" for k, v in unsupported.items())] + list(errors)
-        db.append_log("INFO", "fetch",
-                      f"{airport['name']}: {stats['total']} nodes "
-                      f"(parsed {parse_stats['parsed']}/{parse_stats['total']}"
-                      + (f", duplicate {duplicates}" if duplicates else "") + f", {trigger}, {duration}ms)")
+        db.append_log("INFO", "拉取",
+                      f"{airport['name']}：共 {stats['total']} 个节点 "
+                      f"（解析 {parse_stats['parsed']}/{parse_stats['total']}"
+                      + (f"，去重 {duplicates}" if duplicates else "") + f"，{trig_cn}，耗时 {duration}ms）")
         return {"ok": True, **stats, "duration_ms": duration, "warnings": errors[:10],
                 "parse": parse_stats, "duplicates": duplicates}
     except Exception as exc:
@@ -135,7 +136,7 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
             "INSERT INTO fetch_logs (airport_id, ts, ok, node_count, duration_ms, message) VALUES (?,?,?,?,?,?)",
             (airport_id, db.now(), 0, 0, duration, message),
         )
-        db.append_log("ERROR", "fetch", f"{airport['name']} failed: {message}")
+        db.append_log("ERROR", "拉取", f"{airport['name']} 拉取失败：{message}")
         return {"ok": False, "error": message, "duration_ms": duration}
 
 

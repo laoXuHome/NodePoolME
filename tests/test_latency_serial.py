@@ -53,7 +53,7 @@ def test_manual_test_refused_during_cycle():
     manager.state.running = True
     try:
         res = asyncio.run(manager.test_single_node(1, mode="latency"))
-        assert res["ok"] is False and "running" in res["error"], res
+        assert res["ok"] is False and "运行" in res["error"], res
     finally:
         manager.state.running = False
 

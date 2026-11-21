@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NodePoolME"
-VERSION = "1.2.17"
+VERSION = "1.2.18"
 
 DATA_DIR = Path(os.getenv("NODEPOOL_DATA_DIR", "./data")).resolve()
 CONFIG_DIR = Path(os.getenv("NODEPOOL_CONFIG_DIR", str(DATA_DIR / "config"))).resolve()

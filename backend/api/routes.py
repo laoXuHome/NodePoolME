@@ -32,7 +32,7 @@ protected = [Depends(auth.require_auth)]
 @api.post("/auth/login")
 async def login(payload: LoginIn, response: Response):
     if not auth.verify_password(payload.password):
-        db.append_log("WARN", "auth", "failed login attempt")
+        db.append_log("WARN", "认证", "登录失败：密码错误")
         raise HTTPException(status_code=401, detail="wrong password")
     token = auth.make_token()
     auth.set_session(response, token)
@@ -55,7 +55,7 @@ async def change_password(payload: PasswordIn):
     if not auth.verify_password(payload.old_password):
         raise HTTPException(status_code=400, detail="current password is wrong")
     db.set_setting("admin_password_hash", auth.hash_password(payload.new_password))
-    db.append_log("INFO", "auth", "admin password changed")
+    db.append_log("INFO", "认证", "管理员密码已修改")
     return {"ok": True}
 
 
@@ -211,7 +211,7 @@ async def create_airport(payload: AirportIn):
         (payload.name.strip(), payload.url.strip(), int(payload.enabled), payload.interval_minutes,
          payload.daily_time, stamp, stamp),
     )
-    db.append_log("INFO", "airport", f"airport {payload.name} created")
+    db.append_log("INFO", "机场", f"新增机场：{payload.name}")
     return _airport_payload(fetcher.airport_by_id(airport_id))
 
 
@@ -243,15 +243,15 @@ async def update_airport(airport_id: int, payload: AirportPatch):
         if airport["enabled"]:
             # re-enable: cached nodes come back instantly, no immediate pull
             db.execute("UPDATE airports SET last_attempt_at=? WHERE id=?", (db.now(), airport_id))
-            db.append_log("INFO", "fetch",
-                          f"{airport['name']}: enabled, cached nodes restored without refetching")
+            db.append_log("INFO", "拉取",
+                          f"{airport['name']}：已启用，直接恢复缓存节点，无需重新拉取")
         else:
-            db.append_log("INFO", "fetch",
-                          f"{airport['name']}: disabled, its nodes leave the pool until re-enabled")
+            db.append_log("INFO", "拉取",
+                          f"{airport['name']}：已停用，节点已退出节点池，重新启用后恢复")
         try:
             builder.publish(reason="airport toggle")
         except Exception as exc:
-            db.append_log("WARN", "publish", f"rebuild after airport toggle failed: {exc}")
+            db.append_log("WARN", "下发", f"机场启停后重建订阅失败：{exc}")
     return _airport_payload(fetcher.airport_by_id(airport_id))
 
 
@@ -264,7 +264,7 @@ async def delete_airport(airport_id: int):
     db.execute("DELETE FROM nodes WHERE airport_id=?", (airport_id,))
     db.execute("DELETE FROM fetch_logs WHERE airport_id=?", (airport_id,))
     db.execute("DELETE FROM airports WHERE id=?", (airport_id,))
-    db.append_log("WARN", "airport", f"airport {airport['name']} deleted, {affected} cached nodes removed")
+    db.append_log("WARN", "机场", f"删除机场 {airport['name']}，移除 {affected} 个缓存节点")
     return {"ok": True, "removed_nodes": affected,
             "note": "airport, its cached nodes and fetch history were removed; test history is retained"}
 
@@ -306,7 +306,7 @@ async def create_group(payload: GroupIn):
          payload.expect_status, payload.expect_body, payload.max_latency, 30,
          int(payload.enabled), payload.sort_order, 0, db.now()),
     )
-    db.append_log("INFO", "group", f"test group {payload.name}/{payload.ident} created")
+    db.append_log("INFO", "检测组", f"新增检测组：{payload.name}/{payload.ident}")
     return _group_payload(db.row("SELECT * FROM test_groups WHERE id=?", (group_id,)))
 
 
@@ -351,7 +351,7 @@ async def delete_group(group_id: int):
                             detail="default groups cannot be deleted; disable it instead")
     db.execute("DELETE FROM test_groups WHERE id=?", (group_id,))
     db.execute("DELETE FROM results WHERE group_id=?", (group_id,))
-    db.append_log("WARN", "group", f"test group {group['name']} deleted")
+    db.append_log("WARN", "检测组", f"删除检测组：{group['name']}")
     return {"ok": True}
 
 
@@ -552,7 +552,7 @@ async def test_node(node_id: int, payload: NodeTestIn | None = None):
     try:
         result["subscription"] = builder.add_published_node(node_id)
     except Exception as exc:  # a publish hiccup must not fail the test itself
-        db.append_log("ERROR", "publish", f"incremental add node #{node_id}: {exc}")
+        db.append_log("ERROR", "下发", f"手动测试节点 #{node_id} 增量下发失败：{exc}")
         result["subscription"] = {"ok": False, "reason": str(exc)}
     return result
 
@@ -563,10 +563,10 @@ async def run_cycle(payload: RunIn | None = None):
     """Kick a batch off in the background; progress is polled through /api/runtime."""
     payload = payload or RunIn()
     if manager.state.running:
-        raise HTTPException(status_code=409, detail="a test cycle is already running")
+        raise HTTPException(status_code=409, detail="已有检测批次正在运行")
     if not db.row("SELECT COUNT(*) AS c FROM nodes n JOIN airports a ON a.id=n.airport_id"
                   " WHERE a.enabled=1")["c"]:
-        raise HTTPException(status_code=409, detail="node pool is empty")
+        raise HTTPException(status_code=409, detail="节点池为空")
     task = asyncio.create_task(manager.run_cycle(force=True, group_ids=payload.group_ids,
                                                  reason="manual"))
     manager.state.background_task = task
@@ -624,7 +624,7 @@ async def update_subscription(payload: SubSettings):
         db.set_setting("sub_name", payload.sub_name.strip())
     if payload.regenerate_token:
         db.set_setting("sub_token", secrets.token_urlsafe(24))
-        db.append_log("INFO", "subscription", "subscription token regenerated")
+        db.append_log("INFO", "订阅", "订阅令牌已重新生成")
     elif payload.sub_token:
         db.set_setting("sub_token", payload.sub_token.strip())
     return {"ok": True}
@@ -709,10 +709,10 @@ async def update_settings(payload: SettingsIn):
             db.set_setting("sub_publish_next_at", nxt.strftime("%Y-%m-%d %H:%M:%S"))
         else:
             db.execute("DELETE FROM settings WHERE key='sub_publish_next_at'")
-        db.append_log("INFO", "publish",
-                      "publish schedule changed, next run "
-                      + (nxt.strftime("%Y-%m-%d %H:%M:%S") if nxt else "cleared"))
-    db.append_log("INFO", "settings", f"settings updated: {', '.join(data)}")
+        db.append_log("INFO", "下发",
+                      "下发计划已更改，下次运行："
+                      + (nxt.strftime("%Y-%m-%d %H:%M:%S") if nxt else "已清除"))
+    db.append_log("INFO", "设置", f"设置已更新，共 {len(data)} 项")
     return {"ok": True}
 
 
@@ -748,7 +748,7 @@ async def create_backup():
         source.close()
     with open(config.BACKUP_DIR / "nodepool-latest.db", "wb") as fh:
         fh.write(target.read_bytes())
-    db.append_log("INFO", "backup", f"backup created {target.name}")
+    db.append_log("INFO", "备份", f"已创建备份：{target.name}")
     return {"ok": True, "file": target.name, "size": target.stat().st_size}
 
 
@@ -792,8 +792,8 @@ async def restore_backup(file: UploadFile = File(...)):
     try:
         builder.publish(reason="restore")
     except Exception as exc:
-        db.append_log("WARN", "restore", f"subscription rebuild after restore failed: {exc}")
-    db.append_log("WARN", "restore", f"database restored from upload; previous copy at {safety.name}")
+        db.append_log("WARN", "恢复", f"恢复后重建订阅失败：{exc}")
+    db.append_log("WARN", "恢复", f"已从上传文件恢复数据库，原库备份在 {safety.name}")
     return {"ok": True, "safety_copy": safety.name}
 
 

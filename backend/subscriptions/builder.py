@@ -348,7 +348,7 @@ def add_published_node(node_id: int) -> dict:
         json.dump(manifest, fh, ensure_ascii=False, indent=2)
     os.replace(tmp, config.SUB_DIR / "meta.json")
     db.set_setting("sub_node_count", str(len(nodes)))
-    db.append_log("INFO", "publish", f"node #{node_id} added to current subscription ({len(nodes)} nodes)")
+    db.append_log("INFO", "下发", f"节点 #{node_id} 已追加到当前订阅（当前 {len(nodes)} 个节点）")
     return {**manifest, "ok": True, "added": True}
 
 
@@ -358,8 +358,8 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
     sub_name = db.get("sub_name", "NodePool Unified") or "NodePool Unified"
     previous = meta()
     if not nodes and previous.get("nodes"):
-        db.append_log("WARN", "publish",
-                      "no node qualified in this batch; previous subscription kept untouched")
+        db.append_log("WARN", "下发",
+                      "本批次没有符合下发条件的节点，保留原有订阅不变")
         return {**previous, "skipped": True, "stats": stats}
     written = {}
     for fmt, (filename, fn) in FORMATS.items():
@@ -388,7 +388,13 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
     os.replace(tmp, config.SUB_DIR / "meta.json")
     db.set_setting("sub_last_generated_at", manifest["updated_at"])
     db.set_setting("sub_node_count", str(len(nodes)))
-    db.append_log("INFO", "publish", f"subscription published ({len(nodes)} nodes, reason={reason})")
+    reason_cn = {
+        "airport toggle": "机场启停", "manual": "手动", "manual rebuild": "手动重建",
+        "restore": "数据库恢复", "schedule": "定时检测", "scheduled publish": "定时下发",
+    }.get(reason, reason)
+    if str(reason).startswith("batch#"):
+        reason_cn = "批次 #" + str(reason)[6:]
+    db.append_log("INFO", "下发", f"订阅已下发（{len(nodes)} 个节点，原因：{reason_cn}）")
     return manifest
 
 

@@ -61,6 +61,21 @@ export async function checkAuth() {
   }
 }
 
+export function logLevelLabel(level) {
+  const map = { INFO: '信息', WARN: '警告', ERROR: '错误', DEBUG: '调试' }
+  return map[String(level || '').toUpperCase()] || level
+}
+
+export function logSourceLabel(source) {
+  const map = {
+    auth: '认证', airport: '机场', fetch: '拉取', publish: '下发', group: '检测组',
+    subscription: '订阅', settings: '设置', backup: '备份', restore: '恢复',
+    system: '系统', api: '接口', latency: '延迟', test: '检测',
+    maintenance: '维护', scheduler: '调度', tester: '测试内核'
+  }
+  return map[String(source || '').trim()] || source
+}
+
 export function formatTs(value) {
   if (!value) return '—'
   return String(value).replace('T', ' ').slice(0, 19)

@@ -198,7 +198,7 @@ async def _latency_task(nodes: list[dict], probes: list[dict], batch_id: int, gl
                 db.execute("UPDATE batches SET processed_count=? WHERE id=?",
                            (counters["done"], batch_id))
         except Exception as exc:  # never let one node abort the probe
-            db.append_log("ERROR", "latency", f"{node['raw_name']}: {exc}")
+            db.append_log("ERROR", "延迟", f"{node['raw_name']}：延迟检测异常：{exc}")
 
 
 # ---------------------------------------------------------------------------- results
@@ -288,9 +288,9 @@ async def _group_task(group: dict, nodes: list[dict], batch_id: int, global_sem,
                             counters, manage_status=manage_status)
         except Exception as exc:  # one node must never abort the group
             failures += 1
-            db.append_log("ERROR", "test", f"{group['name']} / {node['raw_name']}: {exc}")
+            db.append_log("ERROR", "检测", f"{group['name']} / {node['raw_name']}：检测异常：{exc}")
     db.execute("UPDATE test_groups SET last_run_at=? WHERE id=?", (db.now(), group["id"]))
-    db.append_log("INFO", "test", f"group {group['name']} finished block ({len(nodes)} nodes)")
+    db.append_log("INFO", "检测", f"检测组 {group['name']} 完成本批（{len(nodes)} 个节点）")
     return {"group": group["name"], "nodes": len(nodes), "failures": failures}
 
 
@@ -313,11 +313,11 @@ def due_groups(force: bool = False, ids: list[int] | None = None) -> list[dict]:
 async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                     reason: str = "schedule") -> dict:
     if state.running:
-        return {"ok": False, "error": "a test cycle is already running", "batch_id": state.batch_id}
+        return {"ok": False, "error": "已有检测批次正在运行", "batch_id": state.batch_id}
     groups = due_groups(force=force, ids=group_ids)
     probes = latency_probes()
     if not groups and not probes:
-        return {"ok": False, "error": "no enabled test group is due"}
+        return {"ok": False, "error": "没有到期的启用检测组"}
     nodes = db.rows(
         """SELECT n.id, n.airport_id, n.raw_name, n.protocol, n.server, n.port, n.params,
                   n.fingerprint
@@ -325,7 +325,7 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
            WHERE a.enabled=1 ORDER BY n.id"""
     )
     if not nodes:
-        return {"ok": False, "error": "node pool is empty; add an airport and fetch it first"}
+        return {"ok": False, "error": "节点池为空，请先添加机场并拉取订阅"}
 
     async with state.cycle_lock:
         state.running = True
@@ -342,7 +342,7 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
             await asyncio.sleep(1)
             waited += 1
         if state.fetching:
-            db.append_log("WARN", "test", "batch started while a fetch is still running")
+            db.append_log("WARN", "检测", "开始批次时订阅拉取仍未结束，继续使用当前缓存节点")
         state.last_cycle_at = datetime.now()
         batch_id = db.execute(
             "INSERT INTO batches (started_at, status, target_count, groups, note) VALUES (?,?,?,?,?)",
@@ -352,9 +352,9 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
              reason),
         )
         state.batch_id = batch_id
-        db.append_log("INFO", "test",
-                      f"batch #{batch_id} started: {len(nodes)} nodes x {units} units"
-                      f" ({len(groups)} groups + {len(probes)} latency targets)")
+        db.append_log("INFO", "检测",
+                      f"批次 #{batch_id} 开始：{len(nodes)} 个节点 × {units} 项"
+                      f"（{len(groups)} 个检测组 + {len(probes)} 个延迟目标）")
         counters = {"done": 0, "ok": 0, "groups": {}}
         state.group_progress = [
             {"name": item["name"], "ident": item["ident"], "done": 0, "total": len(nodes)}
@@ -399,19 +399,19 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                 db.execute("UPDATE batches SET published=1 WHERE id=?", (batch_id,))
                 state.last_error = None
             except Exception as exc:
-                state.last_error = f"publish failed: {exc}"
-                db.append_log("ERROR", "publish", state.last_error)
+                state.last_error = f"订阅下发失败：{exc}"
+                db.append_log("ERROR", "下发", state.last_error)
                 db.execute("UPDATE batches SET note=? WHERE id=?",
                            (state.last_error, batch_id))
-            db.append_log("INFO", "test",
-                          f"batch #{batch_id} complete: {counters['done']}/{state.total} processed")
+            db.append_log("INFO", "检测",
+                          f"批次 #{batch_id} 完成：已处理 {counters['done']}/{state.total}")
             return {"ok": True, "batch_id": batch_id, "processed": counters["done"],
                     "total": state.total, "published": state.last_error is None}
         except Exception as exc:
             state.last_error = f"{type(exc).__name__}: {exc}"
             db.execute("UPDATE batches SET finished_at=?, status='failed', note=? WHERE id=?",
                        (db.now(), state.last_error[:500], batch_id))
-            db.append_log("ERROR", "test", f"batch #{batch_id} failed: {state.last_error}")
+            db.append_log("ERROR", "检测", f"批次 #{batch_id} 失败：{state.last_error}")
             return {"ok": False, "batch_id": batch_id, "error": state.last_error}
         finally:
             state.running = False
@@ -424,7 +424,7 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None,
                            mode: str = "all") -> dict:
     """mode: all | latency | tags. Lets the detail dialog test either half alone."""
     if state.running:
-        return {"ok": False, "error": "a full test cycle is running; retry when it finishes"}
+        return {"ok": False, "error": "已有检测批次在运行，请完成后重试"}
     node = db.row("SELECT * FROM nodes WHERE id=?", (node_id,))
     if not node:
         return {"ok": False, "error": "node not found"}
@@ -435,7 +435,7 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None,
         if group_ids:
             groups = [g for g in groups if g["id"] in group_ids]
         if not groups:
-            return {"ok": False, "error": "no enabled test group"}
+            return {"ok": False, "error": "没有启用的检测组"}
     await engine_mod.engine_manager.prepare([node])
     probes = latency_probes() if mode != "tags" else []
     latency = None
@@ -471,7 +471,7 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None,
 
 async def fetch_now(airport_id: int, trigger: str = "manual") -> dict:
     if state.running:
-        return {"ok": False, "error": "a test cycle is running; retry when it finishes"}
+        return {"ok": False, "error": "已有检测批次在运行，请完成后重试"}
     airport = fetcher.airport_by_id(airport_id)
     if not airport:
         return {"ok": False, "error": "airport not found"}
@@ -513,7 +513,7 @@ async def job_cycle() -> None:
     try:
         await run_cycle(reason="schedule")
     except Exception as exc:
-        db.append_log("ERROR", "test", f"cycle crashed: {exc}")
+        db.append_log("ERROR", "检测", f"检测周期异常退出：{exc}")
 
 
 async def job_publish() -> None:
@@ -533,11 +533,11 @@ async def job_publish() -> None:
         if next_at is None:
             nxt = next_publish_at("interval", interval=interval, base=now)
             db.set_setting("sub_publish_next_at", nxt.strftime(ts_fmt))
-            db.append_log("INFO", "publish", f"interval publish armed: every {interval} min")
+            db.append_log("INFO", "下发", f"间隔下发已启用：每 {interval} 分钟")
             return
         if now < next_at:
             return
-        label = f"every {interval} min"
+        label = f"每 {interval} 分钟"
     else:
         hhmm = db.get("sub_publish_time", "04:30") or "04:30"
         try:
@@ -553,9 +553,9 @@ async def job_publish() -> None:
         label = hhmm
 
     if state.running:
-        db.append_log("WARN", "publish", "scheduled publish skipped: a cycle is already running")
+        db.append_log("WARN", "下发", "定时下发跳过：已有检测批次在运行")
         return
-    db.append_log("INFO", "publish", f"scheduled publish started ({label})")
+    db.append_log("INFO", "下发", f"定时下发开始（{label}）")
     result = await run_cycle(force=True, reason="scheduled publish")
 
     def settle(retry_minutes: int | None = None) -> None:
@@ -572,20 +572,20 @@ async def job_publish() -> None:
 
     if result.get("ok") and result.get("published"):
         settle(None)
-        db.append_log("INFO", "publish", "scheduled publish done")
+        db.append_log("INFO", "下发", "定时下发完成")
         return
     if not result.get("ok"):
         error = result.get("error", "")
-        if "empty" in error or "no enabled" in error:
+        if "为空" in error or "没有启用" in error or "没有到期" in error:
             settle(None)
-            db.append_log("WARN", "publish", f"scheduled publish skipped: {error}")
+            db.append_log("WARN", "下发", f"定时下发跳过：{error}")
         else:
             # retry in one minute instead of burning the whole interval
             settle(1)
-            db.append_log("ERROR", "publish", f"scheduled publish failed, retrying next minute: {error}")
+            db.append_log("ERROR", "下发", f"定时下发失败，下一分钟重试：{error}")
         return
     settle(None)
-    db.append_log("WARN", "publish", "scheduled cycle finished but the subscription was not published")
+    db.append_log("WARN", "下发", "定时检测已完成，但订阅未下发")
 
 
 def next_publish_at(mode: str | None = None, hhmm: str | None = None,
@@ -624,7 +624,7 @@ async def job_maintenance() -> None:
     db.execute("DELETE FROM results WHERE ts < ?", (cutoff,))
     db.execute("DELETE FROM fetch_logs WHERE ts < ?", (cutoff,))
     db.execute("DELETE FROM batches WHERE started_at < ?", (cutoff,))
-    db.append_log("INFO", "maintenance", f"history older than {cutoff} purged")
+    db.append_log("INFO", "维护", f"已清理 {cutoff} 之前的历史记录")
 
 
 def start_scheduler() -> None:
@@ -638,7 +638,7 @@ def start_scheduler() -> None:
                       coalesce=True, next_run_time=datetime.now() + timedelta(seconds=50))
     scheduler.add_job(job_maintenance, "interval", hours=6, id="maintenance", max_instances=1)
     scheduler.start()
-    db.append_log("INFO", "scheduler", "scheduler started")
+    db.append_log("INFO", "调度", "调度器已启动")
 
 
 def stop_scheduler() -> None:

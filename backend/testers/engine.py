@@ -100,7 +100,7 @@ class MihomoEngine(BaseEngine):
         )
         for _ in range(60):
             if await self._api_alive():
-                db.append_log("INFO", "tester", "mihomo core ready")
+                db.append_log("INFO", "测试内核", "Mihomo 内核已就绪")
                 return
             if self.proc.returncode is not None:
                 raise RuntimeError(f"mihomo exited with code {self.proc.returncode}")
@@ -285,7 +285,7 @@ class EngineManager:
                 self.engine = candidate
             except Exception as exc:
                 self.error = str(exc)
-                db.append_log("WARN", "tester", f"mihomo unavailable ({exc}); using tcp engine")
+                db.append_log("WARN", "测试内核", f"Mihomo 不可用（{exc}），改用 TCP 引擎")
                 self.engine = TcpEngine()
         self.ready = True
 

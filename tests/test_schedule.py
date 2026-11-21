@@ -92,7 +92,7 @@ def test_fetch_blocked_during_cycle():
         result = asyncio.run(manager.fetch_now(999))
     finally:
         manager.state.running = False
-    assert result["ok"] is False and "running" in result["error"]
+    assert result["ok"] is False and "运行" in result["error"]
 
 
 def test_bad_time_format_rejected():

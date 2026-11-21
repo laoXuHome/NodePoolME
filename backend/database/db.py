@@ -218,7 +218,7 @@ def init_db() -> None:
         if get("sub_max_latency") in (None, "", "500"):
             set_setting("sub_max_latency", "1000")
         set_setting("latency_dual_enabled", "1")
-        append_log("INFO", "settings", "dual latency targets enabled (Google + Wikipedia, 1000ms each)")
+        append_log("INFO", "设置", "已启用双延迟目标（默认 Google + Wikipedia，各 1000ms）")
     # Migration: "degraded" is no longer a state; status is just available/unavailable
     conn.execute("UPDATE nodes SET status='available' WHERE status='degraded'")
     conn.commit()
