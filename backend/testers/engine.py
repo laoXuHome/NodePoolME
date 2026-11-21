@@ -298,16 +298,29 @@ class EngineManager:
         return self.engine.name if self.engine else "none"
 
     async def prepare(self, nodes: list[dict]) -> None:
+        for node in nodes:
+            normalize_node(node)
         if self.engine:
             await self.engine.prepare(nodes)
 
     async def test(self, node: dict, group: dict) -> Outcome:
+        normalize_node(node)
         if not self.engine:
             return Outcome(False, None, "engine", "test engine not started")
         return await self.engine.test(node, group)
 
 
 engine_manager = EngineManager()
+
+
+def normalize_node(node: dict) -> dict:
+    """params may arrive as a JSON string straight from SQLite rows."""
+    params = node.get("params")
+    if isinstance(params, str):
+        node["params"] = db.loads(params, {}) if params.strip() else {}
+    elif params is None:
+        node["params"] = {}
+    return node
 
 
 def proxied(node: dict) -> bool:

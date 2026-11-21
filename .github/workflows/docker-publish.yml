@@ -25,7 +25,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install fastapi uvicorn httpx[socks] apscheduler pyyaml python-multipart pytest
       - name: Parser and output tests
-        run: python tests/test_parsers.py
+        run: |
+          python tests/test_parsers.py
+          python tests/test_node_params.py
 
   build:
     needs: test
