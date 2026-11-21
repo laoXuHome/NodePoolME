@@ -178,6 +178,22 @@ Google 与 Gemini **不**默认启用，需要时通过「新增检测组」添�
 - 改机场名只影响输出组合，不动节点记录。
 - 同一客户端配置内名称自动去重（重复时追加 `#2`）。
 
+## 一条命令升级
+
+把脚本装成系统命令，之后升级只需一条命令（无需改 `.env`、无需记路径）：
+
+```bash
+sudo curl -fsSL -o /usr/local/bin/npup \
+  https://raw.githubusercontent.com/laoXuHome/NodePoolME/main/upgrade.sh
+sudo chmod +x /usr/local/bin/npup
+sudo ln -sf /usr/local/bin/npup /usr/local/bin/nodepool-upgrade   # 想要个更好记的名字
+
+sudo npup            # 默认更新到 .env 里指定的镜像（填 latest 即为最新版）
+sudo npup v1.2.1     # 也可以直接指定版本，脚本会改写 .env 再升级
+```
+
+脚本行为：`docker compose pull` 成功就直接重建容器；失败则自动按当前架构下载对应 Release 的 `nodepoolme-<版本>-<架构>.tar.gz` 并 `docker load`，最后 `docker compose up -d` 并打印实际镜像与 revision。
+
 ## 仪表盘
 
 顶部的状态板把四条链路的状态并排放：**节点拉取**（机场数、正常/失败/仅手动、最近成功、下次自动拉取）、**节点池**（总量与可用/降级/不可用分布、可下发数与占比、延迟上限）、**标签检测**（启用标签数、本轮进度与工作块、命中节点、累计通过）、**订阅下发**（下发节点数、下发方式与下次执行、自动记录、最近生成）。下方保留检测任务详情、机场明细、最近日志与最近批次。

@@ -2,9 +2,29 @@
 # NodePoolME upgrade helper: try the registry first, fall back to the GitHub release bundle.
 # Usage:  sudo ./upgrade.sh
 # Reads NODEPOOL_IMAGE / NODEPOOL_ROOT from the .env in the same directory.
+#
+# Usage: npup                 -> upgrade to the image tag already in .env (latest = newest)
+#        npup v1.2.1          -> pin that version in .env, then upgrade
+#        npup /path/to/dir    -> upgrade a project living elsewhere
 set -euo pipefail
 
-cd "$(dirname "$0")"
+DEFAULT_DIR="/vol1/1000/docker/compose/nodepoolme"
+TARGET_TAG=""
+if [ $# -gt 0 ] && printf '%s' "$1" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
+  case "$1" in v*) TARGET_TAG="$1" ;; *) TARGET_TAG="v$1" ;; esac
+  shift
+fi
+PROJECT_DIR="${1:-${NODEPOOL_DIR:-}}"
+if [ -z "$PROJECT_DIR" ]; then
+  SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+  if [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/docker-compose.yml" ] && [ -f "$SELF_DIR/.env" ]; then
+    PROJECT_DIR="$SELF_DIR"
+  else
+    PROJECT_DIR="$DEFAULT_DIR"
+  fi
+fi
+cd "$PROJECT_DIR" || { echo "!! project dir not found: $PROJECT_DIR" >&2; exit 1; }
+echo "==> project dir: $PROJECT_DIR"
 
 REPO="laoXuHome/NodePoolME"
 ARCH="$(uname -m)"
@@ -13,6 +33,11 @@ case "$ARCH" in
   aarch64|arm64) BUNDLE_ARCH="arm64" ;;
   *) BUNDLE_ARCH="amd64" ;;
 esac
+
+if [ -n "$TARGET_TAG" ]; then
+  echo "==> pinning .env to $TARGET_TAG"
+  sed -i -E "s#^(NODEPOOL_IMAGE=.*):[^:]+#\1:${TARGET_TAG}#" .env
+fi
 
 if [ ! -f .env ]; then
   echo "!! .env not found in $(pwd)" >&2
