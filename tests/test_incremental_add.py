@@ -21,8 +21,14 @@ def _latency(node, ms):
                    "message,ts) VALUES (?,?,NULL,1,?,NULL,'',?)", (node, target, ms, db.now()))
 
 
+def _wipe():
+    for table in ("latency_results", "results", "nodes", "airports", "batches"):
+        db.execute(f"DELETE FROM {table}")
+
+
 def _seed():
     db.init_db()
+    _wipe()
     ap = db.execute("INSERT INTO airports (name,url,interval_minutes,created_at,updated_at,enabled) "
                     "VALUES ('机场A','http://x',30,datetime('now'),datetime('now'),1)")
     ids = {}
@@ -65,6 +71,24 @@ def test_incremental_add():
     assert again["added"] is False and again["nodes"] == 3, again
 
 
+def test_legacy_manifest_falls_back_to_live_file():
+    ids = _seed()
+    first = builder.publish(reason="legacy")
+    meta_path = __import__("backend").config.SUB_DIR / "meta.json"
+    import json
+    manifest = json.loads(meta_path.read_text(encoding="utf-8"))
+    manifest.pop("node_ids", None)
+    manifest.pop("node_names", None)
+    meta_path.write_text(json.dumps(manifest), encoding="utf-8")
+    for target in ("G", "W"):
+        db.execute("INSERT INTO latency_results (node_id,target,batch_id,ok,latency_ms,error_type,"
+                   "message,ts) VALUES (?,?,NULL,0,2000,'timeout','',?)", (ids["a"], target, db.now()))
+    _latency(ids["c"], 300)
+    added = builder.add_published_node(ids["c"])
+    assert added["added"] and added["nodes"] == 3, added
+    assert set(added["node_ids"]) == {ids["a"], ids["b"], ids["c"]}
+
+
 def test_no_subscription_is_noop():
     db.set_setting("sub_node_count", "0")
     for fmt, (filename, _) in builder.FORMATS.items():
@@ -82,5 +106,7 @@ def test_no_subscription_is_noop():
 if __name__ == "__main__":
     test_incremental_add()
     print("PASS incremental add")
+    test_legacy_manifest_falls_back_to_live_file()
+    print("PASS legacy manifest fallback")
     test_no_subscription_is_noop()
     print("PASS no-subscription noop")

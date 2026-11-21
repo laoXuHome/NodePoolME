@@ -265,6 +265,39 @@ def _snapshot_entry(node_id: int, name: str) -> dict | None:
     return row
 
 
+def _live_snapshot() -> list[dict]:
+    """Recover the published node set from the live Clash file (manifests before v1.2.15)."""
+    path = config.SUB_DIR / "sub_all.yaml"
+    if not path.exists():
+        return []
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    nodes = []
+    for proxy in (doc or {}).get("proxies") or []:
+        name, server, port = proxy.get("name"), proxy.get("server"), proxy.get("port")
+        if not name or not server:
+            continue
+        proto = proxy.get("type")
+        rows = db.rows(
+            "SELECT id, raw_name FROM nodes WHERE server=? AND port=? AND protocol=? "
+            "ORDER BY LENGTH(raw_name) DESC",
+            (server, port, proto),
+        ) or db.rows("SELECT id, raw_name FROM nodes WHERE server=? AND port=? "
+                     "ORDER BY LENGTH(raw_name) DESC", (server, port))
+        # Published names end with the raw node name; prefer that over blind first-match
+        # so duplicate server/port nodes (different users) don't collapse into one.
+        match = next((r for r in rows if r["raw_name"] and name.endswith(r["raw_name"])), None)
+        match = match or (rows[0] if rows else None)
+        if not match:
+            continue
+        entry = _snapshot_entry(match["id"], name)
+        if entry and all(x["id"] != entry["id"] for x in nodes):
+            nodes.append(entry)
+    return nodes
+
+
 def add_published_node(node_id: int) -> dict:
     """Append a manually verified node to the live subscription.
 
@@ -280,8 +313,9 @@ def add_published_node(node_id: int) -> dict:
     if ids:
         nodes = [n for n in (_snapshot_entry(int(i), names.get(int(i), "")) for i in ids) if n]
     else:
-        # Older manifests did not record ids; fall back to the current eligible set.
-        nodes = collect_nodes()[0]
+        # Older manifests did not record ids: recover the live file first, so nodes that
+        # failed later are still preserved instead of being silently dropped.
+        nodes = _live_snapshot() or collect_nodes()[0]
 
     if any(n["id"] == node_id for n in nodes):
         return {**previous, "ok": True, "added": False, "reason": "already published"}
