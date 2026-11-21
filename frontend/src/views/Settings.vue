@@ -45,7 +45,9 @@ async function save() {
       latency_test_timeout: Number(form.value.latency_test_timeout),
       sub_max_latency: Number(form.value.sub_max_latency),
       sub_publish_enabled: !!Number(form.value.sub_publish_enabled),
-      sub_publish_time: form.value.sub_publish_time
+      sub_publish_time: form.value.sub_publish_time,
+      sub_publish_mode: form.value.sub_publish_mode,
+      sub_publish_interval_minutes: Number(form.value.sub_publish_interval_minutes)
     })
     ElMessage.success('设置已保存')
     await load()
@@ -133,11 +135,25 @@ onMounted(load)
             <el-form-item label="定时下发">
               <el-switch v-model="form.sub_publish_enabled" active-value="1" inactive-value="0" />
             </el-form-item>
-            <el-form-item label="下发时间">
+            <el-form-item label="下发方式">
+              <el-radio-group v-model="form.sub_publish_mode">
+                <el-radio value="time">每天固定时刻</el-radio>
+                <el-radio value="interval">固定间隔</el-radio>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item v-if="form.sub_publish_mode === 'interval'" label="下发间隔(分钟)">
+              <el-input-number v-model="form.sub_publish_interval_minutes" :min="5" :max="1440"
+                               :step="30" style="width:200px" />
+            </el-form-item>
+            <el-form-item label="下发时间" v-if="form.sub_publish_mode === 'time'">
               <el-time-picker v-model="form.sub_publish_time" format="HH:mm" value-format="HH:mm"
                               placeholder="04:30" style="width:200px" />
             </el-form-item>
-            <div class="np-muted">到点后先对全部节点重新跑一遍延迟检测和节点标签，检测期间暂停机场拉取，完成后才原子替换订阅；15 分钟内未成功会在下一分钟重试。</div>
+            <div class="np-muted">
+              每次下发前都会先对全部节点重新跑一遍延迟检测和节点标签，检测期间暂停机场拉取，完成后才原子替换订阅。
+              <template v-if="form.sub_publish_mode === 'time'">固定时刻模式下 15 分钟内未成功会在下一分钟重试。</template>
+              <template v-else>间隔模式从保存设置（或上一次下发完成）开始计时，失败会在下一分钟重试，成功后才重新计时。</template>
+            </div>
           </el-form>
         </div>
 

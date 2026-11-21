@@ -51,6 +51,39 @@ def test_skips_while_cycle_running():
     assert db.get("sub_last_auto_publish") is None
 
 
+def test_interval_mode():
+    db.init_db()
+    db.set_setting("sub_publish_enabled", "1")
+    db.set_setting("sub_publish_mode", "interval")
+    db.set_setting("sub_publish_interval_minutes", 60)
+    db.execute("DELETE FROM settings WHERE key='sub_publish_next_at'")
+    asyncio.run(manager.job_publish())
+    next_at = manager._parse_ts(db.get("sub_publish_next_at"))
+    assert next_at is not None and next_at > datetime.now()
+    # still inside the countdown: nothing runs
+    asyncio.run(manager.job_publish())
+    assert db.get("sub_last_auto_publish") is None
+
+    # pretend the countdown expired; a successful cycle re-arms it one interval ahead
+    db.set_setting("sub_publish_next_at", "2000-01-01 00:00:00")
+    calls = []
+
+    async def fake_cycle(**kwargs):
+        calls.append(kwargs)
+        return {"ok": True, "published": True}
+
+    original = manager.run_cycle
+    manager.run_cycle = fake_cycle
+    try:
+        asyncio.run(manager.job_publish())
+    finally:
+        manager.run_cycle = original
+    assert calls, "interval publish never triggered"
+    assert db.get("sub_last_auto_publish") == datetime.now().strftime("%Y-%m-%d")
+    next_at = manager._parse_ts(db.get("sub_publish_next_at"))
+    assert next_at > datetime.now() + manager.timedelta(minutes=50)
+
+
 def test_fetch_blocked_during_cycle():
     db.init_db()
     db.set_setting("sub_publish_enabled", "0")

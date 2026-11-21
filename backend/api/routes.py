@@ -112,7 +112,10 @@ async def dashboard():
         },
         "publish_schedule": {
             "enabled": db.get("sub_publish_enabled", "0") == "1",
+            "mode": db.get("sub_publish_mode", "time"),
             "time": db.get("sub_publish_time", "04:30"),
+            "interval_minutes": db.get_int("sub_publish_interval_minutes", 180),
+            "next_at": db.get("sub_publish_next_at"),
             "last_auto": db.get("sub_last_auto_publish"),
         },
     }
@@ -520,7 +523,8 @@ SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "su
                 "test_interval_minutes", "fail_threshold", "history_days", "dispersion_mask",
                 "sub_name", "latency_test_enabled", "latency_test_url", "latency_test_status",
                 "latency_test_timeout", "sub_max_latency",
-                "sub_publish_enabled", "sub_publish_time"]
+                "sub_publish_enabled", "sub_publish_time", "sub_publish_mode",
+                "sub_publish_interval_minutes"]
 
 
 @api.get("/settings", dependencies=protected)
@@ -553,6 +557,10 @@ async def update_settings(payload: SettingsIn):
     if "request_interval_min_ms" in data or "request_interval_max_ms" in data:
         if db.get_int("request_interval_max_ms") < db.get_int("request_interval_min_ms"):
             db.set_setting("request_interval_max_ms", db.get_int("request_interval_min_ms"))
+    if any(k.startswith("sub_publish_") for k in data):
+        # changing the schedule restarts the interval countdown from now
+        db.execute("DELETE FROM settings WHERE key='sub_publish_next_at'")
+        db.append_log("INFO", "publish", "publish schedule changed, next run recalculated")
     db.append_log("INFO", "settings", f"settings updated: {', '.join(data)}")
     return {"ok": True}
 

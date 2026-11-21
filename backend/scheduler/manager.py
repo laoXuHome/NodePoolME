@@ -449,41 +449,80 @@ async def job_cycle() -> None:
 
 
 async def job_publish() -> None:
-    """Daily publish: force a full latency + label cycle, then write the subscription."""
+    """Scheduled publish: either a fixed daily time or a repeating interval.
+
+    Both modes force a full latency + label cycle before writing the subscription.
+    """
     if db.get("sub_publish_enabled", "0") != "1":
         return
-    hhmm = db.get("sub_publish_time", "04:30") or "04:30"
-    try:
-        hour, minute = (int(x) for x in hhmm.split(":"))
-    except ValueError:
-        return
+    mode = (db.get("sub_publish_mode", "time") or "time").strip().lower()
     now = datetime.now()
-    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    offset = (now - target).total_seconds()
-    if offset < 0 or offset > 900:   # run within 15 minutes after the configured time
-        return
-    today = now.strftime("%Y-%m-%d")
-    if db.get("sub_last_auto_publish") == today:
-        return
+    ts_fmt = "%Y-%m-%d %H:%M:%S"
+
+    if mode == "interval":
+        interval = max(5, db.get_int("sub_publish_interval_minutes", 180))
+        next_at = _parse_ts(db.get("sub_publish_next_at"))
+        if next_at is None:
+            db.set_setting("sub_publish_next_at", (now + timedelta(minutes=interval)).strftime(ts_fmt))
+            db.append_log("INFO", "publish", f"interval publish armed: every {interval} min")
+            return
+        if now < next_at:
+            return
+        label = f"every {interval} min"
+    else:
+        hhmm = db.get("sub_publish_time", "04:30") or "04:30"
+        try:
+            hour, minute = (int(x) for x in hhmm.split(":"))
+        except ValueError:
+            return
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        offset = (now - target).total_seconds()
+        if offset < 0 or offset > 900:   # run within 15 minutes after the configured time
+            return
+        if db.get("sub_last_auto_publish") == now.strftime("%Y-%m-%d"):
+            return
+        label = hhmm
+
     if state.running:
         db.append_log("WARN", "publish", "scheduled publish skipped: a cycle is already running")
         return
-    db.append_log("INFO", "publish", f"scheduled publish started ({hhmm})")
+    db.append_log("INFO", "publish", f"scheduled publish started ({label})")
     result = await run_cycle(force=True, reason="scheduled publish")
+
+    def settle(retry_minutes: int | None = None) -> None:
+        if mode == "interval":
+            db.set_setting("sub_publish_next_at",
+                           (datetime.now() + timedelta(minutes=(retry_minutes or interval))).strftime(ts_fmt))
+        db.set_setting("sub_last_auto_publish", datetime.now().strftime("%Y-%m-%d"))
+        db.set_setting("sub_last_auto_publish_at", datetime.now().strftime(ts_fmt))
+
     if result.get("ok") and result.get("published"):
-        db.set_setting("sub_last_auto_publish", today)
+        settle(None)
         db.append_log("INFO", "publish", "scheduled publish done")
         return
     if not result.get("ok"):
         error = result.get("error", "")
         if "empty" in error or "no enabled" in error:
-            db.set_setting("sub_last_auto_publish", today)
+            settle(None)
             db.append_log("WARN", "publish", f"scheduled publish skipped: {error}")
         else:
+            # retry in one minute instead of burning the whole interval
+            settle(1)
             db.append_log("ERROR", "publish", f"scheduled publish failed, retrying next minute: {error}")
         return
-    db.set_setting("sub_last_auto_publish", today)
+    settle(None)
     db.append_log("WARN", "publish", "scheduled cycle finished but the subscription was not published")
+
+
+def _parse_ts(value) -> datetime | None:
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(str(value)[:19], fmt)
+        except ValueError:
+            continue
+    return None
 
 
 async def job_maintenance() -> None:

@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, formatTs } from '../api'
 
@@ -29,6 +29,15 @@ async function runNow() {
     ElMessage.error(err.message)
   }
 }
+
+const publishText = computed(() => {
+  const ps = data.value?.publish_schedule
+  if (!ps || !ps.enabled) return '未启用'
+  if (ps.mode === 'interval') {
+    return ps.next_at ? `每 ${ps.interval_minutes} 分钟（下次 ${ps.next_at.slice(11, 16)}）` : `每 ${ps.interval_minutes} 分钟`
+  }
+  return `每天 ${ps.time}`
+})
 
 function roundDone(name) {
   const item = (data.value?.runtime?.group_progress || []).find((g) => g.name === name)
@@ -99,7 +108,7 @@ onUnmounted(() => clearInterval(timer.value))
               <span class="np-mono">{{ data.latency_probe?.url }}</span> ·
               期望 {{ data.latency_probe?.status }} · 上限 {{ data.latency_probe?.ceiling || '不限' }}ms ·
               通过 {{ data.latency_probe?.passed }} 个节点 ·
-              定时下发 {{ data.publish_schedule?.enabled ? data.publish_schedule.time : '未启用' }}
+              定时下发 {{ publishText }}
             </div>
             <el-table :data="data.groups" size="small">
               <el-table-column prop="name" label="检测组" />
