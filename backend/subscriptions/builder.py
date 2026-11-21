@@ -60,8 +60,10 @@ def collect_nodes() -> tuple[list[dict], dict]:
     results = latest_results()
     airports = {a["id"]: a for a in db.rows("SELECT id, name FROM airports ORDER BY id")}
     nodes = db.rows(
-        """SELECT id, airport_id, raw_name, protocol, server, port, params, latency,
-                  fail_count, status, region FROM nodes ORDER BY id"""
+        """SELECT n.id, n.airport_id, n.raw_name, n.protocol, n.server, n.port, n.params,
+                  n.latency, n.fail_count, n.status, n.region
+           FROM nodes n JOIN airports a ON a.id=n.airport_id
+           WHERE a.enabled=1 ORDER BY n.id"""
     )
 
     latests = latest_latency()

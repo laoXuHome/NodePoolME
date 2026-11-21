@@ -36,6 +36,7 @@ jobs:
           python tests/test_parser_compat.py
           python tests/test_airport_schedule.py
           python tests/test_settings_bool.py
+          python tests/test_airport_toggle.py
 
   build:
     needs: test

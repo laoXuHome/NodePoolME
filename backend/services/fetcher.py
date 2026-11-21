@@ -1,7 +1,7 @@
 """Airport fetch pipeline: download -> parse -> validate -> transactional replace."""
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 

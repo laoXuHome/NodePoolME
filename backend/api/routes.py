@@ -77,10 +77,12 @@ def _group_stats() -> list[dict]:
 @api.get("/dashboard", dependencies=protected)
 async def dashboard():
     airports = fetcher.all_airports()   # needs daily_time / interval_minutes for the next-run math
-    nodes_total = db.row("SELECT COUNT(*) AS c FROM nodes")["c"]
-    unavailable = db.row("SELECT COUNT(*) AS c FROM nodes WHERE status='unavailable'")["c"]
-    available = db.row("SELECT COUNT(*) AS c FROM nodes WHERE status='available'")["c"]
-    degraded = db.row("SELECT COUNT(*) AS c FROM nodes WHERE status='degraded'")["c"]
+    # Only nodes from enabled airports belong to the pool
+    pool = "SELECT COUNT(*) AS c FROM nodes n JOIN airports a ON a.id=n.airport_id WHERE a.enabled=1"
+    nodes_total = db.row(pool)["c"]
+    unavailable = db.row(pool + " AND n.status='unavailable'")["c"]
+    available = db.row(pool + " AND n.status='available'")["c"]
+    degraded = db.row(pool + " AND n.status='degraded'")["c"]
     selected, stats = builder.collect_nodes()
     ceiling = db.get_int("sub_max_latency", 500)
     latests = builder.latest_latency()
@@ -211,6 +213,7 @@ async def update_airport(airport_id: int, payload: AirportPatch):
     for key in ("url", "daily_time"):
         if key in data and data[key] is not None:
             airport[key] = data[key].strip()
+    was_enabled = bool(airport["enabled"])
     if "enabled" in data and data["enabled"] is not None:
         airport["enabled"] = int(bool(data["enabled"]))
     if data.get("interval_minutes") is not None:
@@ -221,6 +224,19 @@ async def update_airport(airport_id: int, payload: AirportPatch):
         (airport["name"], airport["url"], airport["enabled"], airport["interval_minutes"],
          airport["daily_time"], db.now(), airport_id),
     )
+    if bool(airport["enabled"]) != was_enabled:
+        if airport["enabled"]:
+            # re-enable: cached nodes come back instantly, no immediate pull
+            db.execute("UPDATE airports SET last_attempt_at=? WHERE id=?", (db.now(), airport_id))
+            db.append_log("INFO", "fetch",
+                          f"{airport['name']}: enabled, cached nodes restored without refetching")
+        else:
+            db.append_log("INFO", "fetch",
+                          f"{airport['name']}: disabled, its nodes leave the pool until re-enabled")
+        try:
+            builder.publish(reason="airport toggle")
+        except Exception as exc:
+            db.append_log("WARN", "publish", f"rebuild after airport toggle failed: {exc}")
     return _airport_payload(fetcher.airport_by_id(airport_id))
 
 
@@ -339,7 +355,8 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
                      limit: int = 200, offset: int = 0, sort: str = "latency"):
     nodes = db.rows(
         """SELECT n.*, a.name AS airport_name FROM nodes n
-           JOIN airports a ON a.id = n.airport_id"""
+           JOIN airports a ON a.id = n.airport_id
+           WHERE a.enabled=1"""
     )
     groups = {g["id"]: g for g in db.rows("SELECT * FROM test_groups ORDER BY sort_order, id")}
     enabled_groups = [g for g in groups.values() if g["enabled"]]
@@ -459,7 +476,8 @@ async def run_cycle(payload: RunIn | None = None):
     payload = payload or RunIn()
     if manager.state.running:
         raise HTTPException(status_code=409, detail="a test cycle is already running")
-    if not db.row("SELECT COUNT(*) AS c FROM nodes")["c"]:
+    if not db.row("SELECT COUNT(*) AS c FROM nodes n JOIN airports a ON a.id=n.airport_id"
+                  " WHERE a.enabled=1")["c"]:
         raise HTTPException(status_code=409, detail="node pool is empty")
     task = asyncio.create_task(manager.run_cycle(force=True, group_ids=payload.group_ids,
                                                  reason="manual"))

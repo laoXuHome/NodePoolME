@@ -276,8 +276,10 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
     if not groups and not probe:
         return {"ok": False, "error": "no enabled test group is due"}
     nodes = db.rows(
-        """SELECT id, airport_id, raw_name, protocol, server, port, params, fingerprint
-           FROM nodes ORDER BY id"""
+        """SELECT n.id, n.airport_id, n.raw_name, n.protocol, n.server, n.port, n.params,
+                  n.fingerprint
+           FROM nodes n JOIN airports a ON a.id=n.airport_id
+           WHERE a.enabled=1 ORDER BY n.id"""
     )
     if not nodes:
         return {"ok": False, "error": "node pool is empty; add an airport and fetch it first"}
@@ -407,6 +409,8 @@ async def fetch_now(airport_id: int, trigger: str = "manual") -> dict:
     airport = fetcher.airport_by_id(airport_id)
     if not airport:
         return {"ok": False, "error": "airport not found"}
+    if not airport["enabled"]:
+        return {"ok": False, "error": "airport disabled: enable it first, its cached nodes return without refetching"}
     state.fetching.add(airport_id)
     try:
         return await fetcher.fetch_airport(airport, trigger=trigger)

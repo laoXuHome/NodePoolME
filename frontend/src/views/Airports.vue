@@ -134,9 +134,14 @@ onMounted(() => { load(); loadSystem() })
             <el-tag v-else type="info" size="small">未拉取</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="启用" width="80">
+        <el-table-column label="启用" width="150">
           <template #default="{ row }">
-            <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
+            <div class="np-flex" style="align-items:center;gap:8px">
+              <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
+              <el-tooltip v-if="!row.enabled" content="已停用：该机场的缓存节点不进入节点池、不参与检测与下发；重新启用会直接恢复缓存，不会重新拉取">
+                <el-tag type="info" size="small">节点不入池</el-tag>
+              </el-tooltip>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
