@@ -549,6 +549,11 @@ async def test_node(node_id: int, payload: NodeTestIn | None = None):
     )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error"))
+    try:
+        result["subscription"] = builder.add_published_node(node_id)
+    except Exception as exc:  # a publish hiccup must not fail the test itself
+        db.append_log("ERROR", "publish", f"incremental add node #{node_id}: {exc}")
+        result["subscription"] = {"ok": False, "reason": str(exc)}
     return result
 
 

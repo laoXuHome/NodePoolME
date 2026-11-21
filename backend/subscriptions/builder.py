@@ -247,6 +247,77 @@ FORMATS = {"clash": ("sub_all.yaml", build_clash),
            "base64": ("sub_all.base64", build_base64)}
 
 
+
+def _snapshot_entry(node_id: int, name: str) -> dict | None:
+    """Rebuild one previously published node from the DB, keeping its published name."""
+    row = db.row(
+        """SELECT n.id, n.airport_id, n.raw_name, n.protocol, n.server, n.port, n.params,
+                  n.latency, n.fail_count, n.status, n.region, a.name AS airport_name
+           FROM nodes n JOIN airports a ON a.id = n.airport_id
+           WHERE n.id = ? AND a.enabled = 1""",
+        (node_id,),
+    )
+    if not row:
+        return None
+    row["params"] = db.loads(row.get("params"), {})
+    row["display_name"] = name
+    row["passed"] = []
+    return row
+
+
+def add_published_node(node_id: int) -> dict:
+    """Append a manually verified node to the live subscription.
+
+    Other published nodes are kept exactly as they were; the manifest's updated_at,
+    batch_id and reason stay untouched so the dashboard's publish/detection dates do not move.
+    """
+    previous = meta()
+    if not previous.get("nodes") or not (config.SUB_DIR / "sub_all.yaml").exists():
+        return {"ok": False, "reason": "no existing subscription"}
+
+    ids = previous.get("node_ids")
+    names = {int(x["id"]): x["name"] for x in (previous.get("node_names") or [])}
+    if ids:
+        nodes = [n for n in (_snapshot_entry(int(i), names.get(int(i), "")) for i in ids) if n]
+    else:
+        # Older manifests did not record ids; fall back to the current eligible set.
+        nodes = collect_nodes()[0]
+
+    if any(n["id"] == node_id for n in nodes):
+        return {**previous, "ok": True, "added": False, "reason": "already published"}
+
+    fresh = collect_nodes()[0]
+    entry = next((n for n in fresh if n["id"] == node_id), None)
+    if not entry:
+        return {"ok": False, "reason": "node does not meet the publish gate"}
+    nodes.append(entry)
+
+    sub_name = db.get("sub_name", "NodePool Unified") or "NodePool Unified"
+    for fmt, (filename, fn) in FORMATS.items():
+        content = fn(nodes, sub_name) if fmt != "base64" else fn(nodes)
+        validate(fmt, content, nodes)
+        target = config.SUB_DIR / filename
+        tmp = config.SUB_DIR / f".{filename}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.replace(tmp, target)
+
+    manifest = {
+        **previous,
+        "nodes": len(nodes),
+        "node_ids": [n["id"] for n in nodes],
+        "node_names": [{"id": n["id"], "name": n["display_name"]} for n in nodes],
+        "last_added": node_id,
+    }
+    tmp = config.SUB_DIR / ".meta.json.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, config.SUB_DIR / "meta.json")
+    db.set_setting("sub_node_count", str(len(nodes)))
+    db.append_log("INFO", "publish", f"node #{node_id} added to current subscription ({len(nodes)} nodes)")
+    return {**manifest, "ok": True, "added": True}
+
+
 def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
     """Generate all formats, validate each one, then atomically replace the live files."""
     nodes, stats = collect_nodes()
@@ -269,6 +340,8 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
     manifest = {
         "name": sub_name,
         "nodes": len(nodes),
+        "node_ids": [n["id"] for n in nodes],
+        "node_names": [{"id": n["id"], "name": n["display_name"]} for n in nodes],
         "updated_at": _fmt_ts(),
         "batch_id": batch_id,
         "reason": reason,

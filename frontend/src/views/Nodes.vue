@@ -71,11 +71,12 @@ async function testNode(mode) {
   testing.value = mode
   try {
     const res = await api.post(`/api/nodes/${detail.value.id}/test`, { mode })
+    const addNote = res.subscription?.added ? '，已加入当前订阅' : ''
     if (mode === 'latency') {
-      ElMessage.success(res.latency?.ok ? '延迟检测通过（两个目标都达标）' : '延迟检测未通过')
+      ElMessage.success((res.latency?.ok ? '延迟检测通过（两个目标都达标）' : '延迟检测未通过') + addNote)
     } else {
       const ok = res.results.filter((r) => r.ok).length
-      ElMessage.success(`标签检测完成：${ok}/${res.results.length} 项通过`)
+      ElMessage.success(`标签检测完成：${ok}/${res.results.length} 项通过${addNote}`)
     }
     await openDetail(detail.value)
     await load()
