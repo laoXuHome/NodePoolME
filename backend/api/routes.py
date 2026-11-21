@@ -526,6 +526,11 @@ async def subscription_info(request: Request):
             "base64": _sub_link(token) + "&format=base64",
         },
         "base_url": str(request.base_url).rstrip("/"),
+        "queryless": {
+            "clash": f"/sub/all/{token}/clash",
+            "singbox": f"/sub/all/{token}/singbox",
+            "base64": f"/sub/all/{token}/base64",
+        },
     }
 
 
@@ -754,6 +759,13 @@ async def sub_all(request: Request, token: str | None = None, fmt: str | None = 
 @sub_router.get("/sub/all/{token}")
 async def sub_all_token(token: str, request: Request, fmt: str | None = None,
                         format: str | None = None):
+    return _serve_sub(token, format or fmt, request.headers.get("user-agent", ""))
+
+
+@sub_router.get("/sub/all/{token}/{fmt}")
+async def sub_all_token_fmt(token: str, fmt: str, request: Request, format: str | None = None):
+    """Query-free form: /sub/all/<token>/<clash|singbox|base64>.
+    Needed for reverse proxies that escape & or drop the query string."""
     return _serve_sub(token, format or fmt, request.headers.get("user-agent", ""))
 
 

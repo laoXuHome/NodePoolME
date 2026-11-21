@@ -13,11 +13,22 @@ const saving = ref(false)
 
 const fullLinks = computed(() => {
   if (!info.value) return {}
+  return pick(info.value.links)
+})
+
+const querylessLinks = computed(() => {
+  if (!info.value) return {}
+  return pick(info.value.queryless || {})
+})
+
+function pick(paths) {
   const base = info.value.base_url
   const out = {}
-  Object.entries(info.value.links).forEach(([k, v]) => { out[k] = base + v })
+  Object.entries(paths).forEach(([k, v]) => { out[k] = base + v })
   return out
-})
+}
+
+const shownLinks = ref('queryless')
 
 async function load() {
   loading.value = true
@@ -86,16 +97,20 @@ onMounted(async () => { await load(); await loadPreview() })
         <div class="np-card" style="padding:20px">
           <div class="np-section-title">订阅地址</div>
           <div v-if="info">
+            <el-radio-group v-model="shownLinks" size="small" style="margin-bottom:10px">
+              <el-radio-button value="queryless">无参数（反代推荐）</el-radio-button>
+              <el-radio-button value="query">带 format 参数</el-radio-button>
+            </el-radio-group>
             <div class="link-row" v-for="(label, key) in { clash: 'Clash / Mihomo', singbox: 'sing-box', base64: '通用 Base64' }" :key="key">
               <div class="link-label">{{ label }}</div>
-              <el-input :model-value="fullLinks[key]" readonly size="small">
+              <el-input :model-value="(shownLinks === 'queryless' ? querylessLinks : fullLinks)[key]" readonly size="small">
                 <template #append>
-                  <el-button @click="copy(fullLinks[key])">复制</el-button>
+                  <el-button @click="copy((shownLinks === 'queryless' ? querylessLinks : fullLinks)[key])">复制</el-button>
                 </template>
               </el-input>
             </div>
             <div class="np-muted" style="margin-top:10px">
-              不带 format 参数时按客户端 UA 自动选择格式；也可使用 <span class="np-mono">/sub/all/&lt;token&gt;</span>。
+              反代转发会把 <span class="np-mono">&amp;</span> 转义坏，优先用「无参数」地址 <span class="np-mono">/sub/all/&lt;token&gt;/clash</span>；带 format 参数时按客户端 UA 自动选择。
             </div>
           </div>
           <el-divider />
