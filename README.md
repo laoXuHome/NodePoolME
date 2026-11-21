@@ -1,5 +1,9 @@
 # NodePoolME
 
+[![build](https://github.com/laoXuHome/NodePoolME/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/laoXuHome/NodePoolME/actions/workflows/docker-publish.yml)
+[![image](https://img.shields.io/badge/ghcr.io-nodepoolme-2496ED?logo=docker&logoColor=white)](https://github.com/laoXuHome/NodePoolME/pkgs/container/nodepoolme)
+[![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 多机场节点管理、检测与统一订阅系统。一个自包含的 Web 服务：管理多个机场订阅，本地缓存节点池，按可配置的检测组验证节点，最后输出唯一一个 `/sub/all` 统一订阅。
 
 > 不依赖 Subs-Check-Pro、Sub-Store 或任何第三方订阅转换服务。单个 Docker 容器即可运行，SQLite 存业务数据，前端由后端直接托管。
