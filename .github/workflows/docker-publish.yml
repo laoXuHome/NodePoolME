@@ -43,6 +43,7 @@ jobs:
           python tests/test_node_filters.py
           python tests/test_required_tags.py
           python tests/test_latency_dual.py
+          python tests/test_latency_names.py
 
   build:
     needs: test

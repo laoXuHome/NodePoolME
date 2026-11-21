@@ -95,10 +95,10 @@ def _semaphore_map_factory():
 LATENCY_ROUNDS = 2
 
 LATENCY_TARGETS = (
-    ("Google", "G", "latency_test_url", "sub_max_latency",
-     "http://www.google.com/favicon.ico"),
-    ("Wikipedia", "W", "latency_test_url2", "sub_max_latency2",
-     "http://www.wikipedia.org/favicon.ico"),
+    ("G", "latency_test_url", "sub_max_latency", "latency_test_name",
+     "Google", "http://www.google.com/favicon.ico"),
+    ("W", "latency_test_url2", "sub_max_latency2", "latency_test_name2",
+     "Wikipedia", "http://www.wikipedia.org/favicon.ico"),
 )
 
 
@@ -110,10 +110,13 @@ def latency_probes() -> list[dict]:
     timeout = db.get_int("latency_test_timeout", 8)
     status = db.get("latency_test_status") or "200-399"
     probes = []
-    for name, ident, url_key, cap_key, fallback_url in LATENCY_TARGETS:
+    for ident, url_key, cap_key, name_key, fallback_name, fallback_url in LATENCY_TARGETS:
+        name = (db.get(name_key) or fallback_name).strip() or fallback_name
         probes.append({
             "id": 0,
             "name": f"延迟-{name}",
+            "label": name,
+            "short": name[0],
             "ident": ident,
             "url": db.get(url_key) or fallback_url,
             "method": "GET",

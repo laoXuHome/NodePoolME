@@ -43,6 +43,8 @@ async function save() {
       history_days: Number(form.value.history_days),
       dispersion_mask: Number(form.value.dispersion_mask),
       latency_test_url: form.value.latency_test_url,
+      latency_test_name: form.value.latency_test_name,
+      latency_test_name2: form.value.latency_test_name2,
       latency_test_status: form.value.latency_test_status,
       latency_test_timeout: Number(form.value.latency_test_timeout),
       sub_max_latency: Number(form.value.sub_max_latency),
@@ -112,33 +114,35 @@ onMounted(load)
             <el-button type="primary" size="small" :loading="saving" @click="save">保存设置</el-button>
           </div>
           <el-form label-width="150px" size="default">
-            <el-form-item label="Google 链接">
-              <el-input v-model="form.latency_test_url" placeholder="http://www.google.com/favicon.ico" />
+            <el-form-item label="目标 1（名称/链接/上限ms）">
+              <div class="np-target-row">
+                <el-input v-model="form.latency_test_name" class="np-target-name" maxlength="16"
+                          placeholder="名称（如 Google）" />
+                <el-input v-model="form.latency_test_url" class="np-target-url"
+                          placeholder="检测链接 http://www.google.com/favicon.ico" />
+                <el-input-number v-model="form.sub_max_latency" :min="0" :max="60000"
+                                 class="np-target-cap" controls-position="right" />
+              </div>
             </el-form-item>
-            <el-form-item label="Wikipedia 链接">
-              <el-input v-model="form.latency_test_url2" placeholder="http://www.wikipedia.org/favicon.ico" />
+            <el-form-item label="目标 2（名称/链接/上限ms）">
+              <div class="np-target-row">
+                <el-input v-model="form.latency_test_name2" class="np-target-name" maxlength="16"
+                          placeholder="名称（如 Wikipedia）" />
+                <el-input v-model="form.latency_test_url2" class="np-target-url"
+                          placeholder="检测链接 http://www.wikipedia.org/favicon.ico" />
+                <el-input-number v-model="form.sub_max_latency2" :min="0" :max="60000"
+                                 class="np-target-cap" controls-position="right" />
+              </div>
             </el-form-item>
             <el-row :gutter="12">
-              <el-col :span="8">
+              <el-col :span="12" :xs="24">
                 <el-form-item label="期望状态码">
                   <el-input v-model="form.latency_test_status" placeholder="200-399" />
                 </el-form-item>
               </el-col>
-              <el-col :span="8">
+              <el-col :span="12" :xs="24">
                 <el-form-item label="检测超时(全局, s)">
                   <el-input-number v-model="form.latency_test_timeout" :min="1" :max="60" style="width:100%" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-            <el-row :gutter="12">
-              <el-col :span="12">
-                <el-form-item label="Google 上限(ms)">
-                  <el-input-number v-model="form.sub_max_latency" :min="0" :max="60000" style="width:100%" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="Wikipedia 上限(ms)">
-                  <el-input-number v-model="form.sub_max_latency2" :min="0" :max="60000" style="width:100%" />
                 </el-form-item>
               </el-col>
             </el-row>

@@ -15,6 +15,7 @@ const page = ref(1)
 const detail = ref(null)
 const detailOpen = ref(false)
 const history = ref([])
+const latencyLabels = ref({ G: { short: 'G', name: 'Google' }, W: { short: 'W', name: 'Wikipedia' } })
 const testing = ref(false)
 
 const protocolOptions = computed(() => ['ss', 'vmess', 'vless', 'trojan', 'hysteria2', 'tuic', 'socks5', 'http'])
@@ -31,6 +32,7 @@ async function load() {
     const res = await api.get(`/api/nodes?${params.toString()}`)
     items.value = res.items
     total.value = res.total
+    if (res.latency_labels) latencyLabels.value = res.latency_labels
   } catch (e) { ElMessage.error(e.message) }
   finally { loading.value = false }
 }
@@ -56,6 +58,7 @@ async function openDetail(row) {
   try {
     detail.value = await api.get(`/api/nodes/${row.id}`)
     history.value = detail.value.history
+    if (detail.value.latency_labels) latencyLabels.value = detail.value.latency_labels
     detailOpen.value = true
   } catch (e) { ElMessage.error(e.message) }
 }
@@ -73,6 +76,8 @@ async function testNode() {
 }
 
 function latencyText(n) { return n ? `${n} ms` : '—' }
+function targetName(target) { return latencyLabels.value[target]?.name || target }
+function targetShort(target) { return latencyLabels.value[target]?.short || target }
 function latencyType(n) { if (!n) return 'info'; if (n < 200) return 'success'; if (n < 500) return 'warning'; return 'danger' }
 function groupCell(row, gid) {
   const res = row.results[String(gid)]
@@ -88,7 +93,7 @@ onMounted(async () => { await loadMeta(); await load() })
     <h2 class="np-page-title">节点池</h2>
     <div class="np-page-desc">展示去重后的缓存节点、最近一次各检测组结果与动态生成的最终名称。</div>
 
-    <div class="np-toolbar">
+    <div class="np-toolbar np-node-toolbar">
       <el-input v-model="filters.q" placeholder="搜索名称 / 服务器" style="width:220px" clearable
                 @keyup.enter="search" @clear="search" />
       <el-select v-model="filters.airport_id" placeholder="机场" clearable style="width:150px" @change="search">
@@ -144,10 +149,11 @@ onMounted(async () => { await loadMeta(); await load() })
             <span v-else class="np-muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="延迟 G / W" width="132">
+        <el-table-column :label="`延迟 ${targetShort('G')} / ${targetShort('W')}`" width="132">
           <template #default="{ row }">
             <div class="np-mono" style="font-size:12px">
-              G {{ row.latency_targets?.G?.best ?? '—' }} / W {{ row.latency_targets?.W?.best ?? '—' }}
+              {{ targetShort('G') }} {{ row.latency_targets?.G?.best ?? '—' }} /
+              {{ targetShort('W') }} {{ row.latency_targets?.W?.best ?? '—' }}
             </div>
             <div class="np-muted" style="font-size:11px">上限 {{ row.latency_targets?.G?.cap }} / {{ row.latency_targets?.W?.cap }}</div>
           </template>
@@ -200,8 +206,10 @@ onMounted(async () => { await loadMeta(); await load() })
             <el-tag :type="row.ok ? 'success' : 'danger'" size="small">{{ row.ok ? '通过' : '失败' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="target" label="目标" width="70">
-          <template #default="{ row }">{{ { G: 'Google', W: 'Wikipedia' }[row.target] || row.target }}</template>
+        <el-table-column prop="target" label="目标" width="88">
+          <template #default="{ row }">
+            <span :title="targetName(row.target)">{{ targetName(row.target) }}</span>
+          </template>
         </el-table-column>
         <el-table-column prop="latency_ms" label="延迟(ms)" width="95" />
         <el-table-column label="错误">
@@ -227,8 +235,10 @@ onMounted(async () => { await loadMeta(); await load() })
             <el-tag :type="row.ok ? 'success' : 'danger'" size="small">{{ row.ok ? '通过' : '失败' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="target" label="目标" width="70">
-          <template #default="{ row }">{{ { G: 'Google', W: 'Wikipedia' }[row.target] || row.target }}</template>
+        <el-table-column prop="target" label="目标" width="88">
+          <template #default="{ row }">
+            <span :title="targetName(row.target)">{{ targetName(row.target) }}</span>
+          </template>
         </el-table-column>
         <el-table-column prop="latency_ms" label="延迟(ms)" width="95" />
         <el-table-column label="错误">

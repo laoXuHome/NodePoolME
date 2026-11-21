@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { checkAuth, logout, state } from './api'
 import { ElMessageBox, ElMessage } from 'element-plus'
@@ -12,6 +12,13 @@ const version = computed(() => state.version || '1.0.0')
 const repoUrl = 'https://github.com/laoXuHome/NodePoolME'
 
 const isLogin = computed(() => route.name === 'login')
+const navOpen = ref(false)
+const isMobile = ref(false)
+let mq = null
+function syncMobile(e) {
+  isMobile.value = e.matches
+  if (!e.matches) navOpen.value = false
+}
 const title = computed(() => route.meta.title || 'NodePoolME')
 
 const menus = [
@@ -37,14 +44,22 @@ async function doLogout() {
 }
 
 onMounted(async () => {
+  mq = window.matchMedia('(max-width: 768px)')
+  isMobile.value = mq.matches
+  mq.addEventListener('change', syncMobile)
   await refresh()
 })
+
+onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 
 router.afterEach((to) => {
   if (to.name !== 'login' && ready.value && !state.loggedIn) router.replace('/login')
 })
 
-function onMenu(path) { router.push(path) }
+function onMenu(path) {
+  router.push(path)
+  navOpen.value = false
+}
 </script>
 
 <template>
@@ -53,7 +68,7 @@ function onMenu(path) { router.push(path) }
   <router-view v-else-if="isLogin" />
 
   <el-container v-else-if="authed" style="min-height:100vh">
-    <el-aside width="208px" class="layout-sidebar">
+    <el-aside v-if="!isMobile" width="208px" class="layout-sidebar">
       <div class="brand">
         <div class="name">NodePoolME</div>
         <div class="sub">MULTI-AIRPORT · NODE POOL</div>
@@ -70,8 +85,24 @@ function onMenu(path) { router.push(path) }
            style="color:#7aa2ff;text-decoration:none;display:inline-block;margin-top:4px">GitHub 仓库 ↗</a>
       </div>
     </el-aside>
+    <el-drawer v-model="navOpen" direction="ltr" size="240px" :with-header="false" class="np-nav-drawer">
+      <div class="brand">
+        <div class="name">NodePoolME</div>
+        <div class="sub">MULTI-AIRPORT · NODE POOL</div>
+      </div>
+      <el-menu :default-active="route.path" @select="onMenu">
+        <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
+          <el-icon><component :is="m.icon" /></el-icon>
+          <span>{{ m.label }}</span>
+        </el-menu-item>
+      </el-menu>
+      <div class="np-drawer-foot">v{{ version }} · <a :href="repoUrl" target="_blank" rel="noopener">GitHub ↗</a></div>
+    </el-drawer>
     <el-container direction="vertical">
       <el-header height="60px" class="header-bar">
+        <el-button v-if="isMobile" text class="nav-toggle" @click="navOpen = true">
+          <el-icon size="20"><Menu /></el-icon>
+        </el-button>
         <span class="title">{{ title }}</span>
         <div class="np-flex" />
         <el-tag size="small" type="info" effect="plain">admin</el-tag>

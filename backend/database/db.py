@@ -212,6 +212,9 @@ def init_db() -> None:
     if get("latency_dual_enabled") != "1":
         set_setting("latency_test_url2", config.DEFAULT_SETTINGS["latency_test_url2"])
         set_setting("sub_max_latency2", config.DEFAULT_SETTINGS["sub_max_latency2"])
+    for key in ("latency_test_name", "latency_test_name2"):
+        if not get(key):
+            set_setting(key, config.DEFAULT_SETTINGS[key])
         if get("sub_max_latency") in (None, "", "500"):
             set_setting("sub_max_latency", "1000")
         set_setting("latency_dual_enabled", "1")
