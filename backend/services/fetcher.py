@@ -157,6 +157,36 @@ def parse_interval(value) -> int:
         return 60
 
 
+def next_run_at(airport: dict, now: datetime | None = None) -> datetime | None:
+    """When this airport will fetch next on its own; None = manual only."""
+    now = now or datetime.now().astimezone()
+    daily = (airport.get("daily_time") or "").strip()
+    interval = int(airport.get("interval_minutes") or 0)
+    last_raw = airport.get("last_attempt_at")
+    last = None
+    if last_raw:
+        try:
+            last = datetime.fromisoformat(last_raw)
+            if last.tzinfo is None:
+                last = last.astimezone()
+        except ValueError:
+            last = None
+    candidates: list[datetime] = []
+    if daily:
+        try:
+            hour, _, minute = daily.partition(":")
+            slot = now.replace(hour=int(hour), minute=int(minute or 0), second=0, microsecond=0)
+        except ValueError:
+            slot = None
+        if slot is not None:
+            if last is not None and last >= slot:
+                slot = slot + timedelta(days=1)
+            candidates.append(slot)
+    if interval > 0:
+        candidates.append((last or now) + timedelta(minutes=interval))
+    return min(candidates) if candidates else None
+
+
 def due_airports(now: datetime | None = None) -> list[dict]:
     now = now or datetime.now().astimezone()
     due = []

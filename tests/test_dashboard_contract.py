@@ -32,6 +32,9 @@ def test_dashboard_has_latency_probe():
         for key in ("group_progress", "block_index", "blocks", "block_size"):
             assert key in runtime, runtime.keys()
         assert isinstance(runtime["group_progress"], list)
+        assert {"total", "ok", "error", "manual_only", "next_at"} <= set(data["fetch"].keys())
+        assert {"count", "hits", "passed"} <= set(data["group_summary"].keys())
+        assert {"last_auto", "nodes"} <= set(data["publish"].keys())
 
 
 if __name__ == "__main__":

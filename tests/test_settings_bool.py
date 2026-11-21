@@ -1,0 +1,51 @@
+"""Settings API: boolean payloads must land as "1"/"0" so the scheduler sees them."""
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+_TMP = tempfile.mkdtemp(prefix="np-settings-bool-")
+os.environ["NODEPOOL_DATA_DIR"] = _TMP
+os.environ["NODEPOOL_CONFIG_DIR"] = os.path.join(_TMP, "config")
+os.environ["NODEPOOL_LOG_DIR"] = os.path.join(_TMP, "logs")
+os.environ["NODEPOOL_BACKUP_DIR"] = os.path.join(_TMP, "backup")
+os.environ["NODEPOOL_ADMIN_PASSWORD"] = "test123"
+os.environ["NODEPOOL_TEST_ENGINE"] = "tcp"
+
+from fastapi.testclient import TestClient  # noqa: E402
+from backend.database import db  # noqa: E402
+from backend.main import app  # noqa: E402
+
+
+def test_bool_setting_roundtrip():
+    with TestClient(app) as client:
+        assert client.post("/api/auth/login", json={"password": "test123"}).status_code == 200
+        assert client.patch("/api/settings", json={
+            "sub_publish_enabled": True,
+            "sub_publish_mode": "interval",
+            "sub_publish_interval_minutes": 60,
+        }).status_code == 200
+        assert db.get("sub_publish_enabled") == "1"
+        dash = client.get("/api/dashboard").json()
+        assert dash["publish_schedule"]["enabled"] is True, dash["publish_schedule"]
+        assert dash["publish_schedule"]["mode"] == "interval"
+        assert dash["publish_schedule"]["interval_minutes"] == 60
+
+        client.patch("/api/settings", json={"sub_publish_enabled": False})
+        assert db.get("sub_publish_enabled") == "0"
+        assert client.get("/api/dashboard").json()["publish_schedule"]["enabled"] is False
+
+
+def test_legacy_true_string_is_migrated():
+    db.init_db()
+    db.set_setting("sub_publish_enabled", "True")
+    db.init_db()   # migration on startup normalises it
+    assert db.get("sub_publish_enabled") == "1", db.get("sub_publish_enabled")
+
+
+if __name__ == "__main__":
+    test_bool_setting_roundtrip()
+    print("PASS test_bool_setting_roundtrip")
+    test_legacy_true_string_is_migrated()
+    print("PASS test_legacy_true_string_is_migrated")

@@ -76,7 +76,7 @@ def _group_stats() -> list[dict]:
 
 @api.get("/dashboard", dependencies=protected)
 async def dashboard():
-    airports = db.rows("SELECT id, name, enabled, node_count, last_success_at, last_status, last_error FROM airports")
+    airports = fetcher.all_airports()   # needs daily_time / interval_minutes for the next-run math
     nodes_total = db.row("SELECT COUNT(*) AS c FROM nodes")["c"]
     unavailable = db.row("SELECT COUNT(*) AS c FROM nodes WHERE status='unavailable'")["c"]
     available = db.row("SELECT COUNT(*) AS c FROM nodes WHERE status='available'")["c"]
@@ -88,6 +88,47 @@ async def dashboard():
                        if p["ok"] and (not ceiling or (p["latency_ms"] or 0) <= ceiling))
     last_batch = db.row("SELECT * FROM batches ORDER BY id DESC LIMIT 1")
     logs = db.rows("SELECT * FROM logs ORDER BY id DESC LIMIT 12")
+    now = datetime.now().astimezone()
+    fetch_next: list[str] = []
+    manual_only = 0
+    for airport in airports:
+        nxt = fetcher.next_run_at(airport, now)
+        airport["next_run_at"] = nxt.isoformat(sep=" ", timespec="seconds") if nxt else None
+        airport["manual_only"] = nxt is None
+        if nxt is None:
+            manual_only += 1
+        elif airport["enabled"]:
+            fetch_next.append(airport["next_run_at"])
+    fetch_ok = sum(1 for a in airports if a["last_status"] == "ok")
+    fetch_err = sum(1 for a in airports if a["last_status"] == "error")
+    last_fetch = max((a["last_success_at"] or "" for a in airports), default="") or None
+    fetch_block = {
+        "total": len(airports),
+        "enabled": sum(1 for a in airports if a["enabled"]),
+        "ok": fetch_ok,
+        "error": fetch_err,
+        "manual_only": manual_only,
+        "fetching": len(manager.state.fetching),
+        "last_success_at": last_fetch,
+        "next_at": min(fetch_next) if fetch_next else None,
+    }
+    last_publish = db.row("SELECT * FROM batches WHERE published=1 ORDER BY id DESC LIMIT 1")
+    group_rows = _group_stats()
+    hits = db.row("SELECT COUNT(*) AS c FROM (SELECT DISTINCT node_id FROM results WHERE ok=1) t")["c"]
+    group_total = len([g for g in group_rows if g["enabled"]])
+    group_block = {
+        "count": group_total,
+        "hits": hits,
+        "cells": len(group_rows) and nodes_total * group_total or 0,
+        "passed": sum(g["passed"] for g in group_rows if g["enabled"]),
+    }
+    publish_block = {
+        "last_batch_at": last_publish["finished_at"] if last_publish else (last_batch["finished_at"] if last_batch else None),
+        "last_auto": db.get("sub_last_auto_publish"),
+        "last_auto_at": db.get("sub_last_auto_publish_at"),
+        "nodes": builder.meta().get("nodes") or 0,
+        "updated_at": builder.meta().get("updated_at"),
+    }
     return {
         "airports": len(airports),
         "airports_enabled": sum(1 for a in airports if a["enabled"]),
@@ -110,6 +151,9 @@ async def dashboard():
             "ceiling": ceiling,
             "passed": probe_passed,
         },
+        "fetch": fetch_block,
+        "group_summary": group_block,
+        "publish": publish_block,
         "publish_schedule": {
             "enabled": db.get("sub_publish_enabled", "0") == "1",
             "mode": db.get("sub_publish_mode", "time"),

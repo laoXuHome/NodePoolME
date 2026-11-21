@@ -195,6 +195,11 @@ def init_db() -> None:
 
     if not get("sub_token"):
         set_setting("sub_token", secrets.token_urlsafe(24))
+    # Migration: old rows may store Python bool repr ("True"/"False") instead of 1/0
+    for key in ("sub_publish_enabled", "sub_include_unavailable", "latency_test_enabled"):
+        value = get(key)
+        if value in ("True", "False"):
+            set_setting(key, "1" if value == "True" else "0")
     # The latency probe is the publish gate and always runs: force it on for old databases
     if get("latency_test_enabled") != "1":
         set_setting("latency_test_enabled", "1")
@@ -238,6 +243,9 @@ def get_float(key: str, default: float = 0.0) -> float:
 
 
 def set_setting(key: str, value: Any) -> None:
+    # Booleans must land as "1"/"0": several settings are compared against "1" as strings
+    if isinstance(value, bool):
+        value = "1" if value else "0"
     conn = connect()
     conn.execute(
         "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",

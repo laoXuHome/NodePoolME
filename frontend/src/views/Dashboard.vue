@@ -39,6 +39,45 @@ const publishText = computed(() => {
   return `每天 ${ps.time}`
 })
 
+const poolPct = computed(() => {
+  const d = data.value
+  if (!d || !d.nodes_total) return 0
+  return Math.round(d.nodes_available / d.nodes_total * 100)
+})
+const qualifyPct = computed(() => {
+  const d = data.value
+  if (!d || !d.nodes_total) return 0
+  return Math.round((d.nodes_qualified || 0) / d.nodes_total * 100)
+})
+const fetchState = computed(() => {
+  const f = data.value?.fetch
+  if (!f) return { text: '—', type: 'info' }
+  if (f.fetching) return { text: `拉取中 ${f.fetching}`, type: 'warning' }
+  if (f.error) return { text: `${f.error} 个失败`, type: 'danger' }
+  if (!f.total) return { text: '未配置', type: 'info' }
+  return { text: '正常', type: 'success' }
+})
+const cyclePct = computed(() => {
+  const r = data.value?.runtime
+  if (!r || !r.total) return 0
+  return Math.round((r.done || 0) / r.total * 100)
+})
+const subText = computed(() => {
+  const ps = data.value?.publish_schedule
+  const p = data.value?.publish
+  if (!ps) return '—'
+  if (!ps.enabled) return '未启用'
+  if (ps.mode === 'interval') return `每 ${ps.interval_minutes} 分钟`
+  return `每天 ${ps.time}`
+})
+const nextAutoText = computed(() => {
+  const ps = data.value?.publish_schedule
+  if (!ps || !ps.enabled) return '—'
+  if (ps.mode === 'interval' && ps.next_at) return ps.next_at.slice(5, 16)
+  if (ps.mode === 'time') return `今天 ${ps.time}`
+  return '等待倒计时'
+})
+
 function roundDone(name) {
   const item = (data.value?.runtime?.group_progress || []).find((g) => g.name === name)
   return item ? `${item.done}/${item.total}` : '—'
@@ -61,26 +100,91 @@ onUnmounted(() => clearInterval(timer.value))
     <h2 class="np-page-title">仪表盘</h2>
     <div class="np-page-desc">机场拉取、节点缓存与检测批次总览。检测只读取本地缓存，不会触发机场重新拉取。</div>
 
-    <div class="np-stat-grid" v-if="data">
-      <div class="np-stat">
-        <div class="label">机场</div>
-        <div class="value">{{ data.airports }}</div>
-        <div class="hint">启用 {{ data.airports_enabled }} 个</div>
+    <div class="np-board" v-if="data">
+      <!-- 节点拉取 -->
+      <div class="np-board-card">
+        <div class="np-board-head">
+          <span class="np-dot" :class="`is-${fetchState.type}`" />
+          <span class="np-board-title">节点拉取</span>
+          <div class="np-flex" />
+          <el-tag :type="fetchState.type" size="small" effect="plain">{{ fetchState.text }}</el-tag>
+        </div>
+        <div class="np-board-value">{{ data.fetch?.total || 0 }}<span class="unit">个机场</span></div>
+        <div class="np-board-rows">
+          <div><span class="k">正常</span><span class="v ok">{{ data.fetch?.ok || 0 }}</span></div>
+          <div><span class="k">失败</span><span class="v" :class="{ bad: data.fetch?.error }">{{ data.fetch?.error || 0 }}</span></div>
+          <div><span class="k">仅手动</span><span class="v">{{ data.fetch?.manual_only || 0 }}</span></div>
+        </div>
+        <div class="np-board-foot">
+          最近成功 <b>{{ formatTs(data.fetch?.last_success_at) }}</b><br />
+          下次自动 <b>{{ data.fetch?.next_at ? data.fetch.next_at.slice(5, 16) : '—' }}</b>
+        </div>
       </div>
-      <div class="np-stat">
-        <div class="label">缓存节点</div>
-        <div class="value">{{ data.nodes_total }}</div>
-        <div class="hint">可用 {{ data.nodes_available }} · 降级 {{ data.nodes_degraded }} · 不可用 {{ data.nodes_unavailable }}</div>
+
+      <!-- 节点池 -->
+      <div class="np-board-card">
+        <div class="np-board-head">
+          <span class="np-dot" :class="data.nodes_unavailable ? 'is-warning' : 'is-success'" />
+          <span class="np-board-title">节点池</span>
+          <div class="np-flex" />
+          <el-tag type="info" size="small" effect="plain">缓存</el-tag>
+        </div>
+        <div class="np-board-value">{{ data.nodes_total }}<span class="unit">个节点</span></div>
+        <el-progress :percentage="poolPct" :stroke-width="8" :show-text="false"
+                     :color="data.nodes_unavailable ? '#f79009' : '#12b76a'" />
+        <div class="np-board-rows">
+          <div><span class="k">可用</span><span class="v ok">{{ data.nodes_available }}</span></div>
+          <div><span class="k">降级</span><span class="v">{{ data.nodes_degraded }}</span></div>
+          <div><span class="k">不可用</span><span class="v" :class="{ bad: data.nodes_unavailable }">{{ data.nodes_unavailable }}</span></div>
+        </div>
+        <div class="np-board-foot">
+          可下发 <b>{{ data.nodes_qualified }}</b> 个（{{ qualifyPct }}%），上限 {{ data.latency_probe?.ceiling || '不限' }}ms
+        </div>
       </div>
-      <div class="np-stat">
-        <div class="label">可下发节点</div>
-        <div class="value">{{ data.nodes_qualified }}</div>
-        <div class="hint">延迟 ≤ {{ data.latency_probe?.ceiling || '不限' }}ms 才进入 /sub/all</div>
+
+      <!-- 标签检测 -->
+      <div class="np-board-card">
+        <div class="np-board-head">
+          <span class="np-dot" :class="data.runtime?.running ? 'is-warning' : 'is-success'" />
+          <span class="np-board-title">标签检测</span>
+          <div class="np-flex" />
+          <el-tag :type="data.runtime?.running ? 'warning' : 'success'" size="small" effect="plain">
+            {{ data.runtime?.running ? '检测中' : '空闲' }}
+          </el-tag>
+        </div>
+        <div class="np-board-value">{{ data.group_summary?.count || 0 }}<span class="unit">个启用标签</span></div>
+        <el-progress :percentage="cyclePct" :stroke-width="8" :show-text="false"
+                     :format="() => ''" />
+        <div class="np-board-rows">
+          <div><span class="k">本轮进度</span><span class="v">{{ data.runtime?.done || 0 }}/{{ data.runtime?.total || 0 }}</span></div>
+          <div><span class="k">命中节点</span><span class="v">{{ data.group_summary?.hits || 0 }}</span></div>
+          <div><span class="k">累计通过</span><span class="v">{{ data.group_summary?.passed || 0 }}</span></div>
+        </div>
+        <div class="np-board-foot">
+          <span v-if="data.runtime?.running">块 {{ data.runtime.block_index || 0 }}/{{ data.runtime.blocks || 0 }}，单元 {{ data.runtime.block_size || 0 }} 节点</span>
+          <span v-else>上次批次 {{ formatTs(data.runtime?.last_cycle_at) }}</span>
+        </div>
       </div>
-      <div class="np-stat">
-        <div class="label">统一订阅</div>
-        <div class="value">{{ data.subscription.nodes || 0 }}</div>
-        <div class="hint">{{ formatTs(data.subscription.updated_at) }}</div>
+
+      <!-- 订阅下发 -->
+      <div class="np-board-card">
+        <div class="np-board-head">
+          <span class="np-dot" :class="data.publish_schedule?.enabled ? 'is-success' : 'is-info'" />
+          <span class="np-board-title">订阅下发</span>
+          <div class="np-flex" />
+          <el-tag :type="data.publish_schedule?.enabled ? 'success' : 'info'" size="small" effect="plain">
+            {{ data.publish_schedule?.enabled ? '已启用' : '未启用' }}
+          </el-tag>
+        </div>
+        <div class="np-board-value">{{ data.subscription?.nodes || 0 }}<span class="unit">个下发达标节点</span></div>
+        <div class="np-board-rows">
+          <div><span class="k">下发方式</span><span class="v">{{ subText }}</span></div>
+          <div><span class="k">下次执行</span><span class="v">{{ nextAutoText }}</span></div>
+          <div><span class="k">自动记录</span><span class="v">{{ data.publish?.last_auto || '—' }}</span></div>
+        </div>
+        <div class="np-board-foot">
+          最近生成 <b>{{ formatTs(data.subscription?.updated_at) }}</b>
+        </div>
       </div>
     </div>
 
