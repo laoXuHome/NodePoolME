@@ -4,8 +4,7 @@ import { ElMessage } from 'element-plus'
 import { api, formatTs } from '../api'
 
 const info = ref(null)
-const form = ref({ sub_name: '', sub_max_latency: 500, sub_max_nodes: 0,
-                   sub_include_unavailable: false, sub_token: '', regenerate_token: false })
+const form = ref({ sub_name: '', sub_token: '', regenerate_token: false })
 const preview = ref('')
 const previewFmt = ref('clash')
 const loading = ref(false)
@@ -46,9 +45,6 @@ async function save() {
       sub_name: form.value.sub_name,
       sub_token: form.value.sub_token,
       regenerate_token: form.value.regenerate_token,
-      sub_max_latency: form.value.sub_max_latency,
-      sub_max_nodes: form.value.sub_max_nodes,
-      sub_include_unavailable: form.value.sub_include_unavailable
     })
     ElMessage.success('订阅设置已保存')
     form.value.regenerate_token = false
@@ -140,29 +136,8 @@ onMounted(async () => { await load(); await loadPreview() })
               <el-input v-model="form.sub_token" />
               <el-button link type="warning" style="margin-left:8px" @click="regen">重新生成</el-button>
             </el-form-item>
-            <el-row :gutter="12">
-              <el-col :span="12">
-                <el-form-item label="下发延迟上限(ms)">
-                  <el-input-number v-model="form.sub_max_latency" :min="0" :max="60000" style="width:100%" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="最大节点数">
-                  <el-input-number v-model="form.sub_max_nodes" :min="0" style="width:100%" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-            <el-row :gutter="12">
-              <el-col :span="12">
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="包含不可用">
-                  <el-switch v-model="form.sub_include_unavailable" />
-                </el-form-item>
-              </el-col>
-            </el-row>
           </el-form>
-          <div class="np-muted">下发依据是延迟检测：延迟不超过上限的节点才进入订阅；检测组只用于生成节点名代号。0 表示不限制。</div>
+          <div class="np-muted">下发依据是「系统设置 → 延迟检测」里的双目标上限（Google / Wikipedia，可分别自定义链接与阈值）；检测组只用于生成节点名代号，节点数不设上限。</div>
         </div>
       </el-col>
 

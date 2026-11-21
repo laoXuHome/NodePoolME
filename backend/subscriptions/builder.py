@@ -111,7 +111,6 @@ def collect_nodes() -> tuple[list[dict], dict]:
 
     latests = latest_latency()
     required_tags = [t for t in (db.get("sub_required_tags") or "").split(",") if t]
-    max_nodes = db.get_int("sub_max_nodes", 0)
 
 
     selected: list[dict] = []
@@ -151,8 +150,6 @@ def collect_nodes() -> tuple[list[dict], dict]:
                          "latency": latency, "params": db.loads(node["params"], {})})
 
     selected.sort(key=lambda n: (n["latency"] if n["latency"] else 99999, n["id"]))
-    if max_nodes:
-        selected = selected[:max_nodes]
     # Names must stay unique inside a client profile
     used: dict[str, int] = {}
     for node in selected:

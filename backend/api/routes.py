@@ -567,11 +567,6 @@ async def subscription_info(request: Request):
         "settings": {
             "sub_name": db.get("sub_name"),
             "sub_token": token,
-            "sub_max_latency": db.get_int("sub_max_latency"),
-            "sub_max_latency2": db.get_int("sub_max_latency2"),
-            "sub_max_nodes": db.get_int("sub_max_nodes"),
-            "sub_min_groups": db.get_int("sub_min_groups"),
-            "sub_include_unavailable": db.get("sub_include_unavailable") == "1",
             "latency_test_enabled": True,
             "latency_test_url": db.get("latency_test_url"),
             "latency_test_status": db.get("latency_test_status"),
@@ -596,16 +591,6 @@ async def subscription_info(request: Request):
 async def update_subscription(payload: SubSettings):
     if payload.sub_name:
         db.set_setting("sub_name", payload.sub_name.strip())
-    if payload.sub_max_latency is not None:
-        db.set_setting("sub_max_latency", payload.sub_max_latency)
-    if payload.sub_max_latency2 is not None:
-        db.set_setting("sub_max_latency2", payload.sub_max_latency2)
-    if payload.sub_max_nodes is not None:
-        db.set_setting("sub_max_nodes", payload.sub_max_nodes)
-    if payload.sub_min_groups is not None:
-        db.set_setting("sub_min_groups", payload.sub_min_groups)
-    if payload.sub_include_unavailable is not None:
-        db.set_setting("sub_include_unavailable", "1" if payload.sub_include_unavailable else "0")
     if payload.regenerate_token:
         db.set_setting("sub_token", secrets.token_urlsafe(24))
         db.append_log("INFO", "subscription", "subscription token regenerated")
