@@ -611,9 +611,17 @@ async def update_settings(payload: SettingsIn):
         if db.get_int("request_interval_max_ms") < db.get_int("request_interval_min_ms"):
             db.set_setting("request_interval_max_ms", db.get_int("request_interval_min_ms"))
     if any(k.startswith("sub_publish_") for k in data):
-        # changing the schedule restarts the interval countdown from now
-        db.execute("DELETE FROM settings WHERE key='sub_publish_next_at'")
-        db.append_log("INFO", "publish", "publish schedule changed, next run recalculated")
+        # Changing the schedule recomputes the next run right away so the dashboard is never blank
+        nxt = None
+        if db.get("sub_publish_enabled", "0") == "1":
+            nxt = manager.next_publish_at()
+        if nxt:
+            db.set_setting("sub_publish_next_at", nxt.strftime("%Y-%m-%d %H:%M:%S"))
+        else:
+            db.execute("DELETE FROM settings WHERE key='sub_publish_next_at'")
+        db.append_log("INFO", "publish",
+                      "publish schedule changed, next run "
+                      + (nxt.strftime("%Y-%m-%d %H:%M:%S") if nxt else "cleared"))
     db.append_log("INFO", "settings", f"settings updated: {', '.join(data)}")
     return {"ok": True}
 

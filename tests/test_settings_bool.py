@@ -31,9 +31,15 @@ def test_bool_setting_roundtrip():
         assert dash["publish_schedule"]["enabled"] is True, dash["publish_schedule"]
         assert dash["publish_schedule"]["mode"] == "interval"
         assert dash["publish_schedule"]["interval_minutes"] == 60
+        next_at = dash["publish_schedule"]["next_at"]
+        assert next_at, "saving the schedule must arm the next run immediately"
+        from datetime import datetime, timedelta
+        nxt = datetime.strptime(next_at[:19], "%Y-%m-%d %H:%M:%S")
+        assert timedelta(minutes=55) < (nxt - datetime.now()) <= timedelta(minutes=61), next_at
 
         client.patch("/api/settings", json={"sub_publish_enabled": False})
         assert db.get("sub_publish_enabled") == "0"
+        assert client.get("/api/dashboard").json()["publish_schedule"]["next_at"] is None
         assert client.get("/api/dashboard").json()["publish_schedule"]["enabled"] is False
 
 

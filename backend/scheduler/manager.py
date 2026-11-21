@@ -465,7 +465,8 @@ async def job_publish() -> None:
         interval = max(5, db.get_int("sub_publish_interval_minutes", 180))
         next_at = _parse_ts(db.get("sub_publish_next_at"))
         if next_at is None:
-            db.set_setting("sub_publish_next_at", (now + timedelta(minutes=interval)).strftime(ts_fmt))
+            nxt = next_publish_at("interval", interval=interval, base=now)
+            db.set_setting("sub_publish_next_at", nxt.strftime(ts_fmt))
             db.append_log("INFO", "publish", f"interval publish armed: every {interval} min")
             return
         if now < next_at:
@@ -492,11 +493,16 @@ async def job_publish() -> None:
     result = await run_cycle(force=True, reason="scheduled publish")
 
     def settle(retry_minutes: int | None = None) -> None:
-        if mode == "interval":
-            db.set_setting("sub_publish_next_at",
-                           (datetime.now() + timedelta(minutes=(retry_minutes or interval))).strftime(ts_fmt))
-        db.set_setting("sub_last_auto_publish", datetime.now().strftime("%Y-%m-%d"))
-        db.set_setting("sub_last_auto_publish_at", datetime.now().strftime(ts_fmt))
+        now2 = datetime.now()
+        if retry_minutes:
+            nxt = now2 + timedelta(minutes=retry_minutes)
+        else:
+            nxt = next_publish_at("interval", interval=interval, base=now2) if mode == "interval" \
+                else next_publish_at("time", hhmm=hhmm, base=now2)
+        if nxt:
+            db.set_setting("sub_publish_next_at", nxt.strftime(ts_fmt))
+        db.set_setting("sub_last_auto_publish", now2.strftime("%Y-%m-%d"))
+        db.set_setting("sub_last_auto_publish_at", now2.strftime(ts_fmt))
 
     if result.get("ok") and result.get("published"):
         settle(None)
@@ -514,6 +520,25 @@ async def job_publish() -> None:
         return
     settle(None)
     db.append_log("WARN", "publish", "scheduled cycle finished but the subscription was not published")
+
+
+def next_publish_at(mode: str | None = None, hhmm: str | None = None,
+                    interval: int | None = None, base: datetime | None = None) -> datetime | None:
+    """Next scheduled publish time, used both for arming jobs and for the dashboard."""
+    base = base or datetime.now()
+    mode = (mode or db.get("sub_publish_mode", "time") or "time").strip().lower()
+    if mode == "interval":
+        minutes = max(5, interval if interval is not None else db.get_int("sub_publish_interval_minutes", 180))
+        return base + timedelta(minutes=minutes)
+    value = hhmm or db.get("sub_publish_time", "04:30") or "04:30"
+    try:
+        hour, minute = (int(x) for x in value.split(":"))
+    except ValueError:
+        return None
+    slot = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if slot <= base:
+        slot += timedelta(days=1)
+    return slot
 
 
 def _parse_ts(value) -> datetime | None:

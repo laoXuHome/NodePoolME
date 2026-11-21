@@ -70,12 +70,15 @@ const subText = computed(() => {
   if (ps.mode === 'interval') return `每 ${ps.interval_minutes} 分钟`
   return `每天 ${ps.time}`
 })
+function shortTs(ts) {
+  if (!ts) return '—'
+  return String(ts).replace(/^\d{4}-/, '').slice(0, 11)
+}
 const nextAutoText = computed(() => {
   const ps = data.value?.publish_schedule
-  if (!ps || !ps.enabled) return '—'
-  if (ps.mode === 'interval' && ps.next_at) return ps.next_at.slice(5, 16)
-  if (ps.mode === 'time') return `今天 ${ps.time}`
-  return '等待倒计时'
+  if (!ps || !ps.enabled) return '未启用'
+  if (ps.next_at) return shortTs(ps.next_at)
+  return ps.mode === 'interval' ? `每 ${ps.interval_minutes} 分钟（等待对齐）` : `每天 ${ps.time}（等待对齐）`
 })
 
 function roundDone(name) {
@@ -180,10 +183,11 @@ onUnmounted(() => clearInterval(timer.value))
         <div class="np-board-rows">
           <div><span class="k">下发方式</span><span class="v">{{ subText }}</span></div>
           <div><span class="k">下次执行</span><span class="v">{{ nextAutoText }}</span></div>
-          <div><span class="k">自动记录</span><span class="v">{{ data.publish?.last_auto || '—' }}</span></div>
+          <div><span class="k">上次下发</span><span class="v">{{ shortTs(data.publish?.last_auto_at || data.publish?.last_batch_at) }}</span></div>
         </div>
         <div class="np-board-foot">
-          最近生成 <b>{{ formatTs(data.subscription?.updated_at) }}</b>
+          最近生成 <b>{{ formatTs(data.subscription?.updated_at) }}</b><br />
+          自动下发前会全量重测：延迟探测 + 全部标签
         </div>
       </div>
     </div>
