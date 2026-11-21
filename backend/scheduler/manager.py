@@ -171,20 +171,21 @@ def _apply_latency_gate(node: dict, probes: list[dict], per_probe: dict[str, lis
 
 
 async def _latency_task(nodes: list[dict], probes: list[dict], batch_id: int, global_sem,
-                        counters: dict) -> None:
+                        node_locks: dict, counters: dict) -> None:
     for node in nodes:
         per_probe: dict[str, list] = {}
         try:
-            async def once(probe: dict):
-                async with global_sem:
-                    await asyncio.sleep(engine_mod.jitter_ms())
-                    return probe, await engine_mod.engine_manager.test(node, probe)
-
-            jobs = [once(p) for p in probes for _ in range(LATENCY_ROUNDS)]
-            for probe, outcome in await asyncio.gather(*jobs):
-                per_probe.setdefault(probe["ident"], []).append(outcome)
-                _record_latency(node, probe, batch_id, outcome)
-                counters["ok"] += 1 if outcome.ok else 0
+            # Strictly alternating G, W, G, W; one request in flight per node. Never
+            # run the two targets concurrently, or a weak node may stop responding.
+            for _round in range(LATENCY_ROUNDS):
+                for probe in probes:
+                    async with global_sem:
+                        async with node_locks[node["id"]]:
+                            await asyncio.sleep(engine_mod.jitter_ms())
+                            outcome = await engine_mod.engine_manager.test(node, probe)
+                    per_probe.setdefault(probe["ident"], []).append(outcome)
+                    _record_latency(node, probe, batch_id, outcome)
+                    counters["ok"] += 1 if outcome.ok else 0
             _apply_latency_gate(node, probes, per_probe)
             for probe in probes:
                 counters["groups"][probe["name"]] = counters["groups"].get(probe["name"], 0) + 1
@@ -229,7 +230,7 @@ def _record(node: dict, group: dict, batch_id: int | None, outcome, manage_statu
 
 
 async def _test_one(node: dict, group: dict, batch_id: int | None, global_sem, group_sem,
-                    ip_sems: dict, subnet_sems: dict, counters: dict,
+                    node_lock: asyncio.Lock, ip_sems: dict, subnet_sems: dict, counters: dict,
                     manage_status: bool = True) -> None:
     mask = db.get_int("dispersion_mask", 24)
     if mask not in (8, 16, 24, 32):
@@ -248,39 +249,42 @@ async def _test_one(node: dict, group: dict, batch_id: int | None, global_sem, g
 
     async with group_sem:
         async with global_sem:
-            if ip_sem is not None:
-                await ip_sem.acquire()
-            if subnet_sem is not None:
-                await subnet_sem.acquire()
-            try:
-                await asyncio.sleep(engine_mod.jitter_ms())
-                outcome = await engine_mod.engine_manager.test(node, group)
-                _record(node, group, batch_id, outcome, manage_status=manage_status)
-                counters["done"] += 1
-                counters["ok"] += 1 if outcome.ok else 0
-                counters["groups"][group["name"]] = counters["groups"].get(group["name"], 0) + 1
-                for item in state.group_progress:
-                    if item["name"] == group["name"]:
-                        item["done"] = counters["groups"][group["name"]]
-                if counters["done"] % 10 == 0 and state.batch_id == batch_id:
-                    state.done = counters["done"]
-                    db.execute("UPDATE batches SET processed_count=? WHERE id=?",
-                               (counters["done"], batch_id))
-            finally:
-                if subnet_sem is not None:
-                    subnet_sem.release()
+            # One request per node at a time, shared with the latency probes.
+            async with node_lock:
                 if ip_sem is not None:
-                    ip_sem.release()
+                    await ip_sem.acquire()
+                if subnet_sem is not None:
+                    await subnet_sem.acquire()
+                try:
+                    await asyncio.sleep(engine_mod.jitter_ms())
+                    outcome = await engine_mod.engine_manager.test(node, group)
+                    _record(node, group, batch_id, outcome, manage_status=manage_status)
+                    counters["done"] += 1
+                    counters["ok"] += 1 if outcome.ok else 0
+                    counters["groups"][group["name"]] = counters["groups"].get(group["name"], 0) + 1
+                    for item in state.group_progress:
+                        if item["name"] == group["name"]:
+                            item["done"] = counters["groups"][group["name"]]
+                    if counters["done"] % 10 == 0 and state.batch_id == batch_id:
+                        state.done = counters["done"]
+                        db.execute("UPDATE batches SET processed_count=? WHERE id=?",
+                                   (counters["done"], batch_id))
+                finally:
+                    if subnet_sem is not None:
+                        subnet_sem.release()
+                    if ip_sem is not None:
+                        ip_sem.release()
 
 
 async def _group_task(group: dict, nodes: list[dict], batch_id: int, global_sem,
-                      ip_sems: dict, subnet_sems: dict, counters: dict,
+                      node_locks: dict, ip_sems: dict, subnet_sems: dict, counters: dict,
                       manage_status: bool = True) -> dict:
     group_sem = asyncio.Semaphore(max(1, db.get_int("group_concurrency", 5)))
     failures = 0
     for node in nodes:
         try:
-            await _test_one(node, group, batch_id, global_sem, group_sem, ip_sems, subnet_sems,
+            await _test_one(node, group, batch_id, global_sem, group_sem,
+                            node_locks[node["id"]], ip_sems, subnet_sems,
                             counters, manage_status=manage_status)
         except Exception as exc:  # one node must never abort the group
             failures += 1
@@ -361,6 +365,7 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
         state.block_index = 0
         state.block_size = 0
         global_sem = asyncio.Semaphore(max(1, db.get_int("global_concurrency", 10)))
+        node_locks = {n["id"]: asyncio.Lock() for n in nodes}
         mask = db.get_int("dispersion_mask", 24)
         ip_sems: dict = {}
         subnet_sems: dict = {}
@@ -375,10 +380,11 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                 state.phase = "testing"
                 tasks = []
                 if probes:
-                    tasks.append(_latency_task(block, probes, batch_id, global_sem, counters))
+                    tasks.append(_latency_task(block, probes, batch_id, global_sem,
+                                               node_locks, counters))
                 tasks.extend(
-                    _group_task(g, block, batch_id, global_sem, ip_sems, subnet_sems, counters,
-                                manage_status=not probes)
+                    _group_task(g, block, batch_id, global_sem, node_locks, ip_sems,
+                                subnet_sems, counters, manage_status=not probes)
                     for g in groups
                 )
                 await asyncio.gather(*tasks)
@@ -417,6 +423,8 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
 async def test_single_node(node_id: int, group_ids: list[int] | None = None,
                            mode: str = "all") -> dict:
     """mode: all | latency | tags. Lets the detail dialog test either half alone."""
+    if state.running:
+        return {"ok": False, "error": "a full test cycle is running; retry when it finishes"}
     node = db.row("SELECT * FROM nodes WHERE id=?", (node_id,))
     if not node:
         return {"ok": False, "error": "node not found"}
@@ -434,16 +442,15 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None,
     if probes:
         per_probe = {}
         targets = {}
-        for probe in probes:
-            outs = []
-            for _ in range(LATENCY_ROUNDS):
+        for _round in range(LATENCY_ROUNDS):
+            for probe in probes:
                 outcome = await engine_mod.engine_manager.test(node, probe)
                 _record_latency(node, probe, None, outcome)
-                outs.append(outcome)
+                per_probe.setdefault(probe["ident"], []).append(outcome)
                 await asyncio.sleep(engine_mod.jitter_ms())
-            per_probe[probe["ident"]] = outs
+        for probe in probes:
             targets[probe["ident"]] = {
-                "best": _best_latency(probe, outs),
+                "best": _best_latency(probe, per_probe.get(probe["ident"], [])),
                 "cap": probe["max_latency"],
                 "url": probe["url"],
             }

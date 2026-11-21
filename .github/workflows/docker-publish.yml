@@ -47,6 +47,7 @@ jobs:
           python tests/test_name_separators.py
           python tests/test_node_test_modes.py
           python tests/test_incremental_add.py
+          python tests/test_latency_serial.py
 
   build:
     needs: test
