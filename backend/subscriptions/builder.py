@@ -35,16 +35,59 @@ def latest_results() -> dict[int, dict[int, dict]]:
 
 
 def latest_latency() -> dict[int, dict]:
-    """node_id -> newest latency probe row."""
-    sql = """
-    SELECT l.node_id, l.ok, l.latency_ms, l.error_type, l.ts
-    FROM latency_results l
-    JOIN (SELECT node_id, MAX(id) AS mx FROM latency_results GROUP BY node_id) m
-      ON m.node_id = l.node_id AND m.mx = l.id
+    """node_id -> dual-target summary.
+
+    Each target keeps its last two rounds; the best passing round counts. The node only
+    passes when every configured target has a passing round within its own ceiling.
     """
-    return {row["node_id"]: {"ok": bool(row["ok"]), "latency_ms": row["latency_ms"],
-                             "error_type": row["error_type"], "ts": row["ts"]}
-            for row in db.rows(sql)}
+    sql = """
+    SELECT l.node_id, l.target, l.ok, l.latency_ms, l.error_type, l.ts, l.id
+    FROM latency_results l
+    WHERE l.id IN (
+        SELECT l2.id FROM latency_results l2
+        WHERE l2.node_id = l.node_id AND l2.target = l.target
+        ORDER BY l2.id DESC LIMIT 2
+    )
+    ORDER BY l.id
+    """
+    caps = {
+        "G": db.get_int("sub_max_latency", 1000),
+        "W": db.get_int("sub_max_latency2", 1000),
+    }
+    per_target: dict[int, dict[str, list[dict]]] = {}
+    for row in db.rows(sql):
+        per_target.setdefault(row["node_id"], {}).setdefault(row["target"] or "G", []).append(row)
+    out: dict[int, dict] = {}
+    for node_id, targets in per_target.items():
+        best: dict[str, int | None] = {}
+        detail: dict[str, dict] = {}
+        error_type = None
+        ts = None
+        for target, rows in targets.items():
+            cap = caps.get(target, 1000)
+            ok_rows = [r for r in rows if r["ok"] and r["latency_ms"] is not None
+                       and (not cap or r["latency_ms"] <= cap)]
+            best[target] = min((r["latency_ms"] for r in ok_rows), default=None)
+            detail[target] = {
+                "cap": cap,
+                "best": best[target],
+                "attempts": len(rows),
+                "last_ok": bool(rows[0]["ok"]) if rows else False,
+            }
+            if not ok_rows and rows:
+                error_type = rows[0]["error_type"] or error_type
+            ts = max(filter(None, [ts] + [r["ts"] for r in rows]), default=None)
+        required = set(caps)
+        gate = all(best.get(t) is not None for t in required)
+        values = [v for v in best.values() if v]
+        out[node_id] = {
+            "ok": gate,
+            "latency_ms": max(values) if values else None,
+            "error_type": error_type,
+            "ts": ts,
+            "targets": detail,
+        }
+    return out
 
 
 def collect_nodes() -> tuple[list[dict], dict]:
@@ -67,7 +110,6 @@ def collect_nodes() -> tuple[list[dict], dict]:
     )
 
     latests = latest_latency()
-    max_latency = db.get_int("sub_max_latency", 500)
     required_tags = [t for t in (db.get("sub_required_tags") or "").split(",") if t]
     max_nodes = db.get_int("sub_max_nodes", 0)
 
@@ -88,14 +130,12 @@ def collect_nodes() -> tuple[list[dict], dict]:
         if not probe:
             skipped["no_result"] += 1
             continue
-        latency = (probe["latency_ms"] if probe["ok"] and probe.get("latency_ms")
-                   else (node["latency"] or 0))
-        if not latency:
+        if not probe.get("ok"):
             skipped["latency_fail"] += 1
             continue
-        if max_latency and latency > max_latency:
-            skipped["slow"] += 1
-            continue
+        # Per-target ceilings are enforced inside latest_latency(); the node's latency is
+        # the worse of the two passing targets, so no extra global cap check is applied.
+        latency = probe["latency_ms"] or (node["latency"] or 0)
         if required_tags:
             node_idents = {g["ident"] for g in passed}
             missing = [t for t in required_tags if t not in node_idents]

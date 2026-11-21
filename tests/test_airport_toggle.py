@@ -30,9 +30,10 @@ def _seed_airport(name: str, enabled: int) -> int:
         "latency,fail_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))",
         (aid, f"{name}-节点", "ss", "1.1.1.1", 443,
          db.dumps({"cipher": "aes-128-gcm", "password": "pw"}), f"fp-{aid}", "available", 100, 0))
-    db.execute(
-        "INSERT INTO latency_results (node_id,batch_id,ok,latency_ms,error_type,message,ts)"
-        " VALUES (?,?,?,?,?,?,?)", (node_id, None, 1, 100, None, "", db.now()))
+    for target in ("G", "W"):
+        db.execute(
+            "INSERT INTO latency_results (node_id,target,batch_id,ok,latency_ms,error_type,message,ts)"
+            " VALUES (?,?,?,?,?,?,?,?)", (node_id, target, None, 1, 100, None, "", db.now()))
     return aid
 
 

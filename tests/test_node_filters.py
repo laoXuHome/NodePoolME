@@ -33,8 +33,9 @@ def _seed():
             (air, name, proto, "1.1.1.1", 443, db.dumps({"cipher": "aes-128-gcm", "password": "pw"}),
              fp, "available", lat, region, 0))
         ids[fp] = node
-        db.execute("INSERT INTO latency_results (node_id,batch_id,ok,latency_ms,error_type,message,ts) "
-                   "VALUES (?,NULL,1,?,NULL,'',?)", (node, lat, db.now()))
+        for target in ("G", "W"):
+            db.execute("INSERT INTO latency_results (node_id,target,batch_id,ok,latency_ms,error_type,message,ts) "
+                       "VALUES (?,?,NULL,1,?,NULL,'',?)", (node, target, lat, db.now()))
     g1 = db.row("SELECT id FROM test_groups WHERE ident='G'")["id"]
     g2 = db.row("SELECT id FROM test_groups WHERE ident='TG'")["id"]
     db.execute("INSERT INTO results (node_id,group_id,batch_id,ok,latency_ms,error_type,message,ts) "

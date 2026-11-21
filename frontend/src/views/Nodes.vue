@@ -144,9 +144,12 @@ onMounted(async () => { await loadMeta(); await load() })
             <span v-else class="np-muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="延迟" width="96">
+        <el-table-column label="延迟 G / W" width="132">
           <template #default="{ row }">
-            <el-tag :type="latencyType(row.latency)" size="small" effect="plain">{{ latencyText(row.latency) }}</el-tag>
+            <div class="np-mono" style="font-size:12px">
+              G {{ row.latency_targets?.G?.best ?? '—' }} / W {{ row.latency_targets?.W?.best ?? '—' }}
+            </div>
+            <div class="np-muted" style="font-size:11px">上限 {{ row.latency_targets?.G?.cap }} / {{ row.latency_targets?.W?.cap }}</div>
           </template>
         </el-table-column>
         <el-table-column label="下发" width="110">
@@ -197,6 +200,9 @@ onMounted(async () => { await loadMeta(); await load() })
             <el-tag :type="row.ok ? 'success' : 'danger'" size="small">{{ row.ok ? '通过' : '失败' }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="target" label="目标" width="70">
+          <template #default="{ row }">{{ { G: 'Google', W: 'Wikipedia' }[row.target] || row.target }}</template>
+        </el-table-column>
         <el-table-column prop="latency_ms" label="延迟(ms)" width="95" />
         <el-table-column label="错误">
           <template #default="{ row }">
@@ -220,6 +226,9 @@ onMounted(async () => { await loadMeta(); await load() })
           <template #default="{ row }">
             <el-tag :type="row.ok ? 'success' : 'danger'" size="small">{{ row.ok ? '通过' : '失败' }}</el-tag>
           </template>
+        </el-table-column>
+        <el-table-column prop="target" label="目标" width="70">
+          <template #default="{ row }">{{ { G: 'Google', W: 'Wikipedia' }[row.target] || row.target }}</template>
         </el-table-column>
         <el-table-column prop="latency_ms" label="延迟(ms)" width="95" />
         <el-table-column label="错误">

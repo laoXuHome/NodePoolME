@@ -92,60 +92,103 @@ def _semaphore_map_factory():
 
 
 # ---------------------------------------------------------------------------- latency probe
-def latency_probe() -> dict | None:
-    """The publish gate: every node is measured against this URL each cycle."""
-    return {
-        "id": 0,
-        "name": "延迟检测",
-        "ident": "L",
-        "url": db.get("latency_test_url") or "http://www.google.com/generate_204",
-        "method": "GET",
-        "timeout": db.get_int("latency_test_timeout", 8),
-        "expect_status": db.get("latency_test_status") or "200-399",
-        "expect_body": "",
-        "max_latency": db.get_int("sub_max_latency", 500),
-    }
+LATENCY_ROUNDS = 2
+
+LATENCY_TARGETS = (
+    ("Google", "G", "latency_test_url", "sub_max_latency",
+     "http://www.google.com/favicon.ico"),
+    ("Wikipedia", "W", "latency_test_url2", "sub_max_latency2",
+     "http://www.wikipedia.org/favicon.ico"),
+)
 
 
-def _record_latency(node: dict, batch_id: int | None, outcome) -> None:
-    ok = 1 if outcome.ok else 0
+def latency_probes() -> list[dict]:
+    """Two independent probes; a node publishes only when BOTH meet their own ceiling.
+
+    Each probe runs LATENCY_ROUNDS times and the best round counts for that target.
+    """
+    timeout = db.get_int("latency_test_timeout", 8)
+    status = db.get("latency_test_status") or "200-399"
+    probes = []
+    for name, ident, url_key, cap_key, fallback_url in LATENCY_TARGETS:
+        probes.append({
+            "id": 0,
+            "name": f"延迟-{name}",
+            "ident": ident,
+            "url": db.get(url_key) or fallback_url,
+            "method": "GET",
+            "timeout": timeout,
+            "expect_status": status,
+            "expect_body": "",
+            "max_latency": db.get_int(cap_key, 1000),
+        })
+    return probes
+
+
+def _record_latency(node: dict, probe: dict, batch_id: int | None, outcome) -> None:
     db.execute(
-        """INSERT INTO latency_results (node_id, batch_id, ok, latency_ms, error_type, message, ts)
-           VALUES (?,?,?,?,?,?,?)""",
-        (node["id"], batch_id, ok, outcome.latency_ms, outcome.error_type,
-         (outcome.message or "")[:300], db.now()),
+        """INSERT INTO latency_results (node_id, batch_id, target, ok, latency_ms, error_type,
+           message, ts) VALUES (?,?,?,?,?,?,?,?)""",
+        (node["id"], batch_id, probe["ident"], 1 if outcome.ok else 0, outcome.latency_ms,
+         outcome.error_type, (outcome.message or "")[:300], db.now()),
     )
+
+
+def _best_latency(probe: dict, outcomes: list) -> int | None:
+    """Best of LATENCY_ROUNDS rounds; an over-limit round does not count as a pass."""
+    ok_latencies = [o.latency_ms for o in outcomes
+                    if o.ok and o.latency_ms is not None and o.latency_ms <= probe["max_latency"]]
+    return min(ok_latencies) if ok_latencies else None
+
+
+def _apply_latency_gate(node: dict, probes: list[dict], per_probe: dict[str, list]) -> bool:
+    """Update node status from the dual-target gate; return whether both targets passed."""
+    best = {p["ident"]: _best_latency(p, per_probe.get(p["ident"], [])) for p in probes}
+    passed = all(best.get(p["ident"]) is not None for p in probes) if len(probes) > 1 \
+        else best.get(probes[0]["ident"]) is not None
+    values = [v for v in best.values() if v]
+    latency = max(values) if values else (node.get("latency") or None)
     threshold = db.get_int("fail_threshold", 3)
-    if outcome.ok:
+    if passed:
         db.execute(
-            """UPDATE nodes SET latency=?, fail_count=0, status='available', last_tested_at=?, updated_at=?
-               WHERE id=?""",
-            (outcome.latency_ms, db.now(), db.now(), node["id"]),
+            """UPDATE nodes SET latency=?, fail_count=0, status='available', last_tested_at=?,
+               updated_at=? WHERE id=?""",
+            (latency, db.now(), db.now(), node["id"]),
         )
     else:
         row = db.row("SELECT fail_count FROM nodes WHERE id=?", (node["id"],))
         fail_count = (row["fail_count"] + 1) if row else 1
         status = "unavailable" if fail_count >= threshold else "available"
         db.execute(
-            """UPDATE nodes SET fail_count=?, status=?, last_tested_at=?, updated_at=? WHERE id=?""",
-            (fail_count, status, db.now(), db.now(), node["id"]),
+            """UPDATE nodes SET latency=?, fail_count=?, status=?, last_tested_at=?, updated_at=?
+               WHERE id=?""",
+            (latency, fail_count, status, db.now(), db.now(), node["id"]),
         )
+    return passed
 
 
-async def _latency_task(nodes: list[dict], probe: dict, batch_id: int, global_sem,
+async def _latency_task(nodes: list[dict], probes: list[dict], batch_id: int, global_sem,
                         counters: dict) -> None:
     for node in nodes:
+        per_probe: dict[str, list] = {}
         try:
-            async with global_sem:
-                await asyncio.sleep(engine_mod.jitter_ms())
-                outcome = await engine_mod.engine_manager.test(node, probe)
-            _record_latency(node, batch_id, outcome)
-            counters["done"] += 1
-            counters["groups"][probe["name"]] = counters["groups"].get(probe["name"], 0) + 1
-            for item in state.group_progress:
-                if item["name"] == probe["name"]:
-                    item["done"] = counters["groups"][probe["name"]]
-            counters["ok"] += 1 if outcome.ok else 0
+            async def once(probe: dict):
+                async with global_sem:
+                    await asyncio.sleep(engine_mod.jitter_ms())
+                    return probe, await engine_mod.engine_manager.test(node, probe)
+
+            jobs = [once(p) for p in probes for _ in range(LATENCY_ROUNDS)]
+            for probe, outcome in await asyncio.gather(*jobs):
+                per_probe.setdefault(probe["ident"], []).append(outcome)
+                _record_latency(node, probe, batch_id, outcome)
+                counters["ok"] += 1 if outcome.ok else 0
+            _apply_latency_gate(node, probes, per_probe)
+            for probe in probes:
+                counters["groups"][probe["name"]] = counters["groups"].get(probe["name"], 0) + 1
+                for item in state.group_progress:
+                    if item["name"] == probe["name"]:
+                        item["done"] = counters["groups"][probe["name"]]
+            counters["done"] += len(probes)
             if counters["done"] % 10 == 0 and state.batch_id == batch_id:
                 state.done = counters["done"]
                 db.execute("UPDATE batches SET processed_count=? WHERE id=?",
@@ -265,8 +308,8 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
     if state.running:
         return {"ok": False, "error": "a test cycle is already running", "batch_id": state.batch_id}
     groups = due_groups(force=force, ids=group_ids)
-    probe = latency_probe()
-    if not groups and not probe:
+    probes = latency_probes()
+    if not groups and not probes:
         return {"ok": False, "error": "no enabled test group is due"}
     nodes = db.rows(
         """SELECT n.id, n.airport_id, n.raw_name, n.protocol, n.server, n.port, n.params,
@@ -282,10 +325,10 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
         state.phase = "running"
         state.started_at = db.now()
         state.last_error = None
-        units = len(groups) + (1 if probe else 0)
+        units = len(groups) + len(probes)
         state.total = len(nodes) * units
         state.done = 0
-        state.current_groups = ([probe["name"]] if probe else []) + [g["name"] for g in groups]
+        state.current_groups = [p["name"] for p in probes] + [g["name"] for g in groups]
         # A pull in flight rewrites the node pool; let it finish before we snapshot candidates
         waited = 0
         while state.fetching and waited < 120:
@@ -297,18 +340,18 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
         batch_id = db.execute(
             "INSERT INTO batches (started_at, status, target_count, groups, note) VALUES (?,?,?,?,?)",
             (state.started_at, "running", state.total,
-             db.dumps(([{"id": 0, "name": probe["name"], "ident": "L"}] if probe else [])
+             db.dumps([{"id": 0, "name": p["name"], "ident": p["ident"]} for p in probes]
                       + [{"id": g["id"], "name": g["name"], "ident": g["ident"]} for g in groups]),
              reason),
         )
         state.batch_id = batch_id
         db.append_log("INFO", "test",
                       f"batch #{batch_id} started: {len(nodes)} nodes x {units} units"
-                      f" ({len(groups)} groups{' + latency probe' if probe else ''})")
+                      f" ({len(groups)} groups + {len(probes)} latency targets)")
         counters = {"done": 0, "ok": 0, "groups": {}}
         state.group_progress = [
             {"name": item["name"], "ident": item["ident"], "done": 0, "total": len(nodes)}
-            for item in ([{"name": probe["name"], "ident": "L"}] if probe else [])
+            for item in [{"name": p["name"], "ident": p["ident"]} for p in probes]
             + [{"name": g["name"], "ident": g["ident"]} for g in groups]
         ]
         state.blocks = (len(nodes) + BLOCK_SIZE - 1) // BLOCK_SIZE
@@ -328,11 +371,11 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                 await engine_mod.engine_manager.prepare(block)
                 state.phase = "testing"
                 tasks = []
-                if probe:
-                    tasks.append(_latency_task(block, probe, batch_id, global_sem, counters))
+                if probes:
+                    tasks.append(_latency_task(block, probes, batch_id, global_sem, counters))
                 tasks.extend(
                     _group_task(g, block, batch_id, global_sem, ip_sems, subnet_sems, counters,
-                                manage_status=probe is None)
+                                manage_status=not probes)
                     for g in groups
                 )
                 await asyncio.gather(*tasks)
@@ -379,13 +422,27 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None) -> 
     if not groups:
         return {"ok": False, "error": "no enabled test group"}
     await engine_mod.engine_manager.prepare([node])
-    probe = latency_probe()
+    probes = latency_probes()
     latency = None
-    if probe:
-        outcome = await engine_mod.engine_manager.test(node, probe)
-        _record_latency(node, None, outcome)
-        latency = {"ok": outcome.ok, "latency_ms": outcome.latency_ms,
-                   "error_type": outcome.error_type, "message": outcome.message}
+    if probes:
+        per_probe = {}
+        targets = {}
+        for probe in probes:
+            outs = []
+            for _ in range(LATENCY_ROUNDS):
+                outcome = await engine_mod.engine_manager.test(node, probe)
+                _record_latency(node, probe, None, outcome)
+                outs.append(outcome)
+                await asyncio.sleep(engine_mod.jitter_ms())
+            per_probe[probe["ident"]] = outs
+            targets[probe["ident"]] = {
+                "best": _best_latency(probe, outs),
+                "cap": probe["max_latency"],
+                "url": probe["url"],
+            }
+        passed = _apply_latency_gate(node, probes, per_probe)
+        latency = {"ok": passed, "targets": targets,
+                   "latency_ms": max([t["best"] for t in targets.values() if t["best"]] or [0]) or None}
     results = []
     for group in groups:
         outcome = await engine_mod.engine_manager.test(node, group)

@@ -84,12 +84,11 @@ async def dashboard():
     nodes_total = db.row(pool)["c"]
     unavailable = db.row(pool + " AND n.status='unavailable'")["c"]
     available = db.row(pool + " AND n.status='available'")["c"]
-    degraded = db.row(pool + " AND n.status='degraded'")["c"]
     selected, stats = builder.collect_nodes()
-    ceiling = db.get_int("sub_max_latency", 500)
+    ceiling = db.get_int("sub_max_latency", 1000)
+    ceiling2 = db.get_int("sub_max_latency2", 1000)
     latests = builder.latest_latency()
-    probe_passed = sum(1 for p in latests.values()
-                       if p["ok"] and (not ceiling or (p["latency_ms"] or 0) <= ceiling))
+    probe_passed = sum(1 for p in latests.values() if p["ok"])
     last_batch = db.row("SELECT * FROM batches ORDER BY id DESC LIMIT 1")
     logs = db.rows("SELECT * FROM logs ORDER BY id DESC LIMIT 12")
     now = datetime.now().astimezone()
@@ -139,7 +138,6 @@ async def dashboard():
         "nodes_total": nodes_total,
         "nodes_available": available,
         "nodes_unavailable": unavailable,
-        "nodes_degraded": degraded,
         "nodes_qualified": len(selected),
         "groups": _group_stats(),
         "airport_list": airports,
@@ -151,8 +149,11 @@ async def dashboard():
         "latency_probe": {
             "enabled": True,
             "url": db.get("latency_test_url"),
+            "url2": db.get("latency_test_url2"),
             "status": db.get("latency_test_status"),
             "ceiling": ceiling,
+            "ceiling2": ceiling2,
+            "rounds": 2,
             "passed": probe_passed,
         },
         "fetch": fetch_block,
@@ -369,7 +370,8 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
     enabled_groups = [g for g in groups.values() if g["enabled"]]
     results = builder.latest_results()
     latests = builder.latest_latency()
-    ceiling = db.get_int("sub_max_latency", 500)
+    ceiling = db.get_int("sub_max_latency", 1000)
+    ceiling2 = db.get_int("sub_max_latency2", 1000)
     required_idents = [t for t in (db.get("sub_required_tags") or "").split(",") if t]
     idents = _node_names()
     items = []
@@ -379,23 +381,27 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
         display = (f"{node['airport_name']}｜{'·'.join(passed_idents)}｜{node['raw_name']}"
                    if passed_idents else f"{node['airport_name']}｜未通过｜{node['raw_name']}")
         node["display_name"] = display
-        probe = latests.get(node["id"])
-        # Publish gate is the latency value only: a node is excluded solely when its
-        # measured latency is above the ceiling. Status/fail_count no longer matter.
-        latency = (probe["latency_ms"] if probe and probe["ok"] and probe.get("latency_ms")
-                   else (node["latency"] or 0))
+        probe = latests.get(node["id"]) or {}
+        targets = probe.get("targets") or {}
+        node["latency_targets"] = {
+            "G": {"best": (targets.get("G") or {}).get("best"), "cap": ceiling},
+            "W": {"best": (targets.get("W") or {}).get("best"), "cap": ceiling2},
+        }
+        # Publish gate: BOTH targets need a passing round within their own ceiling.
+        good = all(node["latency_targets"][t]["best"] is not None for t in ("G", "W"))
+        latency = probe.get("latency_ms") or (node["latency"] or 0)
         node["latency"] = latency
-        required_tags = required_idents
-        missing_tags = [t for t in required_tags if t not in passed_idents]
+        missing_tags = [t for t in required_idents if t not in passed_idents]
         node["missing_tags"] = missing_tags
-        node["publishable"] = (bool(latency) and (not ceiling or latency <= ceiling)
-                               and not missing_tags)
+        node["publishable"] = bool(good) and not missing_tags
         if node["publishable"]:
             node["publish_reason"] = "下发"
-        elif not latency:
+        elif not targets:
             node["publish_reason"] = "无可用延迟数据"
-        elif ceiling and latency > ceiling:
-            node["publish_reason"] = f"延迟 {latency}ms 超过上限 {ceiling}ms"
+        elif node["latency_targets"]["G"]["best"] is None:
+            node["publish_reason"] = f"Google 未通过（上限 {ceiling}ms）"
+        elif node["latency_targets"]["W"]["best"] is None:
+            node["publish_reason"] = f"Wikipedia 未通过（上限 {ceiling2}ms）"
         else:
             node["publish_reason"] = f"缺少标签：{'、'.join(missing_tags)}"
         node["results"] = {
@@ -483,22 +489,30 @@ async def node_detail(node_id: int):
            WHERE r.node_id=? ORDER BY r.id DESC LIMIT 60""", (node_id,))
     node["latency_history"] = db.rows(
         "SELECT * FROM latency_results WHERE node_id=? ORDER BY id DESC LIMIT 60", (node_id,))
-    latest = node["latency_history"][0] if node["latency_history"] else None
-    ceiling = db.get_int("sub_max_latency", 500)
-    latency = (latest["latency_ms"] if latest and latest["ok"] and latest["latency_ms"]
-               else (node["latency"] or 0))
-    node["latency"] = latency
+    summary = builder.latest_latency().get(node_id) or {}
+    ceiling = db.get_int("sub_max_latency", 1000)
+    ceiling2 = db.get_int("sub_max_latency2", 1000)
+    node["latency_targets"] = {
+        "G": {"best": ((summary.get("targets") or {}).get("G") or {}).get("best"), "cap": ceiling,
+              "url": db.get("latency_test_url")},
+        "W": {"best": ((summary.get("targets") or {}).get("W") or {}).get("best"), "cap": ceiling2,
+              "url": db.get("latency_test_url2")},
+    }
+    node["latency"] = summary.get("latency_ms") or (node["latency"] or 0)
     required = [t for t in (db.get("sub_required_tags") or "").split(",") if t]
     node_idents = set(_node_names().get(node_id, []))
     missing = [t for t in required if t not in node_idents]
     node["missing_tags"] = missing
-    node["publishable"] = bool(latency) and (not ceiling or latency <= ceiling) and not missing
+    good = all(node["latency_targets"][t]["best"] is not None for t in ("G", "W"))
+    node["publishable"] = bool(good) and not missing
     if node["publishable"]:
         node["publish_reason"] = "下发"
-    elif not latency:
+    elif not summary.get("targets"):
         node["publish_reason"] = "无可用延迟数据"
-    elif ceiling and latency > ceiling:
-        node["publish_reason"] = f"延迟 {latency}ms 超过上限 {ceiling}ms"
+    elif node["latency_targets"]["G"]["best"] is None:
+        node["publish_reason"] = f"Google 未通过（上限 {ceiling}ms）"
+    elif node["latency_targets"]["W"]["best"] is None:
+        node["publish_reason"] = f"Wikipedia 未通过（上限 {ceiling2}ms）"
     else:
         node["publish_reason"] = f"缺少标签：{'、'.join(missing)}"
     return node
@@ -554,6 +568,7 @@ async def subscription_info(request: Request):
             "sub_name": db.get("sub_name"),
             "sub_token": token,
             "sub_max_latency": db.get_int("sub_max_latency"),
+            "sub_max_latency2": db.get_int("sub_max_latency2"),
             "sub_max_nodes": db.get_int("sub_max_nodes"),
             "sub_min_groups": db.get_int("sub_min_groups"),
             "sub_include_unavailable": db.get("sub_include_unavailable") == "1",
@@ -583,6 +598,8 @@ async def update_subscription(payload: SubSettings):
         db.set_setting("sub_name", payload.sub_name.strip())
     if payload.sub_max_latency is not None:
         db.set_setting("sub_max_latency", payload.sub_max_latency)
+    if payload.sub_max_latency2 is not None:
+        db.set_setting("sub_max_latency2", payload.sub_max_latency2)
     if payload.sub_max_nodes is not None:
         db.set_setting("sub_max_nodes", payload.sub_max_nodes)
     if payload.sub_min_groups is not None:
@@ -621,8 +638,8 @@ async def preview_subscription(fmt: str = "clash"):
 SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "subnet_concurrency",
                 "request_interval_min_ms", "request_interval_max_ms", "test_timeout",
                 "test_interval_minutes", "fail_threshold", "history_days", "dispersion_mask",
-                "sub_name", "latency_test_url", "latency_test_status",
-                "latency_test_timeout", "sub_max_latency",
+                "sub_name", "latency_test_url", "latency_test_url2", "latency_test_status",
+                "latency_test_timeout", "sub_max_latency", "sub_max_latency2",
                 "sub_publish_enabled", "sub_publish_time", "sub_publish_mode",
                 "sub_publish_interval_minutes", "sub_required_tags"]
 

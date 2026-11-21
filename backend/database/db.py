@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS latency_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     node_id INTEGER NOT NULL,
     batch_id INTEGER,
+    target TEXT NOT NULL DEFAULT 'G',
     ok INTEGER NOT NULL,
     latency_ms INTEGER,
     error_type TEXT,
@@ -203,6 +204,18 @@ def init_db() -> None:
     # The latency probe is the publish gate and always runs: force it on for old databases
     if get("latency_test_enabled") != "1":
         set_setting("latency_test_enabled", "1")
+    # Migration: dual-target latency gate (Google + Wikipedia)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(latency_results)").fetchall()}
+    if "target" not in cols:
+        conn.execute("ALTER TABLE latency_results ADD COLUMN target TEXT NOT NULL DEFAULT 'G'")
+    conn.commit()
+    if get("latency_dual_enabled") != "1":
+        set_setting("latency_test_url2", config.DEFAULT_SETTINGS["latency_test_url2"])
+        set_setting("sub_max_latency2", config.DEFAULT_SETTINGS["sub_max_latency2"])
+        if get("sub_max_latency") in (None, "", "500"):
+            set_setting("sub_max_latency", "1000")
+        set_setting("latency_dual_enabled", "1")
+        append_log("INFO", "settings", "dual latency targets enabled (Google + Wikipedia, 1000ms each)")
     # Migration: "degraded" is no longer a state; status is just available/unavailable
     conn.execute("UPDATE nodes SET status='available' WHERE status='degraded'")
     conn.commit()

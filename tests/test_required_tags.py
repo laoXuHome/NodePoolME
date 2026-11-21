@@ -26,8 +26,9 @@ def _seed():
             "VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))",
             (ap, fp, "ss", "1.1.1.1", 443,
              db.dumps({"cipher": "aes-128-gcm", "password": "pw"}), fp, "available", 100, 0))
-        db.execute("INSERT INTO latency_results (node_id,batch_id,ok,latency_ms,error_type,message,ts) "
-                   "VALUES (?,NULL,1,100,NULL,'',?)", (ids[fp], db.now()))
+        for target in ("G", "W"):
+            db.execute("INSERT INTO latency_results (node_id,target,batch_id,ok,latency_ms,error_type,message,ts) "
+                       "VALUES (?,?,NULL,1,100,NULL,'',?)", (ids[fp], target, db.now()))
     g1 = db.row("SELECT id FROM test_groups WHERE ident='G'")["id"]
     g2 = db.row("SELECT id FROM test_groups WHERE ident='TG'")["id"]
     db.execute("INSERT INTO results (node_id,group_id,batch_id,ok,latency_ms,error_type,message,ts) "
@@ -42,6 +43,7 @@ def test_required_tags():
     db.init_db()
     _seed()
     db.set_setting("sub_max_latency", 500)
+    db.set_setting("sub_max_latency2", 500)
     db.set_setting("sub_required_tags", "")
     names = lambda: sorted(n["raw_name"] for n in builder.collect_nodes()[0])
     assert names() == ["one", "two"]
@@ -52,6 +54,7 @@ def test_required_tags():
     db.set_setting("sub_required_tags", "TG")
     assert names() == ["one"]
     db.set_setting("sub_max_latency", 80)
+    db.set_setting("sub_max_latency2", 80)
     assert names() == []
 
 

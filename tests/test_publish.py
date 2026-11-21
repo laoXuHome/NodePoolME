@@ -37,8 +37,9 @@ def test_publish_selected_node():
         (airport, "n1", "ss", "1.1.1.1", 443, db.dumps({"cipher": "aes-128-gcm", "password": "pw"}),
          "fp1", "available", 120, 0))
     # Selection is gated by the latency probe; group rows only add ident segments
-    db.execute("INSERT INTO latency_results (node_id, batch_id, ok, latency_ms, error_type, message, ts) "
-               "VALUES (?,?,?,?,?,?,?)", (node_id, None, 1, 120, None, "", db.now()))
+    for target in ("G", "W"):
+        db.execute("INSERT INTO latency_results (node_id, target, batch_id, ok, latency_ms, error_type, message, ts) "
+                   "VALUES (?,?,?,?,?,?,?,?)", (node_id, target, None, 1, 120, None, "", db.now()))
     groups = db.rows("SELECT id FROM test_groups WHERE enabled=1")
     for group in groups:
         db.execute("INSERT INTO results (node_id, group_id, batch_id, ok, latency_ms, error_type, message, ts) "

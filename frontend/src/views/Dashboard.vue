@@ -140,7 +140,7 @@ onUnmounted(() => clearInterval(timer.value))
           <div><span class="k">不可用</span><span class="v" :class="{ bad: data.nodes_unavailable }">{{ data.nodes_unavailable }}</span></div>
         </div>
         <div class="np-board-foot">
-          可下发 <b>{{ data.nodes_qualified }}</b> 个（{{ qualifyPct }}%），上限 {{ data.latency_probe?.ceiling || '不限' }}ms
+          可下发 <b>{{ data.nodes_qualified }}</b> 个（{{ qualifyPct }}%），上限 G {{ data.latency_probe?.ceiling || '不限' }}ms / W {{ data.latency_probe?.ceiling2 || '不限' }}ms
         </div>
       </div>
 
@@ -211,8 +211,8 @@ onUnmounted(() => clearInterval(timer.value))
               {{ data.runtime.phase }} · 上次启动 {{ formatTs(data.runtime.last_cycle_at) }}
             </div>
             <div class="np-muted" style="margin:0 0 10px">
-              延迟检测（每轮必跑）<span class="np-mono">{{ data.latency_probe?.url }}</span> ·
-              期望 {{ data.latency_probe?.status }} · 上限 {{ data.latency_probe?.ceiling || '不限' }}ms ·
+              延迟检测（每轮必跑，各 2 轮）<span class="np-mono">{{ data.latency_probe?.url }} / {{ data.latency_probe?.url2 }}</span> ·
+              期望 {{ data.latency_probe?.status }} · 上限 G {{ data.latency_probe?.ceiling || '不限' }}ms · W {{ data.latency_probe?.ceiling2 || '不限' }}ms ·
               通过 {{ data.latency_probe?.passed }} 个节点 ·
               定时下发 {{ publishText }}
             </div>

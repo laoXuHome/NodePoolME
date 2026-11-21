@@ -32,9 +32,11 @@ def _node(airport: int, name: str, fingerprint: str) -> int:
 
 
 def _probe(node_id: int, ok: bool, latency: int) -> None:
-    db.execute("INSERT INTO latency_results (node_id, batch_id, ok, latency_ms, error_type, message, ts) "
-               "VALUES (?,?,?,?,?,?,?)",
-               (node_id, None, 1 if ok else 0, latency, None if ok else "slow", "", db.now()))
+    for target in ("G", "W"):
+        db.execute("INSERT INTO latency_results (node_id, target, batch_id, ok, latency_ms, error_type, message, ts) "
+                   "VALUES (?,?,?,?,?,?,?,?)",
+                   (node_id, target, None, 1 if ok else 0, latency,
+                    None if ok else "slow", "", db.now()))
 
 
 def _group_pass(node_id: int, group_id: int) -> None:
@@ -45,6 +47,7 @@ def _group_pass(node_id: int, group_id: int) -> None:
 def test_publish_gated_by_latency_ceiling():
     db.init_db()
     db.set_setting("sub_max_latency", 500)
+    db.set_setting("sub_max_latency2", 500)
     airport = _airport()
     a = _node(airport, "快速-有标识", "fp-a")
     b = _node(airport, "慢速", "fp-b")
@@ -61,18 +64,19 @@ def test_publish_gated_by_latency_ceiling():
     assert len(nodes) == 2, names
     assert any(n == "星链｜G｜快速-有标识" for n in names), names   # short ident in the middle
     assert any(n == "星链｜快速-无标识" for n in names), names            # no group hit: airport + name
-    assert stats["skipped"]["slow"] == 1 and stats["skipped"]["no_result"] == 1, stats
+    assert stats["skipped"]["latency_fail"] == 1 and stats["skipped"]["no_result"] == 1, stats
 
 
 def test_probe_config_and_toggle():
     db.init_db()
-    probe = manager.latency_probe()
-    assert probe and probe["max_latency"] == 500
-    assert probe["url"] == "http://www.google.com/generate_204"
+    probes = manager.latency_probes()
+    assert [p["ident"] for p in probes] == ["G", "W"]
+    assert probes[0]["url"].endswith("google.com/favicon.ico")
+    assert probes[1]["url"].endswith("wikipedia.org/favicon.ico")
+    assert probes[0]["max_latency"] == 1000 and probes[1]["max_latency"] == 1000
     db.set_setting("latency_test_url", "https://www.gstatic.com/generate_204")
     db.set_setting("latency_test_enabled", "0")   # legacy value is ignored
-    assert manager.latency_probe() is not None
-    assert manager.latency_probe()["url"].startswith("https://")
+    assert manager.latency_probes()[0]["url"].startswith("https://")
 
 
 if __name__ == "__main__":

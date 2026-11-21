@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NodePoolME"
-VERSION = "1.2.9"
+VERSION = "1.2.10"
 
 DATA_DIR = Path(os.getenv("NODEPOOL_DATA_DIR", "./data")).resolve()
 CONFIG_DIR = Path(os.getenv("NODEPOOL_CONFIG_DIR", str(DATA_DIR / "config"))).resolve()
@@ -65,9 +65,11 @@ DEFAULT_SETTINGS = {
     "history_days": "30",
     "sub_name": "NodePool Unified",
     "sub_token": "",
-    "sub_max_latency": "500",
+    "sub_max_latency": "1000",
+    "sub_max_latency2": "1000",
     "latency_test_enabled": "1",   # kept for compatibility: the probe is always on
-    "latency_test_url": "http://www.google.com/generate_204",
+    "latency_test_url": "http://www.google.com/favicon.ico",
+    "latency_test_url2": "http://www.wikipedia.org/favicon.ico",
     "latency_test_status": "200-399",
     "latency_test_timeout": "8",
     "sub_publish_enabled": "0",

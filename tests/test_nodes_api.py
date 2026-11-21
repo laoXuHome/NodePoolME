@@ -29,10 +29,11 @@ def _seed():
             "latency,fail_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))",
             (airport, name, "ss", "1.1.1.1", 443,
              db.dumps({"cipher": "aes-128-gcm", "password": "pw"}), fp, "available", 0, 0))
-    db.execute("INSERT INTO latency_results (node_id,batch_id,ok,latency_ms,error_type,message,ts) "
-               "VALUES (?,?,?,?,?,?,?)", (ids["fp-fast"], None, 1, 180, None, "", db.now()))
-    db.execute("INSERT INTO latency_results (node_id,batch_id,ok,latency_ms,error_type,message,ts) "
-               "VALUES (?,?,?,?,?,?,?)", (ids["fp-slow"], None, 1, 720, None, "", db.now()))
+    for fp, latency in (("fp-fast", 180), ("fp-slow", 720)):
+        for target in ("G", "W"):
+            db.execute("INSERT INTO latency_results (node_id,target,batch_id,ok,latency_ms,error_type,message,ts) "
+                       "VALUES (?,?,?,?,?,?,?,?)",
+                       (ids[fp], target, None, 1, latency, None, "", db.now()))
     return ids
 
 
@@ -49,7 +50,7 @@ def test_filters_and_reasons():
         assert yes["items"][0]["publish_reason"] == "下发"
         assert no["total"] == 2, no
         reasons = {i["raw_name"]: i["publish_reason"] for i in no["items"]}
-        assert "超过上限" in reasons["慢"], reasons
+        assert "未通过" in reasons["慢"] and "500" in reasons["慢"], reasons
         assert reasons["未测"] == "无可用延迟数据", reasons
 
         # selecting a tag group alone lists nodes that hit it (regression: str/int key mismatch)
