@@ -57,7 +57,12 @@ async function toggle(row, enabled) {
 async function fetchNow(row) {
   try {
     const res = await api.post(`/api/airports/${row.id}/fetch`)
-    ElMessage.success(`拉取成功：${res.total} 个节点（新增 ${res.inserted}）`)
+    const parse = res.parse || {}
+    const detail = parse.total ? `，源里 ${parse.total} 条，解析 ${parse.parsed} 条` : ''
+    const skipped = parse.unsupported && Object.keys(parse.unsupported).length
+      ? `；跳过 ${Object.entries(parse.unsupported).map(([k, v]) => `${k}×${v}`).join('、')}`
+      : ''
+    ElMessage.success(`拉取成功：${res.total} 个节点（新增 ${res.inserted}${detail}${skipped}）`)
     await load()
   } catch (e) { ElMessage.error(e.message) }
 }

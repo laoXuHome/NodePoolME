@@ -217,7 +217,9 @@ Google 与 Gemini **不**默认启用，需要时通过「新增检测组」添�
 ### 引擎
 
 - **mihomo（默认）**：容器内启动 Mihomo 内核，按工作块（每 200 个节点）生成配置，为块内每个节点绑定一个回环 SOCKS 监听口，然后并发发起真实 HTTP 请求，记录状态码、响应体与耗时。
-  - 支持 ss / vmess / vless(含 REALITY) / trojan / hysteria2 / tuic / socks5 / http。
+  - 支持 ss / ssr / vmess（含 h2、ws、grpc） / vless（含 REALITY） / trojan / hysteria(v1) / hysteria2 / tuic / anytls / socks5 / http。
+  - 订阅页按 User-Agent 区分格式：先用自带 UA，解析不出节点时自动依次换成 Clash / Loon / Shadowrocket 的 UA 重试。
+  - 拉取结果会记录「源里多少条、解析多少条、按类型跳过多少、去重多少」，在机场「历史」里可直接看到为什么少节点。
   - 内核只监听 `127.0.0.1`，不对外暴露任何端口。
 - **tcp（降级）**：内核不可用时自动回退，只验证 `server:port` 能否建立 TCP 连接（不校验状态码/响应体，日志会标注）。也可用 `NODEPOOL_TEST_ENGINE=tcp` 强制启用。
 

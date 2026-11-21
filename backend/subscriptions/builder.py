@@ -140,7 +140,8 @@ def build_clash(nodes: list[dict], sub_name: str) -> str:
 
 
 def build_singbox(nodes: list[dict], sub_name: str) -> str:
-    outbounds = [parser.singbox_outbound(n, n["display_name"]) for n in nodes]
+    built = [parser.singbox_outbound(n, n["display_name"]) for n in nodes]
+    outbounds = [o for o in built if o]   # some protocols (ssr) have no sing-box equivalent
     tags = [o["tag"] for o in outbounds]
     selector = {"type": "selector", "tag": sub_name, "outbounds": tags + (["direct"] if tags else []),
                 "default": tags[0] if tags else "direct"}

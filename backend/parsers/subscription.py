@@ -15,8 +15,9 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 import yaml
 
-SCHEMES = ("ss://", "ssr://", "vmess://", "vless://", "trojan://", "hysteria2://", "hy2://",
-           "tuic://", "socks5://", "socks://", "http://", "https://")
+SCHEMES = ("ss://", "ssr://", "vmess://", "vless://", "trojan://", "hysteria://",
+           "hysteria2://", "hy2://", "tuic://", "anytls://", "socks5://", "socks://",
+           "http://", "https://", "wireguard://", "wg://")
 
 REGION_HINTS = {
     "香港": "HK", "深港": "HK", "沪港": "HK", "京港": "HK", "hk": "HK", "hong kong": "HK", "hongkong": "HK",
@@ -293,8 +294,68 @@ def parse_socks(link: str) -> dict | None:
                  unquote(parts.fragment))
 
 
+def parse_ssr(link: str) -> dict | None:
+    """ssr:// base64(host:port:protocol:method:obfs:base64url(password)/?remarks=...)."""
+    decoded = b64decode(link[6:])
+    if not decoded:
+        return None
+    main, _, query = decoded.partition("/?")
+    if not query:
+        main, _, query = decoded.partition("?")
+    fields = main.split(":")
+    if len(fields) < 6:
+        return None
+    host, port, protocol, method, obfs = fields[0], fields[1], fields[2], fields[3], fields[4]
+    password_raw = ":".join(fields[5:])
+    password = b64decode(password_raw) or password_raw
+    q = {k: v[0] for k, v in parse_qs(query).items()} if query else {}
+    params = {
+        "cipher": method, "password": password, "protocol": protocol,
+        "protocol-param": b64decode(q.get("protoparam", "")) or q.get("protoparam", ""),
+        "obfs": obfs, "obfs-param": b64decode(q.get("obfsparam", "")) or q.get("obfsparam", ""),
+    }
+    name = b64decode(q.get("remarks", "")) or q.get("remarks", "")
+    return _make("ssr", host, _int(port), params, name)
+
+
+def parse_hysteria(link: str) -> dict | None:
+    """hysteria v1: hysteria://auth@host:port?peer=sni&insecure=1&upmbps=..&downmbps=.."""
+    parts = urlsplit(link)
+    auth = unquote(parts.username or "") or unquote(parts.password or "")
+    server = parts.hostname or ""
+    port = _int(parts.port)
+    query = {k: v[0] for k, v in parse_qs(parts.query).items()}
+    params = {
+        "password": auth,
+        "sni": query.get("peer") or query.get("sni") or "",
+        "skip-cert-verify": _bool(query.get("insecure", "1")),
+        "up": query.get("upmbps") or query.get("up") or "50",
+        "down": query.get("downmbps") or query.get("down") or "100",
+    }
+    if query.get("obfs"):
+        params["obfs"] = query["obfs"]
+    if query.get("alpn"):
+        params["alpn"] = query["alpn"]
+    return _make("hysteria", server, port, params, unquote(parts.fragment))
+
+
+def parse_anytls(link: str) -> dict | None:
+    parts = urlsplit(link)
+    password = unquote(parts.username or "") or unquote(parts.password or "")
+    server = parts.hostname or ""
+    port = _int(parts.port)
+    query = {k: v[0] for k, v in parse_qs(parts.query).items()}
+    params = {
+        "password": password,
+        "sni": query.get("sni") or query.get("peer") or "",
+        "skip-cert-verify": _bool(query.get("insecure", "1")),
+        "fingerprint": query.get("fp") or "",
+    }
+    return _make("anytls", server, port, params, unquote(parts.fragment))
+
+
 PARSERS = {
-    "ss": parse_ss,
+    "ss": parse_ss, "ssr": parse_ssr, "hysteria": parse_hysteria, "anytls": parse_anytls,
     "vmess": parse_vmess,
     "vless": parse_vless,
     "trojan": parse_trojan,
@@ -306,6 +367,11 @@ PARSERS = {
     "http": parse_socks,
     "https": parse_socks,
 }
+
+
+def parse_wireguard(link: str) -> dict | None:
+    """WireGuard links need a full key pair; accepted only via Clash YAML for now."""
+    return None
 
 
 def parse_link(link: str) -> dict | None:
@@ -329,18 +395,23 @@ def clash_to_node(proxy: dict) -> dict | None:
     if not isinstance(proxy, dict):
         return None
     ptype = str(proxy.get("type", "")).lower()
-    mapping = {"ss": "ss", "vmess": "vmess", "vless": "vless", "trojan": "trojan",
-               "hysteria2": "hysteria2", "tuic": "tuic", "socks5": "socks5", "http": "http"}
+    mapping = {"ss": "ss", "ssr": "ssr", "vmess": "vmess", "vless": "vless",
+               "trojan": "trojan", "hysteria": "hysteria", "hysteria2": "hysteria2",
+               "tuic": "tuic", "anytls": "anytls", "socks5": "socks5", "http": "http"}
     if ptype not in mapping:
         return None
     params: dict = {}
     for key in ("cipher", "password", "uuid", "alterId", "flow", "sni", "servername",
                 "network", "skip-cert-verify", "obfs", "obfs-password", "udp-relay-mode",
-                "congestion-controller", "username", "tls"):
+                "congestion-controller", "username", "tls", "protocol", "protocol-param",
+                "obfs-param", "up", "down", "auth-str", "client-fingerprint", "fingerprint",
+                "plugin", "plugin-opts"):
         if key in proxy:
             params[key] = proxy[key]
     if proxy.get("servername") and not params.get("sni"):
         params["sni"] = proxy["servername"]
+    if proxy.get("auth-str") and not params.get("password"):
+        params["password"] = proxy["auth-str"]
     ws = proxy.get("ws-opts") or {}
     if isinstance(ws, dict):
         params["path"] = ws.get("path") or "/"
@@ -361,13 +432,14 @@ def clash_to_node(proxy: dict) -> dict | None:
                  str(proxy.get("name", "")), proxy.get("region"))
 
 
-def parse_text(text: str) -> tuple[list[dict], list[str]]:
-    """Return (nodes, errors). Handles plain links, base64 blobs and Clash YAML."""
+def parse_text_full(text: str) -> tuple[list[dict], list[str], dict]:
+    """Return (nodes, errors, stats). stats counts what we saw vs what we could use."""
     nodes: list[dict] = []
     errors: list[str] = []
+    stats = {"total": 0, "parsed": 0, "unsupported": {}}
     text = (text or "").strip()
     if not text:
-        return nodes, ["empty subscription"]
+        return nodes, ["empty subscription"], stats
 
     if text.startswith("proxies:") or "\nproxies:" in text or text.startswith("proxy-providers:"):
         try:
@@ -377,13 +449,17 @@ def parse_text(text: str) -> tuple[list[dict], list[str]]:
         proxies = doc.get("proxies") if isinstance(doc, dict) else None
         if not isinstance(proxies, list):
             return nodes, ["no proxies list in yaml"]
+        stats["total"] = len(proxies)
         for item in proxies:
             node = clash_to_node(item)
             if node:
                 nodes.append(node)
             else:
-                errors.append(f"unsupported proxy: {item.get('type')}")
-        return nodes, errors
+                kind = str(item.get("type") or "unknown") if isinstance(item, dict) else "unknown"
+                stats["unsupported"][kind] = stats["unsupported"].get(kind, 0) + 1
+                errors.append(f"unsupported proxy: {kind}")
+        stats["parsed"] = len(nodes)
+        return nodes, errors, stats
 
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     if not any(l.lower().startswith("://") or "://" in l for l in lines):
@@ -395,14 +471,25 @@ def parse_text(text: str) -> tuple[list[dict], list[str]]:
     for line in lines:
         if line.startswith("//") or line.startswith("#"):
             continue
+        if "://" not in line:
+            continue
+        stats["total"] += 1
         node = parse_link(line)
         if node:
             nodes.append(node)
-        elif "://" in line:
+        else:
+            scheme = line.split("://", 1)[0].lower()
+            stats["unsupported"][scheme] = stats["unsupported"].get(scheme, 0) + 1
             errors.append(f"unsupported link: {line[:60]}")
+    stats["parsed"] = len(nodes)
     if not nodes and not errors:
         errors.append("no supported node found")
-    return nodes, errors[:10]
+    return nodes, errors[:10], stats
+
+
+def parse_text(text: str) -> tuple[list[dict], list[str]]:
+    nodes, errors, _ = parse_text_full(text)
+    return nodes, errors
 
 
 # --------------------------------------------------------------------------------------------
@@ -414,7 +501,19 @@ def clash_proxy(node: dict, name: str) -> dict:
     t = node["protocol"]
     base = {"name": name, "type": t, "server": node["server"], "port": node["port"],
             "udp": True, "skip-cert-verify": bool(p.get("skip-cert-verify", True))}
-    if t == "ss":
+    if t == "ssr":
+        base.update({"cipher": p.get("cipher") or "rc4-md5", "password": p.get("password", ""),
+                     "protocol": p.get("protocol") or "origin",
+                     "protocol-param": p.get("protocol-param") or "",
+                     "obfs": p.get("obfs") or "plain", "obfs-param": p.get("obfs-param") or ""})
+    elif t == "hysteria":
+        base.update({"auth-str": p.get("password", ""), "up": p.get("up") or "50",
+                     "down": p.get("down") or "100",
+                     "sni": p.get("sni") or node["server"]})
+    elif t == "anytls":
+        base.update({"password": p.get("password", ""), "sni": p.get("sni") or node["server"],
+                     "client-fingerprint": p.get("fingerprint") or "chrome"})
+    elif t == "ss":
         base.update({"cipher": p.get("cipher") or "aes-128-gcm", "password": p.get("password", "")})
         if p.get("plugin"):
             base["plugin"] = p["plugin"]
@@ -422,6 +521,8 @@ def clash_proxy(node: dict, name: str) -> dict:
                 base["plugin-opts"] = p["plugin-opts"]
     elif t == "vmess":
         net = p.get("network") or "tcp"
+        if net == "http":
+            net = "h2"
         base.update({"uuid": p.get("uuid", ""), "alterId": int(p.get("alterId", 0)),
                      "cipher": p.get("cipher") or "auto", "network": net})
         if p.get("security") == "tls":
@@ -490,14 +591,21 @@ def clash_proxy(node: dict, name: str) -> dict:
     return {k: v for k, v in base.items() if v not in (None, "")}
 
 
-def singbox_outbound(node: dict, tag: str) -> dict:
+def singbox_outbound(node: dict, tag: str) -> dict | None:
     p = node["params"]
     t = node["protocol"]
     server = node["server"]
     port = node["port"]
     tls = {"enabled": True, "insecure": True,
            "server_name": p.get("sni") or server}
-    if t == "ss":
+    if t == "ssr":
+        return None   # sing-box has no ShadowsocksR outbound
+    if t == "anytls":
+        out = {"type": "anytls", "password": p.get("password", ""), "tls": tls}
+    elif t == "hysteria":
+        out = {"type": "hysteria", "auth_str": p.get("password", ""), "tls": tls,
+               "up_mbps": _int(p.get("up"), 50), "down_mbps": _int(p.get("down"), 100)}
+    elif t == "ss":
         out = {"type": "shadowsocks", "method": p.get("cipher") or "aes-128-gcm",
                "password": p.get("password", "")}
     elif t == "vmess":
@@ -593,6 +701,20 @@ def to_uri(node: dict) -> str:
             q["host"] = p["host"]
         query = "&".join(f"{k}={v}" for k, v in q.items() if v)
         return f"trojan://{p.get('password','')}@{server}:{port}?{query}#{name}"
+    if t == "ssr":
+        body = f"{server}:{port}:{p.get('protocol','origin')}:{p.get('cipher','rc4-md5')}:{p.get('obfs','plain')}"
+        pw = base64.urlsafe_b64encode(str(p.get("password", "")).encode()).decode().rstrip("=")
+        raw = f"{body}:{pw}/?remarks={name}"
+        return "ssr://" + base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+    if t == "hysteria":
+        q = {"peer": p.get("sni", ""), "insecure": "1",
+             "upmbps": p.get("up") or "50", "downmbps": p.get("down") or "100"}
+        query = "&".join(f"{k}={v}" for k, v in q.items() if v)
+        return f"hysteria://{p.get('password','')}@{server}:{port}?{query}#{name}"
+    if t == "anytls":
+        q = {"sni": p.get("sni", ""), "insecure": "1"}
+        query = "&".join(f"{k}={v}" for k, v in q.items() if v)
+        return f"anytls://{p.get('password','')}@{server}:{port}?{query}#{name}"
     if t == "hysteria2":
         q = {"sni": p.get("sni", ""), "insecure": "1"}
         query = "&".join(f"{k}={v}" for k, v in q.items() if v)

@@ -12,8 +12,14 @@ from backend.parsers import subscription as parser
 MAX_BYTES = 20 * 1024 * 1024
 
 
-async def _download(url: str) -> str:
-    headers = {"User-Agent": config.HTTP_UA, "Accept": "*/*"}
+# Airports often gate content by User-Agent: fall back to common client agents when a
+# response parses into nothing (wrong format or a truncated "generic" profile).
+FALLBACK_UAS = ("clash-verge/v1.19.6", "clash.meta/v1.19.0", "ClashMetaForAndroid/2.10.1",
+                "Loon/3.1.9", "Shadowrocket/1.0", "Mozilla/5.0")
+
+
+async def _download(url: str, ua: str | None = None) -> str:
+    headers = {"User-Agent": ua or config.HTTP_UA, "Accept": "*/*"}
     last_error = ""
     for attempt in range(3):
         try:
@@ -88,12 +94,21 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
     started_at = db.now()
     db.execute("UPDATE airports SET last_attempt_at=? WHERE id=?", (started_at, airport_id))
     try:
-        text = await _download(airport["url"])
-        nodes, errors = parser.parse_text(text)
+        text, used_ua = "", None
+        for ua in (config.HTTP_UA, *FALLBACK_UAS):
+            text = await _download(airport["url"], ua)
+            nodes, errors, parse_stats = parser.parse_text_full(text)
+            if nodes:
+                used_ua = ua
+                break
+        if nodes and used_ua != config.HTTP_UA:
+            db.append_log("INFO", "fetch",
+                          f"{airport['name']}: parsed with fallback UA {used_ua}")
         # de-duplicate inside this airport before touching the database
         uniq: dict[str, dict] = {}
         for node in nodes:
             uniq.setdefault(node["fingerprint"], node)
+        duplicates = len(nodes) - len(uniq)
         if not uniq:
             raise ValueError(f"no supported node parsed ({'; '.join(errors) or 'unknown content'})")
         stats = _upsert(airport_id, list(uniq.values()))
@@ -105,11 +120,23 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
         db.execute(
             "INSERT INTO fetch_logs (airport_id, ts, ok, node_count, duration_ms, message) VALUES (?,?,?,?,?,?)",
             (airport_id, db.now(), 1, stats["total"], duration,
-             f"{trigger}: {stats['inserted']} new, {stats['updated']} updated"),
+             f"{trigger}: {stats['inserted']} new, {stats['updated']} updated; "
+             f"parsed {parse_stats['parsed']}/{parse_stats['total']}"
+             + (f", duplicate {duplicates}" if duplicates else "")
+             + (f", skipped {', '.join(f'{k}×{v}' for k, v in parse_stats['unsupported'].items())}"
+                if parse_stats["unsupported"] else "")
+             + (f", UA {used_ua}" if used_ua and used_ua != config.HTTP_UA else "")),
         )
+        unsupported = parse_stats["unsupported"]
+        if unsupported:
+            errors = [f"{sum(unsupported.values())} nodes skipped: "
+                      + ", ".join(f"{k}×{v}" for k, v in unsupported.items())] + list(errors)
         db.append_log("INFO", "fetch",
-                      f"{airport['name']}: {stats['total']} nodes ({trigger}, {duration}ms)")
-        return {"ok": True, **stats, "duration_ms": duration, "warnings": errors}
+                      f"{airport['name']}: {stats['total']} nodes "
+                      f"(parsed {parse_stats['parsed']}/{parse_stats['total']}"
+                      + (f", duplicate {duplicates}" if duplicates else "") + f", {trigger}, {duration}ms)")
+        return {"ok": True, **stats, "duration_ms": duration, "warnings": errors[:10],
+                "parse": parse_stats, "duplicates": duplicates}
     except Exception as exc:
         duration = int((time.perf_counter() - started) * 1000)
         message = f"{type(exc).__name__}: {exc}"[:300]
