@@ -232,6 +232,9 @@ onMounted(load)
             <el-descriptions-item label="版本">{{ system.version }}</el-descriptions-item>
             <el-descriptions-item label="检测引擎">{{ system.engine }}</el-descriptions-item>
             <el-descriptions-item label="调度器">{{ system.scheduler ? '运行中' : '已停止' }}</el-descriptions-item>
+            <el-descriptions-item label="拉取 UA">
+              <span class="np-mono">{{ system.fetch_ua }}</span>
+            </el-descriptions-item>
             <el-descriptions-item label="数据目录"><span class="np-mono">{{ system.data_dir }}</span></el-descriptions-item>
             <el-descriptions-item label="数据库大小">{{ prettyBytes(system.db_size) }}</el-descriptions-item>
             <el-descriptions-item label="服务器时间">{{ system.time }}</el-descriptions-item>

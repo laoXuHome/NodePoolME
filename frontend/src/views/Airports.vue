@@ -8,6 +8,10 @@ const loading = ref(false)
 const dialog = ref(false)
 const editing = ref(null)
 const form = ref({ name: '', url: '', interval_minutes: 60, daily_time: '', enabled: true })
+const fetchUa = ref('')
+async function loadSystem() {
+  try { fetchUa.value = (await api.get('/api/settings')).system?.fetch_ua || '' } catch (e) { /* ignore */ }
+}
 const logsOpen = ref(false)
 const logs = ref([])
 const logsTitle = ref('')
@@ -84,7 +88,7 @@ async function remove(row) {
   } catch (e) { ElMessage.error(e.message) }
 }
 
-onMounted(load)
+onMounted(() => { load(); loadSystem() })
 </script>
 
 <template>
@@ -92,6 +96,7 @@ onMounted(load)
     <h2 class="np-page-title">机场管理</h2>
     <div class="np-page-desc">
       每个机场独立拉取、独立周期；拉取或解析失败时保留旧缓存，只有完整解析成功才事务性更新。
+      拉取统一使用固定 UA <span class="np-mono">{{ fetchUa || 'clash-verge/v1.19.6' }}</span>（不轮换客户端身份，避免触发机场风控），每次拉取的历史记录里都会写明。
     </div>
 
     <div class="np-toolbar">

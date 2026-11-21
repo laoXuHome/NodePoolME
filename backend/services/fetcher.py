@@ -12,14 +12,9 @@ from backend.parsers import subscription as parser
 MAX_BYTES = 20 * 1024 * 1024
 
 
-# Airports often gate content by User-Agent: fall back to common client agents when a
-# response parses into nothing (wrong format or a truncated "generic" profile).
-FALLBACK_UAS = ("clash-verge/v1.19.6", "clash.meta/v1.19.0", "ClashMetaForAndroid/2.10.1",
-                "Loon/3.1.9", "Shadowrocket/1.0", "Mozilla/5.0")
-
-
-async def _download(url: str, ua: str | None = None) -> str:
-    headers = {"User-Agent": ua or config.HTTP_UA, "Accept": "*/*"}
+async def _download(url: str) -> str:
+    """One fixed UA per request: switching identities repeatedly triggers risk control."""
+    headers = {"User-Agent": config.HTTP_UA, "Accept": "*/*"}
     last_error = ""
     for attempt in range(3):
         try:
@@ -94,16 +89,8 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
     started_at = db.now()
     db.execute("UPDATE airports SET last_attempt_at=? WHERE id=?", (started_at, airport_id))
     try:
-        text, used_ua = "", None
-        for ua in (config.HTTP_UA, *FALLBACK_UAS):
-            text = await _download(airport["url"], ua)
-            nodes, errors, parse_stats = parser.parse_text_full(text)
-            if nodes:
-                used_ua = ua
-                break
-        if nodes and used_ua != config.HTTP_UA:
-            db.append_log("INFO", "fetch",
-                          f"{airport['name']}: parsed with fallback UA {used_ua}")
+        text = await _download(airport["url"])
+        nodes, errors, parse_stats = parser.parse_text_full(text)
         # de-duplicate inside this airport before touching the database
         uniq: dict[str, dict] = {}
         for node in nodes:
@@ -125,7 +112,7 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
              + (f", duplicate {duplicates}" if duplicates else "")
              + (f", skipped {', '.join(f'{k}×{v}' for k, v in parse_stats['unsupported'].items())}"
                 if parse_stats["unsupported"] else "")
-             + (f", UA {used_ua}" if used_ua and used_ua != config.HTTP_UA else "")),
+             + f", UA {config.HTTP_UA}"),
         )
         unsupported = parse_stats["unsupported"]
         if unsupported:

@@ -530,6 +530,7 @@ async def get_settings():
             "engine_error": engine_mod.engine_manager.error,
             "db_size": os.path.getsize(config.DB_PATH) if config.DB_PATH.exists() else 0,
             "scheduler": manager.scheduler.running,
+            "fetch_ua": config.HTTP_UA,
             "time": db.now(),
         },
     }

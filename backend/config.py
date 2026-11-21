@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NodePoolME"
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 DATA_DIR = Path(os.getenv("NODEPOOL_DATA_DIR", "./data")).resolve()
 CONFIG_DIR = Path(os.getenv("NODEPOOL_CONFIG_DIR", str(DATA_DIR / "config"))).resolve()
@@ -24,10 +24,9 @@ MIHOMO_API = os.getenv("NODEPOOL_MIHOMO_API", "http://127.0.0.1:9090")
 MIHOMO_BASE_PORT = int(os.getenv("NODEPOOL_MIHOMO_BASE_PORT", "31000"))
 MIHOMO_BATCH = int(os.getenv("NODEPOOL_MIHOMO_BATCH", "80"))
 
-HTTP_UA = os.getenv(
-    "NODEPOOL_UA",
-    "clash.meta/v1.19.0 NodePoolME/1.0",
-)
+# One fixed client identity: airports score/risk-control repeated UA switching, and
+# Clash-family clients get the most complete node list from most panels.
+HTTP_UA = os.getenv("NODEPOOL_UA", "clash-verge/v1.19.6")
 
 DEFAULT_GROUPS = [
     {
