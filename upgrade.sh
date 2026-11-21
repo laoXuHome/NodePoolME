@@ -29,17 +29,31 @@ fi
 TAG="${IMAGE##*:}"
 echo "==> target image: $IMAGE"
 
+# "latest" is fine for docker pull, but release bundles are published per version tag,
+# so resolve the newest release when the image tag is latest.
+BUNDLE_TAG="$TAG"
+if [ "$TAG" = "latest" ]; then
+  BUNDLE_TAG="$(curl -fsSL --connect-timeout 10 \
+    "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+    | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')" || true
+  if [ -z "$BUNDLE_TAG" ]; then
+    echo "!! cannot resolve latest release tag; pass the version explicitly or retry later" >&2
+    exit 2
+  fi
+  echo "==> latest resolves to release $BUNDLE_TAG"
+fi
+
 pull_ok=0
 echo "==> trying: docker compose pull"
 if docker compose pull; then
   pull_ok=1
 else
-  echo "!! registry pull failed, switching to release bundle for tag $TAG"
+  echo "!! registry pull failed, switching to release bundle for tag $BUNDLE_TAG"
 fi
 
 if [ "$pull_ok" -eq 0 ]; then
-  BUNDLE="nodepoolme-${TAG}-${BUNDLE_ARCH}.tar.gz"
-  URL="https://github.com/${REPO}/releases/download/${TAG}/${BUNDLE}"
+  BUNDLE="nodepoolme-${BUNDLE_TAG}-${BUNDLE_ARCH}.tar.gz"
+  URL="https://github.com/${REPO}/releases/download/${BUNDLE_TAG}/${BUNDLE}"
   TMP="/tmp/${BUNDLE}"
   echo "==> downloading $URL"
   if ! curl -fL --retry 3 --connect-timeout 15 -o "$TMP" "$URL"; then
