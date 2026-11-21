@@ -69,8 +69,7 @@ def collect_nodes() -> tuple[list[dict], dict]:
     latests = latest_latency()
     max_latency = db.get_int("sub_max_latency", 500)
     max_nodes = db.get_int("sub_max_nodes", 0)
-    fail_threshold = db.get_int("fail_threshold", 3)
-    include_unavailable = db.get("sub_include_unavailable") == "1"
+
 
     selected: list[dict] = []
     skipped = {"no_result": 0, "failed_groups": 0, "slow": 0, "unavailable": 0,
@@ -88,16 +87,13 @@ def collect_nodes() -> tuple[list[dict], dict]:
         if not probe:
             skipped["no_result"] += 1
             continue
-        if not probe["ok"]:
+        latency = (probe["latency_ms"] if probe["ok"] and probe.get("latency_ms")
+                   else (node["latency"] or 0))
+        if not latency:
             skipped["latency_fail"] += 1
             continue
-        latency = probe["latency_ms"] or (node["latency"] or 0)
         if max_latency and latency > max_latency:
             skipped["slow"] += 1
-            continue
-        if not include_unavailable and node["fail_count"] >= fail_threshold \
-                and node["status"] == "unavailable":
-            skipped["unavailable"] += 1
             continue
         # Names read as  机场｜GPT·YT·TG｜节点名  (the short ident, not the group's full name)
         idents = [g["ident"] for g in passed]

@@ -114,16 +114,16 @@ onMounted(load)
     </div>
 
     <el-dialog v-model="dialog" :title="editing ? '编辑检测组' : '新增检测组'" width="620px">
-      <el-form label-width="110px">
+      <el-form label-width="96px">
         <el-row :gutter="12">
           <el-col :span="14">
-            <el-form-item label="名称（内部）">
-              <el-input v-model="form.name" placeholder="例如：ChatGPT 或 自定义 CL" />
+            <el-form-item label="名称">
+              <el-input v-model="form.name" placeholder="内部名称，例如 ChatGPT" />
             </el-form-item>
           </el-col>
           <el-col :span="10">
-            <el-form-item label="标识（进入节点名）">
-              <el-input v-model="form.ident" placeholder="例如 G / TG / CL" maxlength="12" />
+            <el-form-item label="标识">
+              <el-input v-model="form.ident" placeholder="进入节点名，如 GPT" maxlength="12" />
             </el-form-item>
           </el-col>
         </el-row>

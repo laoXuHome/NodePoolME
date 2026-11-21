@@ -8,7 +8,7 @@ const total = ref(0)
 const loading = ref(false)
 const groups = ref([])
 const airports = ref([])
-const filters = ref({ q: '', airport_id: null, protocol: '', region: '', status: '', group_id: null,
+const filters = ref({ q: '', airport_id: null, protocol: '', region: '', group_id: null,
                      passed: '', publishable: '', sort: 'latency', limit: 50 })
 const page = ref(1)
 const detail = ref(null)
@@ -38,7 +38,7 @@ async function loadMeta() {
 
 function search() { page.value = 1; load() }
 function reset() {
-  filters.value = { q: '', airport_id: null, protocol: '', region: '', status: '', group_id: null,
+  filters.value = { q: '', airport_id: null, protocol: '', region: '', group_id: null,
                     passed: '', publishable: '', sort: 'latency', limit: 50 }
   page.value = 1
   load()
@@ -144,13 +144,6 @@ onMounted(async () => { await loadMeta(); await load() })
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="96">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.status === 'available' ? 'success' : row.status === 'unavailable' ? 'danger' : 'info'">
-              {{ { available: '可用', unavailable: '不可用', degraded: '降级', unknown: '未测' }[row.status] || row.status }}
-            </el-tag>
-          </template>
-        </el-table-column>
         <el-table-column label="最近检测" width="160">
           <template #default="{ row }">{{ formatTs(row.last_tested_at) }}</template>
         </el-table-column>
@@ -169,7 +162,7 @@ onMounted(async () => { await loadMeta(); await load() })
         <el-descriptions-item label="协议">{{ detail.protocol }}</el-descriptions-item>
         <el-descriptions-item label="服务器">{{ detail.server }}:{{ detail.port }}</el-descriptions-item>
         <el-descriptions-item label="地区">{{ detail.region || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ detail.status }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ { available: '可用', unavailable: '不可用' }[detail.status] || detail.status }}</el-descriptions-item>
         <el-descriptions-item label="是否下发">{{ detail.publishable ? '下发到 /sub/all' : `不下发（${detail.publish_reason || '—'}）` }}</el-descriptions-item>
         <el-descriptions-item label="连续失败">{{ detail.fail_count }}</el-descriptions-item>
         <el-descriptions-item label="最近检测">{{ formatTs(detail.last_tested_at) }}</el-descriptions-item>

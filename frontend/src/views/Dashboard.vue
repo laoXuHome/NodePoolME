@@ -137,7 +137,6 @@ onUnmounted(() => clearInterval(timer.value))
                      :color="data.nodes_unavailable ? '#f79009' : '#12b76a'" />
         <div class="np-board-rows">
           <div><span class="k">可用</span><span class="v ok">{{ data.nodes_available }}</span></div>
-          <div><span class="k">降级</span><span class="v">{{ data.nodes_degraded }}</span></div>
           <div><span class="k">不可用</span><span class="v" :class="{ bad: data.nodes_unavailable }">{{ data.nodes_unavailable }}</span></div>
         </div>
         <div class="np-board-foot">

@@ -378,16 +378,16 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
                    if passed_idents else f"{node['airport_name']}｜未通过｜{node['raw_name']}")
         node["display_name"] = display
         probe = latests.get(node["id"])
-        latency = (probe or {}).get("latency_ms") or (node["latency"] or 0)
+        # Publish gate is the latency value only: a node is excluded solely when its
+        # measured latency is above the ceiling. Status/fail_count no longer matter.
+        latency = (probe["latency_ms"] if probe and probe["ok"] and probe.get("latency_ms")
+                   else (node["latency"] or 0))
         node["latency"] = latency
-        node["publishable"] = bool(probe and probe["ok"]
-                                  and (not ceiling or (probe["latency_ms"] or 0) <= ceiling))
+        node["publishable"] = bool(latency) and (not ceiling or latency <= ceiling)
         if node["publishable"]:
             node["publish_reason"] = "下发"
-        elif not probe:
-            node["publish_reason"] = "无延迟探测记录"
-        elif not probe["ok"]:
-            node["publish_reason"] = f"探测失败：{probe['error_type'] or 'unknown'}"
+        elif not latency:
+            node["publish_reason"] = "无可用延迟数据"
         else:
             node["publish_reason"] = f"延迟 {latency}ms 超过上限 {ceiling}ms"
         node["results"] = {
@@ -412,10 +412,11 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
             return False
         if group_id:
             res = node["results"].get(str(group_id))
-            want = True if passed in (None, "", "1", "ok", "pass") else False
-            if passed is None:
-                return group_id in node["results"]
-            return bool(res and bool(res.get("ok")) == want)
+            # Selecting a group alone means "nodes that hit this tag".
+            want = False if passed in ("0", "no", "fail", "miss") else True
+            if res is None:
+                return False
+            return bool(res.get("ok")) == want
         if publishable in ("1", "0"):
             return node.get("publishable", False) == (publishable == "1")
         if passed == "qualified":

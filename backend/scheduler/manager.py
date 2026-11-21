@@ -125,7 +125,7 @@ def _record_latency(node: dict, batch_id: int | None, outcome) -> None:
     else:
         row = db.row("SELECT fail_count FROM nodes WHERE id=?", (node["id"],))
         fail_count = (row["fail_count"] + 1) if row else 1
-        status = "unavailable" if fail_count >= threshold else "degraded"
+        status = "unavailable" if fail_count >= threshold else "available"
         db.execute(
             """UPDATE nodes SET fail_count=?, status=?, last_tested_at=?, updated_at=? WHERE id=?""",
             (fail_count, status, db.now(), db.now(), node["id"]),
@@ -175,7 +175,7 @@ def _record(node: dict, group: dict, batch_id: int | None, outcome, manage_statu
     else:
         row = db.row("SELECT fail_count FROM nodes WHERE id=?", (node["id"],))
         fail_count = (row["fail_count"] + 1) if row else 1
-        status = "unavailable" if fail_count >= threshold else "degraded"
+        status = "unavailable" if fail_count >= threshold else "available"
         db.execute(
             """UPDATE nodes SET fail_count=?, status=?, last_tested_at=?, updated_at=? WHERE id=?""",
             (fail_count, status, db.now(), db.now(), node["id"]),

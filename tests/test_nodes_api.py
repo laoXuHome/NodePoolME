@@ -39,7 +39,7 @@ def _seed():
 def test_filters_and_reasons():
     with TestClient(app) as client:
         assert client.post("/api/auth/login", json={"password": "test123"}).status_code == 200
-        _seed()
+        ids = _seed()
         db.set_setting("sub_max_latency", 500)
         db.set_setting("latency_test_enabled", "1")
 
@@ -50,7 +50,14 @@ def test_filters_and_reasons():
         assert no["total"] == 2, no
         reasons = {i["raw_name"]: i["publish_reason"] for i in no["items"]}
         assert "超过上限" in reasons["慢"], reasons
-        assert reasons["未测"] == "无延迟探测记录", reasons
+        assert reasons["未测"] == "无可用延迟数据", reasons
+
+        # selecting a tag group alone lists nodes that hit it (regression: str/int key mismatch)
+        group_id = db.row("SELECT id FROM test_groups ORDER BY id LIMIT 1")["id"]
+        db.execute("INSERT INTO results (node_id,group_id,batch_id,ok,latency_ms,error_type,message,ts) "
+                   "VALUES (?,?,NULL,1,180,NULL,'',?)", (ids["fp-fast"], group_id, db.now()))
+        hit = client.get(f"/api/nodes?group_id={group_id}").json()
+        assert hit["total"] == 1 and hit["items"][0]["raw_name"] == "快", hit
 
 
 if __name__ == "__main__":

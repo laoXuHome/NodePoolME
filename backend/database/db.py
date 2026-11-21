@@ -203,6 +203,9 @@ def init_db() -> None:
     # The latency probe is the publish gate and always runs: force it on for old databases
     if get("latency_test_enabled") != "1":
         set_setting("latency_test_enabled", "1")
+    # Migration: "degraded" is no longer a state; status is just available/unavailable
+    conn.execute("UPDATE nodes SET status='available' WHERE status='degraded'")
+    conn.commit()
     # Seed default test groups only on a fresh database
     cur = conn.execute("SELECT COUNT(*) AS c FROM test_groups")
     if cur.fetchone()["c"] == 0:
