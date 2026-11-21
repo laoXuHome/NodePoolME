@@ -174,7 +174,7 @@ onMounted(load)
           <el-switch v-model="form.enabled" />
         </el-form-item>
       </el-form>
-      <div class="np-muted">延迟 0 表示不限制。停用的检测组不参与下一批合格判断，也不显示其标识。</div>
+      <div class="np-muted">延迟 0 表示不限制。检测组只决定节点名里的代号，不决定是否下发；是否下发由「系统设置 → 延迟检测」的延迟上限决定。</div>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
         <el-button type="primary" @click="submit">保存</el-button>

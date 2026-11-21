@@ -83,13 +83,30 @@ def _semaphore_map_factory():
     return {}
 
 
-# ---------------------------------------------------------------------------- results
-def _record(node: dict, group: dict, batch_id: int | None, outcome) -> None:
+# ---------------------------------------------------------------------------- latency probe
+def latency_probe() -> dict | None:
+    """The publish gate: every node is measured against this URL each cycle."""
+    if db.get("latency_test_enabled", "1") != "1":
+        return None
+    return {
+        "id": 0,
+        "name": "延迟检测",
+        "ident": "L",
+        "url": db.get("latency_test_url") or "http://www.google.com/generate_204",
+        "method": "GET",
+        "timeout": db.get_int("latency_test_timeout", 8),
+        "expect_status": db.get("latency_test_status") or "200-399",
+        "expect_body": "",
+        "max_latency": db.get_int("sub_max_latency", 500),
+    }
+
+
+def _record_latency(node: dict, batch_id: int | None, outcome) -> None:
     ok = 1 if outcome.ok else 0
     db.execute(
-        """INSERT INTO results (node_id, group_id, batch_id, ok, latency_ms, error_type, message, ts)
-           VALUES (?,?,?,?,?,?,?,?)""",
-        (node["id"], group["id"], batch_id, ok, outcome.latency_ms, outcome.error_type,
+        """INSERT INTO latency_results (node_id, batch_id, ok, latency_ms, error_type, message, ts)
+           VALUES (?,?,?,?,?,?,?)""",
+        (node["id"], batch_id, ok, outcome.latency_ms, outcome.error_type,
          (outcome.message or "")[:300], db.now()),
     )
     threshold = db.get_int("fail_threshold", 3)
@@ -109,8 +126,55 @@ def _record(node: dict, group: dict, batch_id: int | None, outcome) -> None:
         )
 
 
+async def _latency_task(nodes: list[dict], probe: dict, batch_id: int, global_sem,
+                        counters: dict) -> None:
+    for node in nodes:
+        try:
+            async with global_sem:
+                await asyncio.sleep(engine_mod.jitter_ms())
+                outcome = await engine_mod.engine_manager.test(node, probe)
+            _record_latency(node, batch_id, outcome)
+            counters["done"] += 1
+            counters["ok"] += 1 if outcome.ok else 0
+            if counters["done"] % 10 == 0 and state.batch_id == batch_id:
+                state.done = counters["done"]
+                db.execute("UPDATE batches SET processed_count=? WHERE id=?",
+                           (counters["done"], batch_id))
+        except Exception as exc:  # never let one node abort the probe
+            db.append_log("ERROR", "latency", f"{node['raw_name']}: {exc}")
+
+
+# ---------------------------------------------------------------------------- results
+def _record(node: dict, group: dict, batch_id: int | None, outcome, manage_status: bool = True) -> None:
+    ok = 1 if outcome.ok else 0
+    db.execute(
+        """INSERT INTO results (node_id, group_id, batch_id, ok, latency_ms, error_type, message, ts)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (node["id"], group["id"], batch_id, ok, outcome.latency_ms, outcome.error_type,
+         (outcome.message or "")[:300], db.now()),
+    )
+    if not manage_status:
+        return
+    threshold = db.get_int("fail_threshold", 3)
+    if outcome.ok:
+        db.execute(
+            """UPDATE nodes SET latency=?, fail_count=0, status='available', last_tested_at=?, updated_at=?
+               WHERE id=?""",
+            (outcome.latency_ms, db.now(), db.now(), node["id"]),
+        )
+    else:
+        row = db.row("SELECT fail_count FROM nodes WHERE id=?", (node["id"],))
+        fail_count = (row["fail_count"] + 1) if row else 1
+        status = "unavailable" if fail_count >= threshold else "degraded"
+        db.execute(
+            """UPDATE nodes SET fail_count=?, status=?, last_tested_at=?, updated_at=? WHERE id=?""",
+            (fail_count, status, db.now(), db.now(), node["id"]),
+        )
+
+
 async def _test_one(node: dict, group: dict, batch_id: int | None, global_sem, group_sem,
-                    ip_sems: dict, subnet_sems: dict, counters: dict) -> None:
+                    ip_sems: dict, subnet_sems: dict, counters: dict,
+                    manage_status: bool = True) -> None:
     mask = db.get_int("dispersion_mask", 24)
     if mask not in (8, 16, 24, 32):
         mask = 24
@@ -135,7 +199,7 @@ async def _test_one(node: dict, group: dict, batch_id: int | None, global_sem, g
             try:
                 await asyncio.sleep(engine_mod.jitter_ms())
                 outcome = await engine_mod.engine_manager.test(node, group)
-                _record(node, group, batch_id, outcome)
+                _record(node, group, batch_id, outcome, manage_status=manage_status)
                 counters["done"] += 1
                 counters["ok"] += 1 if outcome.ok else 0
                 if counters["done"] % 10 == 0 and state.batch_id == batch_id:
@@ -150,12 +214,14 @@ async def _test_one(node: dict, group: dict, batch_id: int | None, global_sem, g
 
 
 async def _group_task(group: dict, nodes: list[dict], batch_id: int, global_sem,
-                      ip_sems: dict, subnet_sems: dict, counters: dict) -> dict:
+                      ip_sems: dict, subnet_sems: dict, counters: dict,
+                      manage_status: bool = True) -> dict:
     group_sem = asyncio.Semaphore(max(1, db.get_int("group_concurrency", 5)))
     failures = 0
     for node in nodes:
         try:
-            await _test_one(node, group, batch_id, global_sem, group_sem, ip_sems, subnet_sems, counters)
+            await _test_one(node, group, batch_id, global_sem, group_sem, ip_sems, subnet_sems,
+                            counters, manage_status=manage_status)
         except Exception as exc:  # one node must never abort the group
             failures += 1
             db.append_log("ERROR", "test", f"{group['name']} / {node['raw_name']}: {exc}")
@@ -192,7 +258,8 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
     if state.running:
         return {"ok": False, "error": "a test cycle is already running", "batch_id": state.batch_id}
     groups = due_groups(force=force, ids=group_ids)
-    if not groups:
+    probe = latency_probe()
+    if not groups and not probe:
         return {"ok": False, "error": "no enabled test group is due"}
     nodes = db.rows(
         """SELECT id, airport_id, raw_name, protocol, server, port, params, fingerprint
@@ -206,19 +273,22 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
         state.phase = "running"
         state.started_at = db.now()
         state.last_error = None
-        state.total = len(nodes) * len(groups)
+        units = len(groups) + (1 if probe else 0)
+        state.total = len(nodes) * units
         state.done = 0
-        state.current_groups = [g["name"] for g in groups]
+        state.current_groups = ([probe["name"]] if probe else []) + [g["name"] for g in groups]
         state.last_cycle_at = datetime.now()
         batch_id = db.execute(
             "INSERT INTO batches (started_at, status, target_count, groups, note) VALUES (?,?,?,?,?)",
             (state.started_at, "running", state.total,
-             db.dumps([{"id": g["id"], "name": g["name"], "ident": g["ident"]} for g in groups]),
+             db.dumps(([{"id": 0, "name": probe["name"], "ident": "L"}] if probe else [])
+                      + [{"id": g["id"], "name": g["name"], "ident": g["ident"]} for g in groups]),
              reason),
         )
         state.batch_id = batch_id
         db.append_log("INFO", "test",
-                      f"batch #{batch_id} started: {len(nodes)} nodes x {len(groups)} groups")
+                      f"batch #{batch_id} started: {len(nodes)} nodes x {units} units"
+                      f" ({len(groups)} groups{' + latency probe' if probe else ''})")
         counters = {"done": 0, "ok": 0}
         global_sem = asyncio.Semaphore(max(1, db.get_int("global_concurrency", 10)))
         mask = db.get_int("dispersion_mask", 24)
@@ -231,10 +301,15 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                 state.phase = f"binding block {offset // BLOCK_SIZE + 1}"
                 await engine_mod.engine_manager.prepare(block)
                 state.phase = "testing"
-                await asyncio.gather(*[
-                    _group_task(g, block, batch_id, global_sem, ip_sems, subnet_sems, counters)
+                tasks = []
+                if probe:
+                    tasks.append(_latency_task(block, probe, batch_id, global_sem, counters))
+                tasks.extend(
+                    _group_task(g, block, batch_id, global_sem, ip_sems, subnet_sems, counters,
+                                manage_status=probe is None)
                     for g in groups
-                ])
+                )
+                await asyncio.gather(*tasks)
             state.done = counters["done"]
             db.execute(
                 "UPDATE batches SET finished_at=?, status='complete', processed_count=? WHERE id=?",
@@ -278,6 +353,13 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None) -> 
     if not groups:
         return {"ok": False, "error": "no enabled test group"}
     await engine_mod.engine_manager.prepare([node])
+    probe = latency_probe()
+    latency = None
+    if probe:
+        outcome = await engine_mod.engine_manager.test(node, probe)
+        _record_latency(node, None, outcome)
+        latency = {"ok": outcome.ok, "latency_ms": outcome.latency_ms,
+                   "error_type": outcome.error_type, "message": outcome.message}
     results = []
     for group in groups:
         outcome = await engine_mod.engine_manager.test(node, group)
@@ -285,7 +367,7 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None) -> 
         results.append({"group": group["name"], "ok": outcome.ok, "latency_ms": outcome.latency_ms,
                         "error_type": outcome.error_type, "message": outcome.message})
         await asyncio.sleep(engine_mod.jitter_ms())
-    return {"ok": True, "node_id": node_id, "results": results}
+    return {"ok": True, "node_id": node_id, "latency": latency, "results": results}
 
 
 async def fetch_now(airport_id: int, trigger: str = "manual") -> dict:

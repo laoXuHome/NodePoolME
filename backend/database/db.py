@@ -95,6 +95,19 @@ CREATE TABLE IF NOT EXISTS results (
 CREATE INDEX IF NOT EXISTS idx_results_node_group ON results (node_id, group_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_results_batch ON results (batch_id);
 
+CREATE TABLE IF NOT EXISTS latency_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id INTEGER NOT NULL,
+    batch_id INTEGER,
+    ok INTEGER NOT NULL,
+    latency_ms INTEGER,
+    error_type TEXT,
+    message TEXT,
+    ts TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_latency_node ON latency_results (node_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_latency_batch ON latency_results (batch_id);
+
 CREATE TABLE IF NOT EXISTS batches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT NOT NULL,
@@ -170,6 +183,9 @@ def init_db() -> None:
     conn = connect()
     conn.executescript(SCHEMA)
     conn.commit()
+    # Migration: first upgrade to the latency-probe model gets a 500 ms publish ceiling
+    if get("latency_test_url") is None:
+        set_setting("sub_max_latency", config.DEFAULT_SETTINGS["sub_max_latency"])
     for key, value in config.DEFAULT_SETTINGS.items():
         if key == "sub_token":
             continue

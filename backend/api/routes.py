@@ -82,6 +82,10 @@ async def dashboard():
     available = db.row("SELECT COUNT(*) AS c FROM nodes WHERE status='available'")["c"]
     degraded = db.row("SELECT COUNT(*) AS c FROM nodes WHERE status='degraded'")["c"]
     selected, stats = builder.collect_nodes()
+    ceiling = db.get_int("sub_max_latency", 500)
+    latests = builder.latest_latency()
+    probe_passed = sum(1 for p in latests.values()
+                       if p["ok"] and (not ceiling or (p["latency_ms"] or 0) <= ceiling))
     last_batch = db.row("SELECT * FROM batches ORDER BY id DESC LIMIT 1")
     logs = db.rows("SELECT * FROM logs ORDER BY id DESC LIMIT 12")
     return {
@@ -281,6 +285,9 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
     groups = {g["id"]: g for g in db.rows("SELECT * FROM test_groups ORDER BY sort_order, id")}
     enabled_groups = [g for g in groups.values() if g["enabled"]]
     results = builder.latest_results()
+    latests = builder.latest_latency()
+    probe_on = db.get("latency_test_enabled", "1") == "1"
+    ceiling = db.get_int("sub_max_latency", 500)
     idents = _node_names()
     items = []
     for node in nodes:
@@ -289,13 +296,22 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
         display = f"{node['airport_name']}.{'.'.join(passed_idents)} {node['raw_name']}" \
             if passed_idents else f"{node['airport_name']}(未通过) {node['raw_name']}"
         node["display_name"] = display
+        probe = latests.get(node["id"])
+        if probe_on:
+            latency = (probe or {}).get("latency_ms") or (node["latency"] or 0)
+            node["latency"] = latency
+            node["publishable"] = bool(probe and probe["ok"]
+                                      and (not ceiling or (probe["latency_ms"] or 0) <= ceiling))
+        else:
+            node["publishable"] = bool(passed_idents)
         node["results"] = {
             str(gid): {**res, "ident": groups.get(gid, {}).get("ident", "?")}
             for gid, res in per_group.items() if gid in groups
         }
         node["passed_count"] = len(passed_idents)
-        node["latency"] = min([r["latency_ms"] for r in per_group.values()
-                               if r.get("ok") and r.get("latency_ms")], default=node["latency"])
+        if not probe_on:
+            node["latency"] = min([r["latency_ms"] for r in per_group.values()
+                                   if r.get("ok") and r.get("latency_ms")], default=node["latency"])
         items.append(node)
 
     def keep(node: dict) -> bool:
@@ -318,7 +334,7 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
                 return group_id in node["results"]
             return bool(res and bool(res.get("ok")) == want)
         if passed == "qualified":
-            return node["passed_count"] >= max(1, db.get_int("sub_min_groups", 1))
+            return node.get("publishable", False)
         return True
 
     items = [n for n in items if keep(n)]
@@ -347,6 +363,8 @@ async def node_detail(node_id: int):
         """SELECT r.*, g.name AS group_name, g.ident FROM results r
            LEFT JOIN test_groups g ON g.id=r.group_id
            WHERE r.node_id=? ORDER BY r.id DESC LIMIT 60""", (node_id,))
+    node["latency_history"] = db.rows(
+        "SELECT * FROM latency_results WHERE node_id=? ORDER BY id DESC LIMIT 60", (node_id,))
     return node
 
 
@@ -402,6 +420,9 @@ async def subscription_info(request: Request):
             "sub_max_nodes": db.get_int("sub_max_nodes"),
             "sub_min_groups": db.get_int("sub_min_groups"),
             "sub_include_unavailable": db.get("sub_include_unavailable") == "1",
+            "latency_test_enabled": db.get("latency_test_enabled") == "1",
+            "latency_test_url": db.get("latency_test_url"),
+            "latency_test_status": db.get("latency_test_status"),
         },
         "meta": builder.meta(),
         "links": {
@@ -458,7 +479,8 @@ async def preview_subscription(fmt: str = "clash"):
 SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "subnet_concurrency",
                 "request_interval_min_ms", "request_interval_max_ms", "test_timeout",
                 "test_interval_minutes", "fail_threshold", "history_days", "dispersion_mask",
-                "sub_name"]
+                "sub_name", "latency_test_enabled", "latency_test_url", "latency_test_status",
+                "latency_test_timeout", "sub_max_latency"]
 
 
 @api.get("/settings", dependencies=protected)

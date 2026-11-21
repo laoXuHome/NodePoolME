@@ -34,8 +34,25 @@ def latest_results() -> dict[int, dict[int, dict]]:
     return out
 
 
+def latest_latency() -> dict[int, dict]:
+    """node_id -> newest latency probe row."""
+    sql = """
+    SELECT l.node_id, l.ok, l.latency_ms, l.error_type, l.ts
+    FROM latency_results l
+    JOIN (SELECT node_id, MAX(id) AS mx FROM latency_results GROUP BY node_id) m
+      ON m.node_id = l.node_id AND m.mx = l.id
+    """
+    return {row["node_id"]: {"ok": bool(row["ok"]), "latency_ms": row["latency_ms"],
+                             "error_type": row["error_type"], "ts": row["ts"]}
+            for row in db.rows(sql)}
+
+
 def collect_nodes() -> tuple[list[dict], dict]:
-    """Apply eligibility rules and compute display names."""
+    """Apply eligibility rules and compute display names.
+
+    Publish gate = newest latency probe within the configured ceiling. Test groups no longer
+    decide eligibility; they only contribute the identifier segments of the display name.
+    """
     groups = db.rows(
         "SELECT id, name, ident, sort_order, enabled FROM test_groups ORDER BY sort_order, id"
     )
@@ -47,14 +64,16 @@ def collect_nodes() -> tuple[list[dict], dict]:
                   fail_count, status, region FROM nodes ORDER BY id"""
     )
 
-    min_groups = max(1, db.get_int("sub_min_groups", 1))
-    max_latency = db.get_int("sub_max_latency", 0)
+    probe_on = db.get("latency_test_enabled", "1") == "1"
+    latests = latest_latency()
+    max_latency = db.get_int("sub_max_latency", 500)
     max_nodes = db.get_int("sub_max_nodes", 0)
     fail_threshold = db.get_int("fail_threshold", 3)
     include_unavailable = db.get("sub_include_unavailable") == "1"
 
     selected: list[dict] = []
-    skipped = {"no_result": 0, "failed_groups": 0, "slow": 0, "unavailable": 0, "bad_airport": 0}
+    skipped = {"no_result": 0, "failed_groups": 0, "slow": 0, "unavailable": 0,
+               "bad_airport": 0, "latency_fail": 0}
     for node in nodes:
         airport = airports.get(node["airport_id"])
         if not airport:
@@ -62,24 +81,36 @@ def collect_nodes() -> tuple[list[dict], dict]:
             continue
         per_group = results.get(node["id"], {})
         passed = [g for g in enabled_groups if per_group.get(g["id"], {}).get("ok")]
-        if not passed:
-            skipped["failed_groups" if per_group else "no_result"] += 1
-            continue
-        if len(passed) < min_groups:
-            skipped["failed_groups"] += 1
-            continue
+
+        if probe_on:
+            probe = latests.get(node["id"])
+            if not probe:
+                skipped["no_result"] += 1
+                continue
+            if not probe["ok"]:
+                skipped["latency_fail"] += 1
+                continue
+            latency = probe["latency_ms"] or (node["latency"] or 0)
+            if max_latency and latency > max_latency:
+                skipped["slow"] += 1
+                continue
+        else:
+            if not passed:
+                skipped["failed_groups" if per_group else "no_result"] += 1
+                continue
+            latencies = [per_group[g["id"]]["latency_ms"] for g in passed
+                         if per_group[g["id"]].get("latency_ms")]
+            latency = min(latencies) if latencies else (node["latency"] or 0)
+            if max_latency and latency and latency > max_latency:
+                skipped["slow"] += 1
+                continue
         if not include_unavailable and node["fail_count"] >= fail_threshold \
                 and node["status"] == "unavailable":
             skipped["unavailable"] += 1
             continue
-        latencies = [per_group[g["id"]]["latency_ms"] for g in passed
-                     if per_group[g["id"]].get("latency_ms")]
-        latency = min(latencies) if latencies else (node["latency"] or 0)
-        if max_latency and latency and latency > max_latency:
-            skipped["slow"] += 1
-            continue
         idents = [g["ident"] for g in passed]
-        display = f"{airport['name']}.{'.'.join(idents)} {node['raw_name']}"
+        display = (f"{airport['name']}.{'.'.join(idents)} {node['raw_name']}" if idents
+                   else f"{airport['name']}.{node['raw_name']}")
         selected.append({**node, "display_name": display, "passed": passed,
                          "latency": latency, "params": db.loads(node["params"], {})})
 

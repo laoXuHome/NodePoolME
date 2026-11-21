@@ -38,7 +38,12 @@ async function save() {
       test_interval_minutes: Number(form.value.test_interval_minutes),
       fail_threshold: Number(form.value.fail_threshold),
       history_days: Number(form.value.history_days),
-      dispersion_mask: Number(form.value.dispersion_mask)
+      dispersion_mask: Number(form.value.dispersion_mask),
+      latency_test_enabled: !!Number(form.value.latency_test_enabled),
+      latency_test_url: form.value.latency_test_url,
+      latency_test_status: form.value.latency_test_status,
+      latency_test_timeout: Number(form.value.latency_test_timeout),
+      sub_max_latency: Number(form.value.sub_max_latency)
     })
     ElMessage.success('设置已保存')
     await load()
@@ -91,6 +96,40 @@ onMounted(load)
 
     <el-row :gutter="16">
       <el-col :md="14" :xs="24">
+        <div class="np-card" style="padding:20px;margin-bottom:16px">
+          <div class="np-section-title">
+            延迟检测（决定是否下发订阅）
+            <div class="np-flex" />
+            <el-button type="primary" size="small" :loading="saving" @click="save">保存设置</el-button>
+          </div>
+          <el-form label-width="150px" size="default">
+            <el-form-item label="启用延迟检测">
+              <el-switch v-model="form.latency_test_enabled" active-value="1" inactive-value="0" />
+            </el-form-item>
+            <el-form-item label="检测链接">
+              <el-input v-model="form.latency_test_url" placeholder="http://www.google.com/generate_204" />
+            </el-form-item>
+            <el-row :gutter="12">
+              <el-col :span="8">
+                <el-form-item label="期望状态码">
+                  <el-input v-model="form.latency_test_status" placeholder="200-399" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="超时(s)">
+                  <el-input-number v-model="form.latency_test_timeout" :min="1" :max="60" style="width:100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="下发延迟上限(ms)">
+                  <el-input-number v-model="form.sub_max_latency" :min="0" :max="60000" style="width:100%" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <div class="np-muted">每轮对全部节点执行一次；延迟不超过上限的节点才进入 <span class="np-mono">/sub/all</span>。检测组（G/TG/Y 及自定义）只决定节点名里的代号，不决定是否下发。上限填 0 表示不限制。</div>
+          </el-form>
+        </div>
+
         <div class="np-card" style="padding:20px">
           <div class="np-section-title">
             调度与检测

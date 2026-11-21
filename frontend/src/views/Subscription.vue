@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { api, formatTs } from '../api'
 
 const info = ref(null)
-const form = ref({ sub_name: '', sub_max_latency: 0, sub_max_nodes: 0, sub_min_groups: 1,
+const form = ref({ sub_name: '', sub_max_latency: 500, sub_max_nodes: 0,
                    sub_include_unavailable: false, sub_token: '', regenerate_token: false })
 const preview = ref('')
 const previewFmt = ref('clash')
@@ -37,7 +37,6 @@ async function save() {
       regenerate_token: form.value.regenerate_token,
       sub_max_latency: form.value.sub_max_latency,
       sub_max_nodes: form.value.sub_max_nodes,
-      sub_min_groups: form.value.sub_min_groups,
       sub_include_unavailable: form.value.sub_include_unavailable
     })
     ElMessage.success('订阅设置已保存')
@@ -128,7 +127,7 @@ onMounted(async () => { await load(); await loadPreview() })
             </el-form-item>
             <el-row :gutter="12">
               <el-col :span="12">
-                <el-form-item label="最大延迟(ms)">
+                <el-form-item label="下发延迟上限(ms)">
                   <el-input-number v-model="form.sub_max_latency" :min="0" :max="60000" style="width:100%" />
                 </el-form-item>
               </el-col>
@@ -140,9 +139,6 @@ onMounted(async () => { await load(); await loadPreview() })
             </el-row>
             <el-row :gutter="12">
               <el-col :span="12">
-                <el-form-item label="最低通过组数">
-                  <el-input-number v-model="form.sub_min_groups" :min="1" :max="20" style="width:100%" />
-                </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="包含不可用">
@@ -151,7 +147,7 @@ onMounted(async () => { await load(); await loadPreview() })
               </el-col>
             </el-row>
           </el-form>
-          <div class="np-muted">0 表示不限制。默认规则：至少通过指定数量的启用检测组才会进入订阅。</div>
+          <div class="np-muted">下发依据是延迟检测：延迟不超过上限的节点才进入订阅；检测组只用于生成节点名代号。0 表示不限制。</div>
         </div>
       </el-col>
 
