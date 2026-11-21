@@ -64,7 +64,6 @@ def collect_nodes() -> tuple[list[dict], dict]:
                   fail_count, status, region FROM nodes ORDER BY id"""
     )
 
-    probe_on = db.get("latency_test_enabled", "1") == "1"
     latests = latest_latency()
     max_latency = db.get_int("sub_max_latency", 500)
     max_nodes = db.get_int("sub_max_nodes", 0)
@@ -82,28 +81,18 @@ def collect_nodes() -> tuple[list[dict], dict]:
         per_group = results.get(node["id"], {})
         passed = [g for g in enabled_groups if per_group.get(g["id"], {}).get("ok")]
 
-        if probe_on:
-            probe = latests.get(node["id"])
-            if not probe:
-                skipped["no_result"] += 1
-                continue
-            if not probe["ok"]:
-                skipped["latency_fail"] += 1
-                continue
-            latency = probe["latency_ms"] or (node["latency"] or 0)
-            if max_latency and latency > max_latency:
-                skipped["slow"] += 1
-                continue
-        else:
-            if not passed:
-                skipped["failed_groups" if per_group else "no_result"] += 1
-                continue
-            latencies = [per_group[g["id"]]["latency_ms"] for g in passed
-                         if per_group[g["id"]].get("latency_ms")]
-            latency = min(latencies) if latencies else (node["latency"] or 0)
-            if max_latency and latency and latency > max_latency:
-                skipped["slow"] += 1
-                continue
+        # The probe always runs per cycle and is the only publish gate
+        probe = latests.get(node["id"])
+        if not probe:
+            skipped["no_result"] += 1
+            continue
+        if not probe["ok"]:
+            skipped["latency_fail"] += 1
+            continue
+        latency = probe["latency_ms"] or (node["latency"] or 0)
+        if max_latency and latency > max_latency:
+            skipped["slow"] += 1
+            continue
         if not include_unavailable and node["fail_count"] >= fail_threshold \
                 and node["status"] == "unavailable":
             skipped["unavailable"] += 1

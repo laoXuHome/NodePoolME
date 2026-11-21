@@ -195,6 +195,9 @@ def init_db() -> None:
 
     if not get("sub_token"):
         set_setting("sub_token", secrets.token_urlsafe(24))
+    # The latency probe is the publish gate and always runs: force it on for old databases
+    if get("latency_test_enabled") != "1":
+        set_setting("latency_test_enabled", "1")
     # Seed default test groups only on a fresh database
     cur = conn.execute("SELECT COUNT(*) AS c FROM test_groups")
     if cur.fetchone()["c"] == 0:

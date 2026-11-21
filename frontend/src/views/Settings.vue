@@ -39,7 +39,6 @@ async function save() {
       fail_threshold: Number(form.value.fail_threshold),
       history_days: Number(form.value.history_days),
       dispersion_mask: Number(form.value.dispersion_mask),
-      latency_test_enabled: !!Number(form.value.latency_test_enabled),
       latency_test_url: form.value.latency_test_url,
       latency_test_status: form.value.latency_test_status,
       latency_test_timeout: Number(form.value.latency_test_timeout),
@@ -107,9 +106,6 @@ onMounted(load)
             <el-button type="primary" size="small" :loading="saving" @click="save">保存设置</el-button>
           </div>
           <el-form label-width="150px" size="default">
-            <el-form-item label="启用延迟检测">
-              <el-switch v-model="form.latency_test_enabled" active-value="1" inactive-value="0" />
-            </el-form-item>
             <el-form-item label="检测链接">
               <el-input v-model="form.latency_test_url" placeholder="http://www.google.com/generate_204" />
             </el-form-item>
@@ -130,7 +126,7 @@ onMounted(load)
                 </el-form-item>
               </el-col>
             </el-row>
-            <div class="np-muted">每轮对全部节点执行一次；延迟不超过上限的节点才进入 <span class="np-mono">/sub/all</span>。检测组（G/TG/Y 及自定义）只决定节点名里的代号，不决定是否下发。上限填 0 表示不限制。</div>
+            <div class="np-muted">每次检测都会对全部节点执行一次（无开关）；延迟不超过上限的节点才进入 <span class="np-mono">/sub/all</span>。检测组（G/TG/Y 及自定义）只决定节点名里的代号，不决定是否下发。上限填 0 表示不限制。</div>
             <el-divider />
             <el-form-item label="定时下发">
               <el-switch v-model="form.sub_publish_enabled" active-value="1" inactive-value="0" />

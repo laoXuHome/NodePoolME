@@ -104,8 +104,7 @@ onUnmounted(() => clearInterval(timer.value))
               {{ data.runtime.phase }} · 上次启动 {{ formatTs(data.runtime.last_cycle_at) }}
             </div>
             <div class="np-muted" style="margin:0 0 10px">
-              延迟检测 {{ data.latency_probe?.enabled ? '启用' : '停用' }} ·
-              <span class="np-mono">{{ data.latency_probe?.url }}</span> ·
+              延迟检测（每轮必跑）<span class="np-mono">{{ data.latency_probe?.url }}</span> ·
               期望 {{ data.latency_probe?.status }} · 上限 {{ data.latency_probe?.ceiling || '不限' }}ms ·
               通过 {{ data.latency_probe?.passed }} 个节点 ·
               定时下发 {{ publishText }}

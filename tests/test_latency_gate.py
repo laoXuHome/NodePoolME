@@ -70,9 +70,8 @@ def test_probe_config_and_toggle():
     assert probe and probe["max_latency"] == 500
     assert probe["url"] == "http://www.google.com/generate_204"
     db.set_setting("latency_test_url", "https://www.gstatic.com/generate_204")
-    db.set_setting("latency_test_enabled", "0")
-    assert manager.latency_probe() is None
-    db.set_setting("latency_test_enabled", "1")
+    db.set_setting("latency_test_enabled", "0")   # legacy value is ignored
+    assert manager.latency_probe() is not None
     assert manager.latency_probe()["url"].startswith("https://")
 
 

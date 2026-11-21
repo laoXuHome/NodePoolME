@@ -104,7 +104,7 @@ async def dashboard():
         "logs": logs,
         "stats": stats,
         "latency_probe": {
-            "enabled": db.get("latency_test_enabled", "1") == "1",
+            "enabled": True,
             "url": db.get("latency_test_url"),
             "status": db.get("latency_test_status"),
             "ceiling": ceiling,
@@ -301,7 +301,6 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
     enabled_groups = [g for g in groups.values() if g["enabled"]]
     results = builder.latest_results()
     latests = builder.latest_latency()
-    probe_on = db.get("latency_test_enabled", "1") == "1"
     ceiling = db.get_int("sub_max_latency", 500)
     idents = _node_names()
     items = []
@@ -312,30 +311,23 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
             if passed_idents else f"{node['airport_name']}(未通过) {node['raw_name']}"
         node["display_name"] = display
         probe = latests.get(node["id"])
-        if probe_on:
-            latency = (probe or {}).get("latency_ms") or (node["latency"] or 0)
-            node["latency"] = latency
-            node["publishable"] = bool(probe and probe["ok"]
-                                      and (not ceiling or (probe["latency_ms"] or 0) <= ceiling))
-            if node["publishable"]:
-                node["publish_reason"] = "下发"
-            elif not probe:
-                node["publish_reason"] = "无延迟探测记录"
-            elif not probe["ok"]:
-                node["publish_reason"] = f"探测失败：{probe['error_type'] or 'unknown'}"
-            else:
-                node["publish_reason"] = f"延迟 {latency}ms 超过上限 {ceiling}ms"
+        latency = (probe or {}).get("latency_ms") or (node["latency"] or 0)
+        node["latency"] = latency
+        node["publishable"] = bool(probe and probe["ok"]
+                                  and (not ceiling or (probe["latency_ms"] or 0) <= ceiling))
+        if node["publishable"]:
+            node["publish_reason"] = "下发"
+        elif not probe:
+            node["publish_reason"] = "无延迟探测记录"
+        elif not probe["ok"]:
+            node["publish_reason"] = f"探测失败：{probe['error_type'] or 'unknown'}"
         else:
-            node["publishable"] = bool(passed_idents)
-            node["publish_reason"] = "延迟检测未启用" if node["publishable"] else "未命中任何标签"
+            node["publish_reason"] = f"延迟 {latency}ms 超过上限 {ceiling}ms"
         node["results"] = {
             str(gid): {**res, "ident": groups.get(gid, {}).get("ident", "?")}
             for gid, res in per_group.items() if gid in groups
         }
         node["passed_count"] = len(passed_idents)
-        if not probe_on:
-            node["latency"] = min([r["latency_ms"] for r in per_group.values()
-                                   if r.get("ok") and r.get("latency_ms")], default=node["latency"])
         items.append(node)
 
     def keep(node: dict) -> bool:
@@ -394,13 +386,11 @@ async def node_detail(node_id: int):
     latest = node["latency_history"][0] if node["latency_history"] else None
     ceiling = db.get_int("sub_max_latency", 500)
     node["publishable"] = bool(
-        db.get("latency_test_enabled", "1") == "1" and latest and latest["ok"]
+        latest and latest["ok"]
         and (not ceiling or (latest["latency_ms"] or 0) <= ceiling)
     )
     if node["publishable"]:
         node["publish_reason"] = "下发"
-    elif db.get("latency_test_enabled", "1") != "1":
-        node["publish_reason"] = "延迟检测未启用"
     elif not latest:
         node["publish_reason"] = "无延迟探测记录"
     elif not latest["ok"]:
@@ -462,7 +452,7 @@ async def subscription_info(request: Request):
             "sub_max_nodes": db.get_int("sub_max_nodes"),
             "sub_min_groups": db.get_int("sub_min_groups"),
             "sub_include_unavailable": db.get("sub_include_unavailable") == "1",
-            "latency_test_enabled": db.get("latency_test_enabled") == "1",
+            "latency_test_enabled": True,
             "latency_test_url": db.get("latency_test_url"),
             "latency_test_status": db.get("latency_test_status"),
         },
@@ -521,7 +511,7 @@ async def preview_subscription(fmt: str = "clash"):
 SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "subnet_concurrency",
                 "request_interval_min_ms", "request_interval_max_ms", "test_timeout",
                 "test_interval_minutes", "fail_threshold", "history_days", "dispersion_mask",
-                "sub_name", "latency_test_enabled", "latency_test_url", "latency_test_status",
+                "sub_name", "latency_test_url", "latency_test_status",
                 "latency_test_timeout", "sub_max_latency",
                 "sub_publish_enabled", "sub_publish_time", "sub_publish_mode",
                 "sub_publish_interval_minutes"]

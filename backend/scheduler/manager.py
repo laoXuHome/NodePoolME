@@ -94,8 +94,6 @@ def _semaphore_map_factory():
 # ---------------------------------------------------------------------------- latency probe
 def latency_probe() -> dict | None:
     """The publish gate: every node is measured against this URL each cycle."""
-    if db.get("latency_test_enabled", "1") != "1":
-        return None
     return {
         "id": 0,
         "name": "延迟检测",

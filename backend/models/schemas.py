@@ -83,7 +83,6 @@ class SettingsIn(BaseModel):
     fail_threshold: Optional[int] = Field(default=None, ge=1, le=20)
     history_days: Optional[int] = Field(default=None, ge=7, le=365)
     dispersion_mask: Optional[int] = None
-    latency_test_enabled: Optional[bool] = None
     latency_test_url: Optional[str] = None
     latency_test_status: Optional[str] = None
     latency_test_timeout: Optional[int] = Field(default=None, ge=1, le=60)
