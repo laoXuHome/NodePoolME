@@ -73,6 +73,12 @@ def test_filters():
         assert names(publishable="1", airport_id=ap) == ["hit-all"]
         assert names(publishable="0") == ["hit-one"]
         assert names(publishable="1", protocol="ss") == ["hit-all"]
+        # group_id also accepts the ident, and unknown groups must not crash
+        assert names(group_id="TG", passed="1") == ["hit-all"]
+        assert names(group_id="NOPE") == []
+        assert names(tags="G,TG", group_id="TG", passed="1", publishable="1") == ["hit-all"]
+        assert names(sort="tags") == ["hit-all", "hit-one"]
+        assert names(limit="0") != []
 
 
 if __name__ == "__main__":

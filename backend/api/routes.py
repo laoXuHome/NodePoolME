@@ -356,9 +356,9 @@ def _node_names() -> dict[int, str]:
 
 @api.get("/nodes", dependencies=protected)
 async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str | None = None,
-                     region: str | None = None, status: str | None = None, group_id: int | None = None,
-                     tags: str | None = None, passed: str | None = None,
-                     publishable: str | None = None,
+                     region: str | None = None, status: str | None = None,
+                     group_id: str | None = None, tags: str | None = None,
+                     passed: str | None = None, publishable: str | None = None,
                      limit: int = 200, offset: int = 0, sort: str = "latency"):
     nodes = db.rows(
         """SELECT n.*, a.name AS airport_name FROM nodes n
@@ -408,6 +408,15 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
 
     hit_mode = (passed or "").strip().lower() in ("0", "no", "fail", "miss", "missed")
     tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
+    # group_id accepts either the numeric id or the ident (e.g. "GPT")
+    group_key: str | None = None
+    if group_id not in (None, "", "0"):
+        raw_gid = str(group_id).strip()
+        if raw_gid.isdigit() and int(raw_gid) in groups:
+            group_key = str(int(raw_gid))
+        else:
+            match = next((g for g in groups.values() if g["ident"] == raw_gid), None)
+            group_key = str(match["id"]) if match else "__missing__"
 
     def keep(node: dict) -> bool:
         """All filters are ANDed; no branch may short-circuit another one."""
@@ -423,8 +432,8 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
             return False
         if status and node["status"] != status:
             return False
-        if group_id:
-            res = node["results"].get(str(group_id))
+        if group_key:
+            res = node["results"].get(group_key)
             ok = bool(res.get("ok")) if res else False
             # hit_mode means "the user asked for misses"; a node without a record counts as miss
             if ok == hit_mode:
@@ -448,9 +457,11 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
     if sort == "latency":
         items.sort(key=lambda n: (n["latency"] if n["latency"] else 10 ** 6))
     elif sort == "name":
-        items.sort(key=lambda n: n["display_name"])
+        items.sort(key=lambda n: n["display_name"] or "")
     elif sort == "tested":
         items.sort(key=lambda n: (n["last_tested_at"] or ""), reverse=True)
+    elif sort == "tags":
+        items.sort(key=lambda n: -n["passed_idents_count"])
     else:
         items.sort(key=lambda n: n["id"])
     total = len(items)

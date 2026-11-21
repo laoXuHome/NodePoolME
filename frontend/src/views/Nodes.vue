@@ -7,6 +7,7 @@ const items = ref([])
 const total = ref(0)
 const loading = ref(false)
 const groups = ref([])
+const enabledGroups = computed(() => (groups.value || []).filter(g => g && g.enabled))
 const airports = ref([])
 const filters = ref({ q: '', airport_id: null, protocol: '', region: '', group_id: null,
                      tags: [], passed: '', publishable: '', sort: 'latency', limit: 50 })
@@ -39,7 +40,11 @@ async function loadMeta() {
   airports.value = await api.get('/api/airports')
 }
 
-function search() { page.value = 1; load() }
+function search() {
+  if (!filters.value.group_id) filters.value.passed = filters.value.passed === 'miss' ? '' : filters.value.passed
+  page.value = 1
+  load()
+}
 function reset() {
   filters.value = { q: '', airport_id: null, protocol: '', region: '', group_id: null,
                     tags: [], passed: '', publishable: '', sort: 'latency', limit: 50 }
@@ -93,17 +98,17 @@ onMounted(async () => { await loadMeta(); await load() })
         <el-option v-for="p in protocolOptions" :key="p" :label="p" :value="p" />
       </el-select>
       <el-select v-model="filters.group_id" placeholder="检测组" clearable style="width:140px" @change="search">
-        <el-option v-for="g in groups.filter(x => x.enabled)" :key="g.id" :label="`${g.ident} · ${g.name}`" :value="g.id" />
+        <el-option v-for="g in enabledGroups" :key="g.id" :label="`${g.ident} · ${g.name}`" :value="g.ident" />
       </el-select>
       <el-select v-model="filters.tags" placeholder="标签（须同时命中）" multiple collapse-tags clearable style="width:190px" @change="search">
-        <el-option v-for="g in groups.filter(x => x.enabled)" :key="g.ident" :label="g.ident" :value="g.ident" />
+        <el-option v-for="g in enabledGroups" :key="g.ident" :label="g.ident" :value="g.ident" />
       </el-select>
       <el-select v-model="filters.publishable" placeholder="下发结果" clearable style="width:130px" @change="search">
         <el-option label="仅下发节点" value="1" />
         <el-option label="仅不下发" value="0" />
       </el-select>
-      <el-select v-model="filters.passed" placeholder="组结果/标签" clearable style="width:150px" @change="search">
-        <el-option label="未命中所选组" value="miss" />
+      <el-select v-model="filters.passed" placeholder="组结果 / 标签情况" clearable style="width:170px" @change="search">
+        <el-option label="未命中所选组" value="miss" :disabled="!filters.group_id" />
         <el-option label="至少有一个标签" value="qualified" />
         <el-option label="没有任何标签" value="untagged" />
       </el-select>
@@ -111,6 +116,7 @@ onMounted(async () => { await loadMeta(); await load() })
         <el-option label="按延迟" value="latency" />
         <el-option label="按名称" value="name" />
         <el-option label="按检测时间" value="tested" />
+        <el-option label="按标签数量" value="tags" />
       </el-select>
       <el-button @click="search"><el-icon><Search /></el-icon>查询</el-button>
       <el-button @click="reset">重置</el-button>
@@ -156,7 +162,9 @@ onMounted(async () => { await loadMeta(); await load() })
           <template #default="{ row }">{{ formatTs(row.last_tested_at) }}</template>
         </el-table-column>
       </el-table>
-      <div v-if="!items.length" class="np-empty">没有符合条件的节点</div>
+      <div v-if="!items.length" class="np-empty">
+        {{ total ? '没有符合筛选条件的节点' : (filters.q || filters.airport_id || filters.protocol || filters.region || filters.group_id || filters.tags.length || filters.passed || filters.publishable ? '当前筛选条件下没有节点' : '节点池为空，请先拉取机场订阅') }}
+      </div>
       <div style="display:flex;justify-content:flex-end;padding:12px">
         <el-pagination v-model:current-page="page" :page-size="filters.limit" :total="total"
                        layout="prev, pager, next" @current-change="load" />
