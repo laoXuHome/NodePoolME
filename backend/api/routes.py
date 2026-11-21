@@ -1,6 +1,7 @@
 """HTTP API."""
 import asyncio
 import base64
+import html
 import json
 import os
 import secrets
@@ -8,6 +9,7 @@ import shutil
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
+import urllib.parse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, File
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -720,9 +722,42 @@ async def restore_backup(file: UploadFile = File(...)):
 sub_router = APIRouter()
 
 
-def _serve_sub(token: str | None, fmt: str | None, ua: str) -> Response:
+def _deep_unescape(value: str) -> str:
+    """Reverse proxies sometimes HTML-escape &;: more than once."""
+    for _ in range(3):
+        unescaped = html.unescape(value)
+        if unescaped == value:
+            break
+        value = unescaped
+    return urllib.parse.unquote(value)
+
+
+def _clean_param(value: str | None) -> str:
+    """Repair values mangled by reverse proxies: HTML-escaped &, encoded &, trailing slashes."""
+    value = _deep_unescape(value or "")
+    value = urllib.parse.unquote(value)
+    value = value.replace("&amp;", "&")
+    value = value.split("&", 1)[0]
+    return value.strip().strip("/")
+
+
+def _serve_sub(token: str | None, fmt: str | None, ua: str,
+               raw_query: str | None = None) -> Response:
     expected = auth.sub_token()
-    token = token or ""
+    token = _clean_param(token)
+    if not token and raw_query:
+        # reverse proxy may have turned "&" into "&amp;" so FastAPI saw one broken value
+        parsed = urllib.parse.parse_qs(_deep_unescape(raw_query))
+        token = _clean_param((parsed.get("token") or [""])[0])
+        if not fmt:
+            fmt = (parsed.get("format") or parsed.get("fmt") or [""])[0]
+    if not fmt and raw_query:
+        repaired = _deep_unescape(raw_query)
+        parsed = urllib.parse.parse_qs(repaired)
+        fmt = (parsed.get("format") or parsed.get("fmt") or [""])[0]
+        if not fmt and "format=" in repaired:
+            fmt = repaired.split("format=", 1)[1]
+    fmt = _clean_param(fmt) if fmt else fmt
     if not expected or not secrets.compare_digest(token, expected):
         raise HTTPException(status_code=403, detail="invalid subscription token")
     if not fmt:
@@ -757,20 +792,44 @@ def _serve_sub(token: str | None, fmt: str | None, ua: str) -> Response:
 @sub_router.get("/sub/all")
 async def sub_all(request: Request, token: str | None = None, fmt: str | None = None,
                   format: str | None = None):
-    return _serve_sub(token, format or fmt, request.headers.get("user-agent", ""))
+    return _serve_sub(token, format or fmt, request.headers.get("user-agent", ""),
+                      request.url.query)
+
+
+@sub_router.get("/sub/all/", include_in_schema=False)
+async def sub_all_slash(request: Request, token: str | None = None, fmt: str | None = None,
+                        format: str | None = None):
+    return _serve_sub(token, format or fmt, request.headers.get("user-agent", ""),
+                      request.url.query)
 
 
 @sub_router.get("/sub/all/{token}")
 async def sub_all_token(token: str, request: Request, fmt: str | None = None,
                         format: str | None = None):
-    return _serve_sub(token, format or fmt, request.headers.get("user-agent", ""))
+    return _serve_sub(token, format or fmt, request.headers.get("user-agent", ""),
+                      request.url.query)
+
+
+@sub_router.get("/sub/all/{token}/")
+async def sub_all_token_slash(token: str, request: Request, fmt: str | None = None,
+                              format: str | None = None):
+    return _serve_sub(token, format or fmt, request.headers.get("user-agent", ""),
+                      request.url.query)
 
 
 @sub_router.get("/sub/all/{token}/{fmt}")
 async def sub_all_token_fmt(token: str, fmt: str, request: Request, format: str | None = None):
     """Query-free form: /sub/all/<token>/<clash|singbox|base64>.
     Needed for reverse proxies that escape & or drop the query string."""
-    return _serve_sub(token, format or fmt, request.headers.get("user-agent", ""))
+    return _serve_sub(token, format or fmt, request.headers.get("user-agent", ""),
+                      request.url.query)
+
+
+@sub_router.get("/sub/all/{token}/{fmt}/")
+async def sub_all_token_fmt_slash(token: str, fmt: str, request: Request,
+                                  format: str | None = None):
+    return _serve_sub(token, format or fmt, request.headers.get("user-agent", ""),
+                      request.url.query)
 
 
 @sub_router.get("/healthz")

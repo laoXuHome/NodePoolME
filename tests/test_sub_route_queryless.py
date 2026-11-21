@@ -31,6 +31,15 @@ def test_queryless_route():
     r = client.get("/sub/all/bad-token/clash")
     assert r.status_code == 403
 
+    # reverse proxies that HTML-escape & or append a trailing slash must still work
+    for url in (f"/sub/all?token={token}&amp;amp;format=clash/",
+                f"/sub/all?token={token}%26amp%3Bformat=clash",
+                f"/sub/all/{token}/clash/",
+                f"/sub/all/?token={token}&format=clash"):
+        r = client.get(url)
+        assert r.status_code == 200, (url, r.status_code, r.text[:80])
+        assert "yaml" in r.headers.get("content-type", ""), (url, r.headers.get("content-type"))
+
 
 if __name__ == "__main__":
     test_queryless_route()
