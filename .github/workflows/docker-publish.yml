@@ -45,6 +45,7 @@ jobs:
           python tests/test_latency_dual.py
           python tests/test_latency_names.py
           python tests/test_name_separators.py
+          python tests/test_node_test_modes.py
 
   build:
     needs: test

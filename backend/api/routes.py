@@ -542,7 +542,11 @@ async def node_detail(node_id: int):
 
 @api.post("/nodes/{node_id}/test", dependencies=protected)
 async def test_node(node_id: int, payload: NodeTestIn | None = None):
-    result = await manager.test_single_node(node_id, payload.group_ids if payload else None)
+    result = await manager.test_single_node(
+        node_id,
+        payload.group_ids if payload else None,
+        payload.mode if payload else "all",
+    )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error"))
     return result

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, formatTs } from '../api'
 
@@ -16,7 +16,11 @@ const detail = ref(null)
 const detailOpen = ref(false)
 const history = ref([])
 const latencyLabels = ref({ G: { short: 'G', name: 'Google' }, W: { short: 'W', name: 'Wikipedia' } })
-const testing = ref(false)
+const testing = ref('')   // '' | 'latency' | 'tags'
+const isMobile = ref(false)
+const detailCols = computed(() => (isMobile.value ? 1 : 2))
+let mq = null
+function syncMobile(e) { isMobile.value = e.matches }
 
 const protocolOptions = computed(() => ['ss', 'vmess', 'vless', 'trojan', 'hysteria2', 'tuic', 'socks5', 'http'])
 
@@ -63,21 +67,26 @@ async function openDetail(row) {
   } catch (e) { ElMessage.error(e.message) }
 }
 
-async function testNode() {
-  testing.value = true
+async function testNode(mode) {
+  testing.value = mode
   try {
-    const res = await api.post(`/api/nodes/${detail.value.id}/test`, {})
-    const ok = res.results.filter((r) => r.ok).length
-    ElMessage.success(`检测完成：${ok}/${res.results.length} 项通过`)
+    const res = await api.post(`/api/nodes/${detail.value.id}/test`, { mode })
+    if (mode === 'latency') {
+      ElMessage.success(res.latency?.ok ? '延迟检测通过（两个目标都达标）' : '延迟检测未通过')
+    } else {
+      const ok = res.results.filter((r) => r.ok).length
+      ElMessage.success(`标签检测完成：${ok}/${res.results.length} 项通过`)
+    }
     await openDetail(detail.value)
     await load()
   } catch (e) { ElMessage.error(e.message) }
-  finally { testing.value = false }
+  finally { testing.value = '' }
 }
 
 function latencyText(n) { return n ? `${n} ms` : '—' }
 function targetName(target) { return latencyLabels.value[target]?.name || target }
 function targetShort(target) { return latencyLabels.value[target]?.short || target }
+function shortTs(ts) { const full = formatTs(ts); return full === '—' ? full : full.slice(5, 16) }
 function latencyType(n) { if (!n) return 'info'; if (n < 200) return 'success'; if (n < 500) return 'warning'; return 'danger' }
 function groupCell(row, gid) {
   const res = row.results[String(gid)]
@@ -85,7 +94,14 @@ function groupCell(row, gid) {
   return res
 }
 
-onMounted(async () => { await loadMeta(); await load() })
+onMounted(async () => {
+  mq = window.matchMedia('(max-width: 768px)')
+  isMobile.value = mq.matches
+  mq.addEventListener('change', syncMobile)
+  await loadMeta()
+  await load()
+})
+onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 </script>
 
 <template>
@@ -180,8 +196,9 @@ onMounted(async () => { await loadMeta(); await load() })
       </div>
     </div>
 
-    <el-dialog v-model="detailOpen" :title="detail?.display_name || '节点详情'" width="720px">
-      <el-descriptions v-if="detail" :column="2" border size="small">
+    <el-dialog v-model="detailOpen" :title="detail?.display_name || '节点详情'" width="720px"
+               :fullscreen="isMobile" class="node-detail-dialog">
+      <el-descriptions v-if="detail" :column="detailCols" border size="small">
         <el-descriptions-item label="原始名称">{{ detail.raw_name }}</el-descriptions-item>
         <el-descriptions-item label="机场">{{ detail.airport_name }}</el-descriptions-item>
         <el-descriptions-item label="协议">{{ detail.protocol }}</el-descriptions-item>
@@ -196,23 +213,29 @@ onMounted(async () => { await loadMeta(); await load() })
           <div class="np-code" style="max-height:150px">{{ JSON.stringify(detail.params, null, 2) }}</div>
         </el-descriptions-item>
       </el-descriptions>
-      <div class="np-section-title" style="margin-top:16px">延迟检测（下发依据）</div>
+      <div class="np-section-title" style="margin-top:16px">
+        延迟检测（下发依据）
+        <div class="np-flex" />
+        <el-button size="small" type="primary" plain
+                   :loading="testing === 'latency'" :disabled="!!testing && testing !== 'latency'"
+                   @click="testNode('latency')">只测延迟</el-button>
+      </div>
       <el-table :data="detail?.latency_history || []" size="small" max-height="180">
-        <el-table-column label="时间" width="160">
-          <template #default="{ row }">{{ formatTs(row.ts) }}</template>
+        <el-table-column label="时间" :width="isMobile ? 104 : 160">
+          <template #default="{ row }">{{ isMobile ? shortTs(row.ts) : formatTs(row.ts) }}</template>
         </el-table-column>
-        <el-table-column label="结果" width="80">
+        <el-table-column label="结果" :width="isMobile ? 64 : 80">
           <template #default="{ row }">
             <el-tag :type="row.ok ? 'success' : 'danger'" size="small">{{ row.ok ? '通过' : '失败' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="target" label="目标" width="88">
+        <el-table-column prop="target" label="目标" :width="isMobile ? 64 : 88">
           <template #default="{ row }">
-            <span :title="targetName(row.target)">{{ targetName(row.target) }}</span>
+            <span :title="targetName(row.target)">{{ isMobile ? targetShort(row.target) : targetName(row.target) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="latency_ms" label="延迟(ms)" width="95" />
-        <el-table-column label="错误">
+        <el-table-column prop="latency_ms" label="延迟(ms)" :width="isMobile ? 76 : 95" />
+        <el-table-column v-if="!isMobile" label="错误">
           <template #default="{ row }">
             <span class="np-muted">{{ row.error_type || '—' }} {{ row.message || '' }}</span>
           </template>
@@ -221,27 +244,26 @@ onMounted(async () => { await loadMeta(); await load() })
       <div class="np-section-title" style="margin-top:16px">
         标签历史
         <div class="np-flex" />
-        <el-button size="small" type="primary" :loading="testing" @click="testNode">立即检测此节点</el-button>
+        <el-button size="small" type="primary" plain
+                   :loading="testing === 'tags'" :disabled="!!testing && testing !== 'tags'"
+                   @click="testNode('tags')">只测标签</el-button>
       </div>
       <el-table :data="history" size="small" max-height="260">
-        <el-table-column label="时间" width="160">
-          <template #default="{ row }">{{ formatTs(row.ts) }}</template>
+        <el-table-column label="时间" :width="isMobile ? 104 : 160">
+          <template #default="{ row }">{{ isMobile ? shortTs(row.ts) : formatTs(row.ts) }}</template>
         </el-table-column>
-        <el-table-column label="检测组" width="120">
-          <template #default="{ row }">{{ row.group_name }} ({{ row.ident }})</template>
+        <el-table-column label="检测组" :width="isMobile ? 78 : 120">
+          <template #default="{ row }">
+            <span :title="`${row.group_name} (${row.ident})`">{{ isMobile ? row.ident : `${row.group_name} (${row.ident})` }}</span>
+          </template>
         </el-table-column>
-        <el-table-column label="结果" width="80">
+        <el-table-column label="结果" :width="isMobile ? 64 : 80">
           <template #default="{ row }">
             <el-tag :type="row.ok ? 'success' : 'danger'" size="small">{{ row.ok ? '通过' : '失败' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="target" label="目标" width="88">
-          <template #default="{ row }">
-            <span :title="targetName(row.target)">{{ targetName(row.target) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="latency_ms" label="延迟(ms)" width="95" />
-        <el-table-column label="错误">
+        <el-table-column prop="latency_ms" label="延迟(ms)" :width="isMobile ? 76 : 95" />
+        <el-table-column v-if="!isMobile" label="错误">
           <template #default="{ row }">
             <span class="np-muted">{{ row.error_type || '—' }} {{ row.message || '' }}</span>
           </template>

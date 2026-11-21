@@ -105,7 +105,8 @@ body {
     padding: 0 0 4px !important; line-height: 1.45; }
   .el-form-item__content { margin-left: 0 !important; display: block; }
 
-  .el-dialog { width: 94% !important; margin-top: 5vh !important; }
+  .el-dialog:not(.is-fullscreen) { width: 94% !important; margin-top: 5vh !important; }
+  .el-dialog.is-fullscreen { width: 100% !important; height: 100% !important; margin: 0 !important; border-radius: 0; }
   .el-dialog__body { padding: 14px 14px 4px !important; }
   .el-drawer { max-width: 82vw; }
 

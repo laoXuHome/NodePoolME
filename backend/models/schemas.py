@@ -1,5 +1,5 @@
 """Request/response models."""
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -101,3 +101,4 @@ class RunIn(BaseModel):
 
 class NodeTestIn(BaseModel):
     group_ids: Optional[list[int]] = None
+    mode: Literal["all", "latency", "tags"] = "all"

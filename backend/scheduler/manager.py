@@ -414,18 +414,22 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
             state.current_groups = []
 
 
-async def test_single_node(node_id: int, group_ids: list[int] | None = None) -> dict:
+async def test_single_node(node_id: int, group_ids: list[int] | None = None,
+                           mode: str = "all") -> dict:
+    """mode: all | latency | tags. Lets the detail dialog test either half alone."""
     node = db.row("SELECT * FROM nodes WHERE id=?", (node_id,))
     if not node:
         return {"ok": False, "error": "node not found"}
     node["params"] = db.loads(node.get("params"), {})
-    groups = db.rows("SELECT * FROM test_groups WHERE enabled=1 ORDER BY sort_order, id")
-    if group_ids:
-        groups = [g for g in groups if g["id"] in group_ids]
-    if not groups:
-        return {"ok": False, "error": "no enabled test group"}
+    groups = []
+    if mode != "latency":
+        groups = db.rows("SELECT * FROM test_groups WHERE enabled=1 ORDER BY sort_order, id")
+        if group_ids:
+            groups = [g for g in groups if g["id"] in group_ids]
+        if not groups:
+            return {"ok": False, "error": "no enabled test group"}
     await engine_mod.engine_manager.prepare([node])
-    probes = latency_probes()
+    probes = latency_probes() if mode != "tags" else []
     latency = None
     if probes:
         per_probe = {}
@@ -444,8 +448,9 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None) -> 
                 "url": probe["url"],
             }
         passed = _apply_latency_gate(node, probes, per_probe)
+        best_values = [t["best"] for t in targets.values() if t["best"] is not None]
         latency = {"ok": passed, "targets": targets,
-                   "latency_ms": max([t["best"] for t in targets.values() if t["best"]] or [0]) or None}
+                   "latency_ms": max(best_values) if best_values else None}
     results = []
     for group in groups:
         outcome = await engine_mod.engine_manager.test(node, group)
@@ -453,7 +458,8 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None) -> 
         results.append({"group": group["name"], "ok": outcome.ok, "latency_ms": outcome.latency_ms,
                         "error_type": outcome.error_type, "message": outcome.message})
         await asyncio.sleep(engine_mod.jitter_ms())
-    return {"ok": True, "node_id": node_id, "latency": latency, "results": results}
+    return {"ok": True, "node_id": node_id, "mode": mode,
+            "latency": latency, "results": results}
 
 
 async def fetch_now(airport_id: int, trigger: str = "manual") -> dict:
