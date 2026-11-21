@@ -661,7 +661,7 @@ def to_uri(node: dict) -> str:
     """Rebuild a share link so the base64 output stays importable."""
     p = node["params"]
     t = node["protocol"]
-    name = node["raw_name"]
+    name = node.get("display_name") or node["raw_name"]
     server, port = node["server"], node["port"]
     if t == "ss":
         userinfo = base64.urlsafe_b64encode(

@@ -97,9 +97,10 @@ def collect_nodes() -> tuple[list[dict], dict]:
                 and node["status"] == "unavailable":
             skipped["unavailable"] += 1
             continue
-        idents = [g["ident"] for g in passed]
-        display = (f"{airport['name']}.{'.'.join(idents)} {node['raw_name']}" if idents
-                   else f"{airport['name']}.{node['raw_name']}")
+        # Names read as  机场｜GPT·YT·TG｜节点名  (group names, not single letters)
+        group_names = [g["name"] for g in passed]
+        display = (f"{airport['name']}｜{'·'.join(group_names)}｜{node['raw_name']}" if group_names
+                   else f"{airport['name']}｜{node['raw_name']}")
         selected.append({**node, "display_name": display, "passed": passed,
                          "latency": latency, "params": db.loads(node["params"], {})})
 

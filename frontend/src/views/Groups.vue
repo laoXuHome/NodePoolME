@@ -48,7 +48,7 @@ async function toggle(row, enabled) {
 }
 
 async function remove(row) {
-  await ElMessageBox.confirm(`删除检测组「${row.name}」会同时删除其检测结果，节点标识将不再包含 ${row.ident}。`,
+  await ElMessageBox.confirm(`删除检测组「${row.name}」会同时删除其检测结果，节点名的中间段将不再包含 ${row.name}。`,
                              '确认删除', { type: 'warning' })
   try { await api.del(`/api/groups/${row.id}`); ElMessage.success('已删除'); await load() }
   catch (e) { ElMessage.error(e.message) }
@@ -69,14 +69,14 @@ onMounted(load)
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">节点标签</h2>
     <div class="np-page-desc">
-      每个标签对应一个检测目标与一个延迟上限。命中即在节点名中加入该代号，不决定是否下发；是否下发由「系统设置 → 延迟检测」决定。默认标签 ChatGPT/G、Telegram/TG、YouTube/Y。
+      每个标签对应一个检测目标与一个延迟上限。命中即在节点名中间段加入该组名（如「机场｜GPT·YouTube｜节点名」），不决定是否下发；是否下发由「系统设置 → 延迟检测」的延迟上限决定。
     </div>
 
     <div class="np-toolbar">
       <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新增检测组</el-button>
       <el-button @click="load"><el-icon><Refresh /></el-icon>刷新</el-button>
       <div class="np-flex" />
-      <span class="np-muted">标识顺序决定名称中标识的排列：{{ items.filter(i => i.enabled).map(i => i.ident).join(' . ') }}</span>
+      <span class="np-muted">顺序决定名称中间段的排列：{{ items.filter(i => i.enabled).map(i => i.name).join(' · ') || '（无启用标签）' }}</span>
     </div>
 
     <div class="np-card">
@@ -124,7 +124,7 @@ onMounted(load)
             </el-form-item>
           </el-col>
           <el-col :span="10">
-            <el-form-item label="节点标识">
+            <el-form-item label="代号（内部用）">
               <el-input v-model="form.ident" placeholder="例如 G / TG / CL" maxlength="12" />
             </el-form-item>
           </el-col>

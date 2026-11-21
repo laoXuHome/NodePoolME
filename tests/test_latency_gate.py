@@ -59,8 +59,8 @@ def test_publish_gated_by_latency_ceiling():
     nodes, stats = builder.collect_nodes()
     names = [n["display_name"] for n in nodes]
     assert len(nodes) == 2, names
-    assert any("星链.G " in n for n in names), names          # ident from the group
-    assert any("星链.快速-无标识" == n for n in names), names   # published without any ident
+    assert any(n == "星链｜ChatGPT｜快速-有标识" for n in names), names   # group name in the middle
+    assert any(n == "星链｜快速-无标识" for n in names), names            # no group hit: airport + name
     assert stats["skipped"]["slow"] == 1 and stats["skipped"]["no_result"] == 1, stats
 
 

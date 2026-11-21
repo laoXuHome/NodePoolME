@@ -278,12 +278,12 @@ async def delete_group(group_id: int):
 
 # ---------------------------------------------------------------------------- nodes
 def _node_names() -> dict[int, str]:
-    groups = db.rows("SELECT id, ident, sort_order FROM test_groups WHERE enabled=1 ORDER BY sort_order, id")
+    groups = db.rows("SELECT id, name, sort_order FROM test_groups WHERE enabled=1 ORDER BY sort_order, id")
     results = builder.latest_results()
     airports = {a["id"]: a["name"] for a in db.rows("SELECT id, name FROM airports")}
     names: dict[int, list[str]] = {}
     for node_id, per_group in results.items():
-        passed = [g["ident"] for g in groups if per_group.get(g["id"], {}).get("ok")]
+        passed = [g["name"] for g in groups if per_group.get(g["id"], {}).get("ok")]
         names[node_id] = passed
     return names
 
@@ -306,9 +306,9 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
     items = []
     for node in nodes:
         per_group = results.get(node["id"], {})
-        passed_idents = idents.get(node["id"], [])
-        display = f"{node['airport_name']}.{'.'.join(passed_idents)} {node['raw_name']}" \
-            if passed_idents else f"{node['airport_name']}(未通过) {node['raw_name']}"
+        passed_idents = idents.get(node["id"], [])   # group display names
+        display = (f"{node['airport_name']}｜{'·'.join(passed_idents)}｜{node['raw_name']}"
+                   if passed_idents else f"{node['airport_name']}｜未通过｜{node['raw_name']}")
         node["display_name"] = display
         probe = latests.get(node["id"])
         latency = (probe or {}).get("latency_ms") or (node["latency"] or 0)
