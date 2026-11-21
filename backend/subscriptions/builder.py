@@ -51,6 +51,7 @@ def collect_nodes() -> tuple[list[dict], dict]:
     max_latency = db.get_int("sub_max_latency", 0)
     max_nodes = db.get_int("sub_max_nodes", 0)
     fail_threshold = db.get_int("fail_threshold", 3)
+    include_unavailable = db.get("sub_include_unavailable") == "1"
 
     selected: list[dict] = []
     skipped = {"no_result": 0, "failed_groups": 0, "slow": 0, "unavailable": 0, "bad_airport": 0}
@@ -67,7 +68,8 @@ def collect_nodes() -> tuple[list[dict], dict]:
         if len(passed) < min_groups:
             skipped["failed_groups"] += 1
             continue
-        if node["fail_count"] >= fail_threshold and node["status"] == "unavailable":
+        if not include_unavailable and node["fail_count"] >= fail_threshold \
+                and node["status"] == "unavailable":
             skipped["unavailable"] += 1
             continue
         latencies = [per_group[g["id"]]["latency_ms"] for g in passed
