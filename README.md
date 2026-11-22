@@ -8,6 +8,8 @@
 
 > 不依赖 Subs-Check-Pro、Sub-Store 或任何第三方订阅转换服务。单个 Docker 容器即可运行，SQLite 存业务数据，前端由后端直接托管。
 
+完整功能、参数、调度与排障说明见 **[docs/项目说明.md](docs/项目说明.md)**。
+
 ## 目录
 
 - [特性](#特性)
@@ -40,7 +42,8 @@
 - **随机化与相似节点分散**：每轮重新打乱，按同 IP / 同网段交错排列，配合全局并发、单组并发、同 IP、同网段四层限流。
 - **批次完整性**：所有启用检测组处理完本轮目标节点后才算完整批次，完整后才生成并原子替换订阅；中断、崩溃不发布半成品。
 - **唯一统一订阅**：`/sub/all`，Token 保护，支持 Clash/Mihomo YAML、sing-box JSON、通用 Base64 三种格式，不暴露机场原始 URL。
-- **动态名称标识**：`机场名.检测标识 原始名称`，改机场名不必重写节点记录。
+- **动态名称标识**：`机场名⁃检测标识ᐧ检测标识⁃原始名称`，改机场名不必重写节点记录。
+- **节点池延迟可读**：G/W 列显示最近 3 轮中最低的实测延迟，未下发节点也保留数值；超过各自上限的数字标红。
 - **可运维**：仪表盘、全中文日志、系统设置、数据库备份/恢复、健康检查、重启自动恢复。
 
 ## 架构
@@ -105,7 +108,7 @@ docker run -d --name nodepool --restart unless-stopped \
 | 来源 | 地址 |
 | --- | --- |
 | GHCR（GitHub Actions 构建，多架构） | `ghcr.io/laoxuhome/nodepoolme:latest` |
-| 版本标签 | `ghcr.io/laoxuhome/nodepoolme:v1.0.0`、`sha-xxxxxxx` |
+| 版本标签 | `ghcr.io/laoxuhome/nodepoolme:v1.2.29`、`sha-xxxxxxx` |
 
 支持 `linux/amd64` 与 `linux/arm64`（含 Mihomo 内核）。
 
@@ -124,7 +127,7 @@ docker run -d --name nodepool --restart unless-stopped \
 | `NODEPOOL_MIHOMO_BIN` | `/usr/local/bin/mihomo` | 内核路径 |
 | `NODEPOOL_MIHOMO_API` | `http://127.0.0.1:9090` | 内核控制接口（仅监听回环） |
 | `NODEPOOL_MIHOMO_BASE_PORT` | `31000` | 每个节点 SOCKS 入口起始端口（仅回环） |
-| `NODEPOOL_UA` | `clash.meta/... NodePoolME/1.0` | 拉取订阅时使用的 UA |
+| `NODEPOOL_UA` | `clash-verge/v1.19.6` | 拉取订阅时使用的 UA |
 
 持久化目录：
 
@@ -155,7 +158,7 @@ docker run -d --name nodepool --restart unless-stopped \
 | Telegram | `TG` | `https://telegram.org/` | 状态码 200–399 |
 | YouTube | `Y` | `https://www.youtube.com/generate_204` | 状态码 204 |
 
-下发延迟探测固定为双目标（Google / Wikipedia favicon），每轮各测 2 次，可在系统设置中分别配置链接与上限。
+下发延迟探测固定为双目标（Google / Wikipedia favicon），每个目标各测 3 轮（G→W 交替、不并发），可在系统设置中分别配置链接与上限。
 
 Google 与 Gemini **不**默认启用，需要时通过「新增检测组」添加。自定义组可使用任意标识，标识顺序按「排序值、ID」稳定输出。
 
@@ -257,7 +260,7 @@ sudo npup v1.2.1     # 也可以直接指定版本，脚本会改写 .env 再升
 
 | 项目 | 默认 | 可配置范围 |
 | --- | --- | --- |
-| 单检测组并发 | 5 | 1–20（系统设置） |
+| 单检测组并发 | 5 | 1–100（系统设置） |
 | 全局并发 | 10 | 1–300，优先级最高 |
 | 同 IP 并发 | 1 | 1–10 |
 | 同 /24 并发 | 2 | 1–20 |
@@ -343,7 +346,7 @@ python tests/test_engine_live.py    # 需要 /tmp/mihomo 内核，验证真实 H
 | GET | `/api/airports/{id}/logs` | 拉取历史 |
 | GET | `/api/nodes` | 搜索、筛选、排序、分页 |
 | GET | `/api/nodes/{id}` | 节点详情与检测历史 |
-| POST | `/api/nodes/{id}/test` | 手动检测单个节点 |
+| POST | `/api/nodes/{id}/test` | 手动检测单个节点，body 可含 `mode: latency/tags/all` |
 | GET/POST/PATCH/DELETE | `/api/groups[/{id}]` | 检测组管理 |
 | POST | `/api/run` | 手动触发批次（可指定组） |
 | POST | `/api/run/pause` `/resume` `/stop` | 暂停 / 继续 / 停止当前批次（停止后按进度下发） |
@@ -355,6 +358,7 @@ python tests/test_engine_live.py    # 需要 /tmp/mihomo 内核，验证真实 H
 | GET | `/api/logs` | 系统日志 |
 | POST/GET | `/api/system/backup` `/download` `/restore` | 备份 / 下载 / 恢复 |
 | GET | `/sub/all?token=...&format=...` | 统一订阅 |
+| GET | `/sub/all/{token}/{format}` | 无查询参数订阅形式 |
 | GET | `/healthz` | 健康检查 |
 
 ## 首版范围与限制
