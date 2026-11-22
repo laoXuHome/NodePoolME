@@ -178,6 +178,7 @@ function airportPublishRate(row) {
   return Math.min(100, Math.round((row.published_count || 0) / pool * 100))
 }
 function airportStateText(row) {
+  if (!row.enabled) return '未启用'
   if (row.last_status === 'ok') return '正常'
   if (row.last_status === 'error') return '失败'
   return '未拉取'
@@ -261,18 +262,23 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
 
         <div class="np-pool-subhead">
           <span>机场 · 节点与下发分布</span>
-          <span>节点占比 · 下发率 · 最近拉取</span>
+          <span>节点占比 · 下发率 · 上次 / 下次拉取</span>
         </div>
 
         <div v-if="data.airport_list?.length" class="np-pool-airports">
           <div v-for="row in data.airport_list" :key="row.id" class="np-pool-airport-row">
             <div class="np-pool-airport-name">
               <div class="np-pool-airport-title">
-                <span class="np-airport-dot" :class="`is-${row.last_status || 'none'}`" :title="airportStateText(row)" />
+                <span class="np-airport-dot" :class="!row.enabled ? 'is-off' : `is-${row.last_status || 'none'}`" :title="airportStateText(row)" />
                 <b>{{ row.name }}</b>
-                <span>{{ row.pool_count }} 节点</span>
+                <span v-if="row.enabled">{{ row.pool_count }} 节点</span>
+                <span v-else>{{ row.node_count }} 缓存</span>
+                <span v-if="!row.enabled" class="np-pool-off">未启用</span>
               </div>
-              <div class="np-pool-airport-meta">拉取 {{ shortTs(row.last_success_at) }}</div>
+              <div class="np-pool-airport-meta">
+                <span>上次拉取 {{ shortTs(row.last_success_at) }}</span>
+                <span>下次拉取 {{ !row.enabled ? '未启用' : row.next_run_at ? shortTs(row.next_run_at) : '仅手动' }}</span>
+              </div>
             </div>
             <div class="np-pool-metric">
               <div class="np-pool-caption"><span>节点占比</span><b>{{ airportNodeShare(row) }}%</b></div>
@@ -286,10 +292,6 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
         </div>
         <div v-else class="np-empty">节点池为空，先到「机场管理」添加并拉取订阅。</div>
 
-        <div class="np-pool-foot">
-          <span>最近成功 {{ shortTs(data.fetch?.last_success_at) }}</span>
-          <span>{{ manualCount ? `${manualCount} 个仅手动` : data.fetch?.error ? `${data.fetch.error} 个失败` : '自动拉取开启' }}</span>
-        </div>
       </div>
 
       <!-- 检测任务 + 最近批次：合并成一块实时状态 -->

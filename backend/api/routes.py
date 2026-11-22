@@ -68,6 +68,8 @@ def _group_stats() -> list[dict]:
                    SELECT r.node_id FROM results r
                    JOIN (SELECT node_id, MAX(id) AS mx FROM results WHERE group_id=? GROUP BY node_id) m
                      ON m.node_id = r.node_id AND m.mx = r.id
+                   JOIN nodes n ON n.id = r.node_id
+                   JOIN airports a ON a.id = n.airport_id AND a.enabled = 1
                    WHERE r.ok = 1) t""",
             (group["id"],),
         )
@@ -111,24 +113,26 @@ async def dashboard():
     manual_only = 0
     airport_list: list[dict] = []
     for airport in airports:
-        nxt = fetcher.next_run_at(airport, now)
+        nxt = fetcher.next_run_at(airport, now) if airport["enabled"] else None
         airport["next_run_at"] = nxt.isoformat(sep=" ", timespec="seconds") if nxt else None
-        airport["manual_only"] = nxt is None
-        if nxt is None:
-            manual_only += 1
-        elif airport["enabled"]:
-            fetch_next.append(airport["next_run_at"])
+        airport["manual_only"] = bool(airport["enabled"] and nxt is None)
+        if airport["enabled"]:
+            if nxt is None:
+                manual_only += 1
+            else:
+                fetch_next.append(airport["next_run_at"])
         payload = _airport_payload(airport)
         payload["next_run_at"] = airport["next_run_at"]
         payload["manual_only"] = airport["manual_only"]
         payload["published_count"] = published_by_airport.get(airport["id"], 0)
         airport_list.append(payload)
-    fetch_ok = sum(1 for a in airports if a["last_status"] == "ok")
-    fetch_err = sum(1 for a in airports if a["last_status"] == "error")
-    last_fetch = max((a["last_success_at"] or "" for a in airports), default="") or None
+    enabled_airports = [a for a in airports if a["enabled"]]
+    fetch_ok = sum(1 for a in enabled_airports if a["last_status"] == "ok")
+    fetch_err = sum(1 for a in enabled_airports if a["last_status"] == "error")
+    last_fetch = max((a["last_success_at"] or "" for a in enabled_airports), default="") or None
     fetch_block = {
-        "total": len(airports),
-        "enabled": sum(1 for a in airports if a["enabled"]),
+        "total": len(enabled_airports),
+        "enabled": len(enabled_airports),
         "ok": fetch_ok,
         "error": fetch_err,
         "manual_only": manual_only,
@@ -138,7 +142,11 @@ async def dashboard():
     }
     last_publish = db.row("SELECT * FROM batches WHERE published=1 ORDER BY id DESC LIMIT 1")
     group_rows = _group_stats()
-    hits = db.row("SELECT COUNT(*) AS c FROM (SELECT DISTINCT node_id FROM results WHERE ok=1) t")["c"]
+    hits = db.row("""SELECT COUNT(*) AS c FROM (
+        SELECT DISTINCT r.node_id FROM results r
+        JOIN nodes n ON n.id = r.node_id
+        JOIN airports a ON a.id = n.airport_id AND a.enabled = 1
+        WHERE r.ok = 1) t""")["c"]
     group_total = len([g for g in group_rows if g["enabled"]])
     group_block = {
         "count": group_total,
@@ -206,7 +214,7 @@ def _airport_payload(row: dict) -> dict:
         "last_attempt_at": row["last_attempt_at"], "last_success_at": row["last_success_at"],
         "last_status": row["last_status"], "last_error": row["last_error"],
         "node_count": row["node_count"] + filtered,
-        "pool_count": row["node_count"],
+        "pool_count": row["node_count"] if row["enabled"] else 0,
         "filter_keywords": fetcher.normalize_keywords(row.get("filter_keywords")),
         "filtered_count": filtered,
         "traffic_available": bool(row.get("traffic_updated_at")),

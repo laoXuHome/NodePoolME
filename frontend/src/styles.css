@@ -842,8 +842,8 @@ a { color: var(--np-accent); }
 .np-pool-airports { flex: 1; display: flex; flex-direction: column; }
 .np-pool-airport-row {
   flex: 1; min-height: 70px;
-  display: grid; grid-template-columns: minmax(126px, .72fr) minmax(0, 1.32fr) minmax(0, 1.32fr);
-  align-items: center; gap: 16px;
+  display: grid; grid-template-columns: minmax(162px, .88fr) minmax(0, 1.24fr) minmax(0, 1.24fr);
+  align-items: center; gap: 12px;
   border-top: 1px solid var(--np-separator-soft);
 }
 .np-pool-airport-row:first-child { border-top: 0; }
@@ -851,18 +851,14 @@ a { color: var(--np-accent); }
 .np-pool-airport-title { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .np-pool-airport-title b { font-size: 14px; font-weight: 600; color: var(--np-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .np-pool-airport-title span { flex: none; font-size: 11.5px; color: var(--np-tertiary); white-space: nowrap; }
-.np-pool-airport-meta { margin-top: 4px; font-size: 11px; color: var(--np-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.np-pool-airport-title .np-pool-off { padding: 1px 6px; border-radius: 99px; background: #f2f2f7; color: #8e8e93; font-size: 9.5px; line-height: 1.5; }
+.np-pool-airport-meta { display: flex; flex-direction: column; gap: 1px; margin-top: 3px; font-size: 10.5px; line-height: 1.35; color: var(--np-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .np-pool-metric { min-width: 0; display: flex; flex-direction: column; }
 .np-pool-caption { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 7px; font-size: 12px; color: var(--np-tertiary); }
 .np-pool-caption b { font-weight: 600; color: var(--np-secondary); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .np-pool-track { height: 10px; border-radius: 99px; overflow: hidden; background: #edf0f4; }
 .np-pool-track i { display: block; height: 100%; border-radius: inherit; background: color-mix(in srgb, var(--np-accent) 68%, #fff); transition: width .8s cubic-bezier(.22,.61,.36,1); }
 .np-pool-track.is-publish i { background: linear-gradient(90deg, #34c759, #7de08f); }
-.np-pool-foot {
-  display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
-  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--np-separator-soft);
-  font-size: 10.5px; color: var(--np-tertiary); font-variant-numeric: tabular-nums;
-}
 
 /* ---------------------------------------------------------------- subscription compact */
 .np-detect-sub {
@@ -1023,6 +1019,7 @@ a { color: var(--np-accent); }
 .np-airport-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #aeaeb2; box-shadow: 0 0 0 3px rgba(174, 174, 178, .12); }
 .np-airport-dot.is-ok { background: #34c759; box-shadow: 0 0 0 3px rgba(52, 199, 89, .13); }
 .np-airport-dot.is-error { background: #ff3b30; box-shadow: 0 0 0 3px rgba(255, 59, 48, .12); }
+.np-airport-dot.is-off { background: #c7c7cc; box-shadow: 0 0 0 3px rgba(199, 199, 204, .16); }
 .np-airport-name b { font-size: 12px; font-weight: 600; color: var(--np-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .np-airport-name span { font-size: 10px; color: var(--np-tertiary); white-space: nowrap; }
 .np-airport-bar { height: 5px; border-radius: 99px; background: #edf0f4; overflow: hidden; }
