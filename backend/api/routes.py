@@ -102,6 +102,10 @@ async def dashboard():
     probe_passed = sum(1 for p in latests.values() if p["ok"])
     last_batch = db.row("SELECT * FROM batches ORDER BY id DESC LIMIT 1")
     logs = db.rows("SELECT * FROM logs ORDER BY id DESC LIMIT 12")
+    published_by_airport = {}
+    for node in selected:
+        aid = node.get("airport_id")
+        published_by_airport[aid] = published_by_airport.get(aid, 0) + 1
     now = datetime.now().astimezone()
     fetch_next: list[str] = []
     manual_only = 0
@@ -117,6 +121,7 @@ async def dashboard():
         payload = _airport_payload(airport)
         payload["next_run_at"] = airport["next_run_at"]
         payload["manual_only"] = airport["manual_only"]
+        payload["published_count"] = published_by_airport.get(airport["id"], 0)
         airport_list.append(payload)
     fetch_ok = sum(1 for a in airports if a["last_status"] == "ok")
     fetch_err = sum(1 for a in airports if a["last_status"] == "error")
