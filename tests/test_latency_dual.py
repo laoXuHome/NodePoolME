@@ -55,20 +55,30 @@ def test_dual_best_of_three():
     assert latests[ids["g-slow"]]["ok"] is False
     assert latests[ids["g-slow"]]["targets"]["G"]["best"] is None
     assert latests[ids["g-slow"]]["targets"]["W"]["best"] == 300
+    # Display values keep the fastest measured round even when the target failed the gate.
+    assert latests[ids["g-slow"]]["targets"]["G"]["min"] == 1300
+    assert latests[ids["g-slow"]]["targets"]["W"]["min"] == 300
+    assert latests[ids["g-slow"]]["fastest_ms"] == 300
 
     assert latests[ids["w-fallback"]]["ok"] is False
     assert latests[ids["w-fallback"]]["targets"]["G"]["best"] == 800
     assert latests[ids["w-fallback"]]["targets"]["W"]["best"] is None
+    assert latests[ids["w-fallback"]]["targets"]["G"]["min"] == 800
+    assert latests[ids["w-fallback"]]["targets"]["W"]["min"] == 1100
 
     assert latests[ids["both-ok"]]["ok"] is True
     assert latests[ids["both-ok"]]["targets"]["G"]["best"] == 900
     assert latests[ids["both-ok"]]["targets"]["W"]["best"] == 700
     assert latests[ids["both-ok"]]["latency_ms"] == 900  # worst of the two best values
+    assert latests[ids["both-ok"]]["targets"]["G"]["min"] == 900
+    assert latests[ids["both-ok"]]["targets"]["W"]["min"] == 700
+    assert latests[ids["both-ok"]]["fastest_ms"] == 700
 
     # Third-round success must count; keeping only the newest two rounds would drop it.
     assert latests[ids["third-rescue"]]["ok"] is True
     assert latests[ids["third-rescue"]]["targets"]["G"]["best"] == 980
     assert latests[ids["third-rescue"]]["targets"]["W"]["best"] == 950
+    assert latests[ids["third-rescue"]]["fastest_ms"] == 950
 
     nodes, stats = builder.collect_nodes()
     assert [n["raw_name"] for n in nodes] == ["both-ok", "third-rescue"], nodes

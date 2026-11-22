@@ -399,14 +399,16 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
         probe = latests.get(node["id"]) or {}
         targets = probe.get("targets") or {}
         node["latency_targets"] = {
-            "G": {"best": (targets.get("G") or {}).get("best"), "cap": ceiling,
+            "G": {"best": (targets.get("G") or {}).get("best"),
+                  "min": (targets.get("G") or {}).get("min"), "cap": ceiling,
                   "name": latency_labels["G"]["name"], "short": latency_labels["G"]["short"]},
-            "W": {"best": (targets.get("W") or {}).get("best"), "cap": ceiling2,
+            "W": {"best": (targets.get("W") or {}).get("best"),
+                  "min": (targets.get("W") or {}).get("min"), "cap": ceiling2,
                   "name": latency_labels["W"]["name"], "short": latency_labels["W"]["short"]},
         }
         # Publish gate: BOTH targets need a passing round within their own ceiling.
         good = all(node["latency_targets"][t]["best"] is not None for t in ("G", "W"))
-        latency = probe.get("latency_ms") or (node["latency"] or 0)
+        latency = probe.get("fastest_ms") or probe.get("latency_ms") or (node["latency"] or 0)
         node["latency"] = latency
         missing_tags = [t for t in required_idents if t not in passed_idents]
         node["missing_tags"] = missing_tags
@@ -515,14 +517,16 @@ async def node_detail(node_id: int):
     latency_labels = _latency_labels()
     node["latency_labels"] = latency_labels
     node["latency_targets"] = {
-        "G": {"best": ((summary.get("targets") or {}).get("G") or {}).get("best"), "cap": ceiling,
+        "G": {"best": ((summary.get("targets") or {}).get("G") or {}).get("best"),
+              "min": ((summary.get("targets") or {}).get("G") or {}).get("min"), "cap": ceiling,
               "url": db.get("latency_test_url"), "name": latency_labels["G"]["name"],
               "short": latency_labels["G"]["short"]},
-        "W": {"best": ((summary.get("targets") or {}).get("W") or {}).get("best"), "cap": ceiling2,
+        "W": {"best": ((summary.get("targets") or {}).get("W") or {}).get("best"),
+              "min": ((summary.get("targets") or {}).get("W") or {}).get("min"), "cap": ceiling2,
               "url": db.get("latency_test_url2"), "name": latency_labels["W"]["name"],
               "short": latency_labels["W"]["short"]},
     }
-    node["latency"] = summary.get("latency_ms") or (node["latency"] or 0)
+    node["latency"] = summary.get("fastest_ms") or summary.get("latency_ms") or (node["latency"] or 0)
     required = [t for t in (db.get("sub_required_tags") or "").split(",") if t]
     node_idents = set(_node_names().get(node_id, []))
     missing = [t for t in required if t not in node_idents]

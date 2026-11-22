@@ -190,8 +190,8 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <el-table-column :label="`延迟 ${targetShort('G')} / ${targetShort('W')}`" width="132">
           <template #default="{ row }">
             <div class="np-mono" style="font-size:12px">
-              {{ targetShort('G') }} {{ row.latency_targets?.G?.best ?? '—' }} /
-              {{ targetShort('W') }} {{ row.latency_targets?.W?.best ?? '—' }}
+              {{ targetShort('G') }} {{ row.latency_targets?.G?.min ?? row.latency_targets?.G?.best ?? '—' }} /
+              {{ targetShort('W') }} {{ row.latency_targets?.W?.min ?? row.latency_targets?.W?.best ?? '—' }}
             </div>
             <div class="np-muted" style="font-size:11px">上限 {{ row.latency_targets?.G?.cap }} / {{ row.latency_targets?.W?.cap }}</div>
           </template>

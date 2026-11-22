@@ -98,9 +98,12 @@ def latest_latency(batch_id: int | None = None) -> dict[int, dict]:
             ok_rows = [r for r in rows if r["ok"] and r["latency_ms"] is not None
                        and (not cap or r["latency_ms"] <= cap)]
             best[target] = min((r["latency_ms"] for r in ok_rows), default=None)
+            measured = [r["latency_ms"] for r in rows if r["latency_ms"] is not None]
             detail[target] = {
                 "cap": cap,
                 "best": best[target],
+                # Display only: fastest measured round even when it failed or exceeded the cap.
+                "min": min(measured, default=None),
                 "attempts": len(rows),
                 "last_ok": bool(rows[0]["ok"]) if rows else False,
             }
@@ -113,6 +116,8 @@ def latest_latency(batch_id: int | None = None) -> dict[int, dict]:
         out[node_id] = {
             "ok": gate,
             "latency_ms": max(values) if values else None,
+            "fastest_ms": min((d["min"] for d in detail.values() if d["min"] is not None),
+                              default=None),
             "error_type": error_type,
             "ts": ts,
             "targets": detail,

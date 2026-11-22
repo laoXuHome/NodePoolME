@@ -52,6 +52,12 @@ def test_filters_and_reasons():
         reasons = {i["raw_name"]: i["publish_reason"] for i in no["items"]}
         assert "未通过" in reasons["慢"] and "500" in reasons["慢"], reasons
         assert reasons["未测"] == "无可用延迟数据", reasons
+        # Non-publishable nodes must still show the fastest measured latency.
+        slow = next(i for i in no["items"] if i["raw_name"] == "慢")
+        assert slow["latency_targets"]["G"]["best"] is None
+        assert slow["latency_targets"]["G"]["min"] == 720
+        assert slow["latency_targets"]["W"]["min"] == 720
+        assert slow["latency"] == 720
 
         # selecting a tag group alone lists nodes that hit it (regression: str/int key mismatch)
         group_id = db.row("SELECT id FROM test_groups ORDER BY id LIMIT 1")["id"]
