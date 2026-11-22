@@ -45,7 +45,7 @@
 - **唯一统一订阅**：`/sub/all`，Token 保护，支持 Clash/Mihomo YAML、sing-box JSON、通用 Base64 三种格式，不暴露机场原始 URL。
 - **动态名称标识**：`机场名⁃检测标识ᐧ检测标识⁃原始名称`，改机场名不必重写节点记录。
 - **节点池延迟可读**：G/W 列显示最近 3 轮中最低的实测延迟，未下发节点也保留数值；超过各自上限的数字标红。
-- **可运维**：仪表盘、全中文日志、系统设置、数据库备份/恢复、健康检查、重启自动恢复。
+- **可运维**：仪表盘、全中文日志与全中文操作提示、系统设置、数据库备份/恢复、健康检查、重启自动恢复。
 
 ## 架构
 
@@ -109,7 +109,7 @@ docker run -d --name nodepool --restart unless-stopped \
 | 来源 | 地址 |
 | --- | --- |
 | GHCR（GitHub Actions 构建，多架构） | `ghcr.io/laoxuhome/nodepoolme:latest` |
-| 版本标签 | `ghcr.io/laoxuhome/nodepoolme:v1.2.32`、`sha-xxxxxxx` |
+| 版本标签 | `ghcr.io/laoxuhome/nodepoolme:v1.2.33`、`sha-xxxxxxx` |
 
 支持 `linux/amd64` 与 `linux/arm64`（含 Mihomo 内核）。
 

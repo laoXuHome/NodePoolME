@@ -1,5 +1,53 @@
 import { reactive } from 'vue'
 
+const STATUS_TEXT = {
+  400: '请求参数有误，请检查输入',
+  401: '请先登录',
+  403: '没有权限执行此操作',
+  404: '请求的内容不存在',
+  409: '操作冲突，请刷新后重试',
+  405: '请求方式不允许',
+  413: '上传的文件过大',
+  422: '提交内容不符合要求，请检查输入',
+  429: '请求过于频繁，请稍后再试',
+  500: '服务器内部错误',
+  502: '服务暂时不可用，请稍后重试',
+  503: '服务暂时不可用，请稍后重试',
+  504: '网关超时，请稍后重试'
+}
+
+const DEFAULT_ENGLISH_ERROR = {
+  'bad request': 400,
+  unauthorized: 401,
+  forbidden: 403,
+  'not found': 404,
+  'method not allowed': 405,
+  'request entity too large': 413,
+  'unprocessable entity': 422,
+  'too many requests': 429,
+  'internal server error': 500,
+  'bad gateway': 502,
+  'service unavailable': 503,
+  'gateway timeout': 504
+}
+
+function responseMessage(status, data) {
+  const detail = data && typeof data === 'object' && 'detail' in data ? data.detail : data
+  if (typeof detail === 'string' && detail.trim()) {
+    const text = detail.trim()
+    if (text.startsWith('<')) return STATUS_TEXT[status] || '请求失败，请稍后重试'
+    const mapped = DEFAULT_ENGLISH_ERROR[text.toLowerCase()]
+    if (mapped) return STATUS_TEXT[mapped] || STATUS_TEXT[status]
+    return text
+  }
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    if (typeof detail.message === 'string' && detail.message.trim()) return detail.message
+  }
+  if (Array.isArray(detail)) return STATUS_TEXT[422] || '提交内容不符合要求，请检查输入'
+  return STATUS_TEXT[status] || `请求失败（HTTP ${status}）`
+}
+
+
 async function request(method, url, body) {
   const options = { method, credentials: 'same-origin', headers: {} }
   if (body !== undefined) {
@@ -10,7 +58,12 @@ async function request(method, url, body) {
       options.body = JSON.stringify(body)
     }
   }
-  const res = await fetch(url, options)
+  let res
+  try {
+    res = await fetch(url, options)
+  } catch {
+    throw new Error('网络请求失败，请检查网络连接或服务是否正在运行')
+  }
   if (res.status === 401 && !url.includes('/auth/login')) {
     window.location.hash = '#/login'
     throw new Error('登录已失效，请重新登录')
@@ -18,8 +71,7 @@ async function request(method, url, body) {
   const text = await res.text()
   const data = text ? (() => { try { return JSON.parse(text) } catch { return text } })() : null
   if (!res.ok) {
-    const detail = data && data.detail ? data.detail : `HTTP ${res.status}`
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+    throw new Error(responseMessage(res.status, data))
   }
   return data
 }

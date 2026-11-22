@@ -22,16 +22,30 @@ async def _download(url: str) -> str:
                                          headers=headers, trust_env=True) as client:
                 response = await client.get(url)
                 if response.status_code >= 400:
-                    last_error = f"HTTP {response.status_code}"
+                    last_error = f"服务器返回 HTTP {response.status_code}"
                 else:
                     text = response.text
                     if len(text.encode()) > MAX_BYTES:
-                        raise ValueError("subscription larger than 20MB")
+                        raise ValueError("订阅文件超过 20MB")
                     return text
+        except ValueError as exc:
+            last_error = str(exc)
         except Exception as exc:
-            last_error = f"{type(exc).__name__}: {exc}"
+            name = type(exc).__name__
+            friendly = {
+                "ConnectTimeout": "连接超时",
+                "ReadTimeout": "读取超时",
+                "TimeoutException": "请求超时",
+                "ConnectError": "无法连接服务器",
+                "ReadError": "读取响应失败",
+                "RemoteProtocolError": "服务器响应异常",
+                "TooManyRedirects": "重定向次数过多",
+                "InvalidURL": "订阅地址无效",
+                "SSLError": "TLS 证书校验失败",
+            }.get(name, "网络请求异常")
+            last_error = f"{friendly}（{name}）"
         await asyncio.sleep(1.5 * (attempt + 1))
-    raise RuntimeError(last_error or "download failed")
+    raise RuntimeError(last_error or "下载失败")
 
 
 def normalize_keywords(value) -> list[str]:
@@ -217,7 +231,7 @@ def reclassify_airport(airport_id: int, keywords: list[str] | None = None,
     """
     airport = airport_by_id(airport_id)
     if not airport:
-        return {"ok": False, "error": "airport not found"}
+        return {"ok": False, "error": "机场不存在"}
     kws = normalize_keywords(keywords if keywords is not None else airport["filter_keywords"])
     stamp = db.now()
     moved_out = 0
@@ -350,7 +364,7 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
             uniq.setdefault(node["fingerprint"], node)
         duplicates = len(nodes) - len(uniq)
         if not uniq:
-            raise ValueError(f"no supported node parsed ({'; '.join(errors) or 'unknown content'})")
+            raise ValueError(f"未解析到支持的节点（{'; '.join(errors) or '无法识别内容'}）")
         keywords = normalize_keywords(airport.get("filter_keywords"))
         stats = _upsert(airport_id, list(uniq.values()), keywords)
         duration = int((time.perf_counter() - started) * 1000)
@@ -372,8 +386,8 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
         )
         unsupported = parse_stats["unsupported"]
         if unsupported:
-            errors = [f"{sum(unsupported.values())} nodes skipped: "
-                      + ", ".join(f"{k}×{v}" for k, v in unsupported.items())] + list(errors)
+            errors = [f"跳过 {sum(unsupported.values())} 个不支持的节点："
+                      + "、".join(f"{k}×{v}" for k, v in unsupported.items())] + list(errors)
         db.append_log("INFO", "拉取",
                       f"{airport['name']}：共 {stats['total']} 个节点 "
                       + (f"，过滤 {stats['filtered']} 个" if stats.get("filtered") else "")
@@ -383,7 +397,11 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
                 "parse": parse_stats, "duplicates": duplicates}
     except Exception as exc:
         duration = int((time.perf_counter() - started) * 1000)
-        message = f"{type(exc).__name__}: {exc}"[:300]
+        detail = str(exc).strip()
+        if detail.startswith(("服务器返回", "订阅文件", "未解析到支持", "下载失败")):
+            message = detail[:300]
+        else:
+            message = f"拉取失败：{detail}"[:300]
         db.execute(
             "UPDATE airports SET last_status='error', last_error=?, updated_at=? WHERE id=?",
             (message, db.now(), airport_id),

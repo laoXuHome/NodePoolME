@@ -75,7 +75,7 @@ def clear_session(response: Response) -> None:
 async def require_auth(request: Request) -> None:
     token = request.cookies.get(COOKIE) or request.headers.get("X-Nodepool-Token")
     if not check_token(token):
-        raise HTTPException(status_code=401, detail="authentication required")
+        raise HTTPException(status_code=401, detail="需要先登录")
 
 
 def sub_token() -> str:

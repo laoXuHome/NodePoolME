@@ -69,7 +69,7 @@ def test_manual_fetch_rejected_when_disabled():
         aid = _seed_airport("机场B", 0)
         res = client.post(f"/api/airports/{aid}/fetch")
         assert res.status_code == 400
-        assert "disabled" in res.json()["detail"]
+        assert "停用" in res.json()["detail"] and "启用" in res.json()["detail"]
 
 
 if __name__ == "__main__":

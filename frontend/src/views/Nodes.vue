@@ -112,6 +112,11 @@ function overCap(row, target) {
   const cap = row?.latency_targets?.[target]?.cap
   return value != null && cap > 0 && value > cap
 }
+const ERROR_TYPE_LABELS = {
+  timeout: '超时', connect: '连接失败', status: '状态码不符',
+  content: '内容不符', slow: '延迟超限', engine: '引擎异常'
+}
+function errorTypeLabel(value) { return ERROR_TYPE_LABELS[value] || value || '检测失败' }
 function groupCell(row, gid) {
   const res = row.results[String(gid)]
   if (!res) return null
@@ -319,7 +324,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <el-table-column prop="latency_ms" label="延迟(ms)" :width="isMobile ? 76 : 95" />
         <el-table-column v-if="!isMobile" label="错误">
           <template #default="{ row }">
-            <span class="np-muted">{{ row.error_type || '—' }} {{ row.message || '' }}</span>
+            <span class="np-muted">{{ errorTypeLabel(row.error_type) }}{{ row.message ? '：' + row.message : '' }}</span>
           </template>
         </el-table-column>
       </el-table>
@@ -347,7 +352,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <el-table-column prop="latency_ms" label="延迟(ms)" :width="isMobile ? 76 : 95" />
         <el-table-column v-if="!isMobile" label="错误">
           <template #default="{ row }">
-            <span class="np-muted">{{ row.error_type || '—' }} {{ row.message || '' }}</span>
+            <span class="np-muted">{{ errorTypeLabel(row.error_type) }}{{ row.message ? '：' + row.message : '' }}</span>
           </template>
         </el-table-column>
       </el-table>

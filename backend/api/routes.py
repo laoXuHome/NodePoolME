@@ -33,7 +33,7 @@ protected = [Depends(auth.require_auth)]
 async def login(payload: LoginIn, response: Response):
     if not auth.verify_password(payload.password):
         db.append_log("WARN", "认证", "登录失败：密码错误")
-        raise HTTPException(status_code=401, detail="wrong password")
+        raise HTTPException(status_code=401, detail="密码错误")
     token = auth.make_token()
     auth.set_session(response, token)
     return {"ok": True}
@@ -53,7 +53,7 @@ async def me():
 @api.post("/auth/password", dependencies=protected)
 async def change_password(payload: PasswordIn):
     if not auth.verify_password(payload.old_password):
-        raise HTTPException(status_code=400, detail="current password is wrong")
+        raise HTTPException(status_code=400, detail="当前密码错误")
     db.set_setting("admin_password_hash", auth.hash_password(payload.new_password))
     db.append_log("INFO", "认证", "管理员密码已修改")
     return {"ok": True}
@@ -205,7 +205,7 @@ async def list_airports():
 async def create_airport(payload: AirportIn):
     exists = db.row("SELECT id FROM airports WHERE name=?", (payload.name,))
     if exists:
-        raise HTTPException(status_code=400, detail="airport name already used")
+        raise HTTPException(status_code=400, detail="机场名称已被使用")
     stamp = db.now()
     keywords = (fetcher.normalize_keywords(payload.filter_keywords)
                 if payload.filter_keywords is not None else list(config.DEFAULT_FILTER_KEYWORDS))
@@ -223,11 +223,11 @@ async def create_airport(payload: AirportIn):
 async def update_airport(airport_id: int, payload: AirportPatch):
     airport = fetcher.airport_by_id(airport_id)
     if not airport:
-        raise HTTPException(status_code=404, detail="airport not found")
+        raise HTTPException(status_code=404, detail="机场不存在")
     data = payload.dict(exclude_unset=True)
     if "name" in data and data["name"]:
         if db.row("SELECT id FROM airports WHERE name=? AND id<>?", (data["name"], airport_id)):
-            raise HTTPException(status_code=400, detail="airport name already used")
+            raise HTTPException(status_code=400, detail="机场名称已被使用")
         airport["name"] = data["name"].strip()
     for key in ("url", "daily_time"):
         if key in data and data[key] is not None:
@@ -268,7 +268,7 @@ async def update_airport(airport_id: int, payload: AirportPatch):
 async def delete_airport(airport_id: int):
     airport = fetcher.airport_by_id(airport_id)
     if not airport:
-        raise HTTPException(status_code=404, detail="airport not found")
+        raise HTTPException(status_code=404, detail="机场不存在")
     affected = db.row("SELECT COUNT(*) AS c FROM nodes WHERE airport_id=?", (airport_id,))["c"]
     db.execute("DELETE FROM nodes WHERE airport_id=?", (airport_id,))
     db.execute("DELETE FROM airport_filtered_nodes WHERE airport_id=?", (airport_id,))
@@ -288,7 +288,7 @@ async def airport_filter_defaults():
 async def airport_filter(airport_id: int):
     airport = fetcher.airport_by_id(airport_id)
     if not airport:
-        raise HTTPException(status_code=404, detail="airport not found")
+        raise HTTPException(status_code=404, detail="机场不存在")
     return {
         "airport": _airport_payload(airport),
         "keywords": fetcher.normalize_keywords(airport.get("filter_keywords")),
@@ -301,10 +301,10 @@ async def airport_filter(airport_id: int):
 async def airport_filter_admit(airport_id: int, body: dict):
     fingerprint = str(body.get("fingerprint") or "").strip()
     if not fingerprint:
-        raise HTTPException(status_code=400, detail="fingerprint required")
+        raise HTTPException(status_code=400, detail="缺少节点指纹")
     result = fetcher.admit_filtered_node(airport_id, fingerprint)
     if not result:
-        raise HTTPException(status_code=404, detail="filtered node not found")
+        raise HTTPException(status_code=404, detail="被过滤节点不存在，可能已加入节点池")
     return result
 
 
@@ -312,7 +312,7 @@ async def airport_filter_admit(airport_id: int, body: dict):
 async def fetch_airport_now(airport_id: int):
     result = await manager.fetch_now(airport_id, trigger="manual")
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error", "fetch failed"))
+        raise HTTPException(status_code=400, detail=result.get("error") or "拉取失败")
     return result
 
 
@@ -335,7 +335,7 @@ async def list_groups():
 @api.post("/groups", dependencies=protected)
 async def create_group(payload: GroupIn):
     if db.row("SELECT id FROM test_groups WHERE ident=?", (payload.ident,)):
-        raise HTTPException(status_code=400, detail="ident already used by another group")
+        raise HTTPException(status_code=400, detail="标识已被其他检测组使用")
     group_id = db.execute(
         """INSERT INTO test_groups (name, ident, url, method, timeout, expect_status, expect_body,
            max_latency, interval_minutes, enabled, sort_order, is_default, created_at)
@@ -353,14 +353,14 @@ async def create_group(payload: GroupIn):
 async def update_group(group_id: int, payload: GroupPatch):
     group = db.row("SELECT * FROM test_groups WHERE id=?", (group_id,))
     if not group:
-        raise HTTPException(status_code=404, detail="group not found")
+        raise HTTPException(status_code=404, detail="检测组不存在")
     data = payload.dict(exclude_unset=True)
     # timeout and cadence are global now: ignore whatever the client still sends
     data.pop("timeout", None)
     data.pop("interval_minutes", None)
     if "ident" in data and data["ident"]:
         if db.row("SELECT id FROM test_groups WHERE ident=? AND id<>?", (data["ident"], group_id)):
-            raise HTTPException(status_code=400, detail="ident already used by another group")
+            raise HTTPException(status_code=400, detail="标识已被其他检测组使用")
     for key, value in data.items():
         if value is None:
             continue
@@ -384,10 +384,10 @@ async def update_group(group_id: int, payload: GroupPatch):
 async def delete_group(group_id: int):
     group = db.row("SELECT * FROM test_groups WHERE id=?", (group_id,))
     if not group:
-        raise HTTPException(status_code=404, detail="group not found")
+        raise HTTPException(status_code=404, detail="检测组不存在")
     if group["is_default"]:
         raise HTTPException(status_code=400,
-                            detail="default groups cannot be deleted; disable it instead")
+                            detail="默认检测组不能删除，请改为停用")
     db.execute("DELETE FROM test_groups WHERE id=?", (group_id,))
     db.execute("DELETE FROM results WHERE group_id=?", (group_id,))
     db.append_log("WARN", "检测组", f"删除检测组：{group['name']}")
@@ -542,7 +542,7 @@ async def node_detail(node_id: int):
     node = db.row("""SELECT n.*, a.name AS airport_name FROM nodes n
                      JOIN airports a ON a.id=n.airport_id WHERE n.id=?""", (node_id,))
     if not node:
-        raise HTTPException(status_code=404, detail="node not found")
+        raise HTTPException(status_code=404, detail="节点不存在")
     node["params"] = db.loads(node.get("params"), {})
     node["history"] = db.rows(
         """SELECT r.*, g.name AS group_name, g.ident FROM results r
@@ -593,7 +593,7 @@ async def test_node(node_id: int, payload: NodeTestIn | None = None):
         payload.mode if payload else "all",
     )
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        raise HTTPException(status_code=400, detail=result.get("error") or "节点检测失败")
     try:
         result["subscription"] = builder.add_published_node(node_id)
     except Exception as exc:  # a publish hiccup must not fail the test itself
@@ -622,7 +622,7 @@ async def run_cycle(payload: RunIn | None = None):
 async def pause_cycle():
     res = manager.state.request_pause()
     if not res.get("ok"):
-        raise HTTPException(status_code=409, detail=res.get("error"))
+        raise HTTPException(status_code=409, detail=res.get("error") or "操作失败")
     return res
 
 
@@ -630,7 +630,7 @@ async def pause_cycle():
 async def resume_cycle():
     res = manager.state.request_resume()
     if not res.get("ok"):
-        raise HTTPException(status_code=409, detail=res.get("error"))
+        raise HTTPException(status_code=409, detail=res.get("error") or "操作失败")
     return res
 
 
@@ -638,7 +638,7 @@ async def resume_cycle():
 async def stop_cycle():
     res = manager.state.request_stop()
     if not res.get("ok"):
-        raise HTTPException(status_code=409, detail=res.get("error"))
+        raise HTTPException(status_code=409, detail=res.get("error") or "操作失败")
     return res
 
 
@@ -759,13 +759,13 @@ async def update_settings(payload: SettingsIn):
         valid = {g["ident"] for g in enabled}
         unknown = [t for t in wanted if t not in valid]
         if unknown:
-            raise HTTPException(status_code=400, detail=f"unknown or disabled tag: {', '.join(unknown)}")
+            raise HTTPException(status_code=400, detail=f"未知或已停用的标签：{'、'.join(unknown)}")
         data["sub_required_tags"] = ",".join(wanted)
     for key, value in data.items():
         if value is None:
             continue
         if key == "dispersion_mask" and value not in (8, 16, 24, 32):
-            raise HTTPException(status_code=400, detail="dispersion_mask must be 8, 16, 24 or 32")
+            raise HTTPException(status_code=400, detail="相似节点分散粒度只能是 8、16、24 或 32")
         db.set_setting(key, value)
     if "request_interval_min_ms" in data or "request_interval_max_ms" in data:
         if db.get_int("request_interval_max_ms") < db.get_int("request_interval_min_ms"):
@@ -841,7 +841,7 @@ async def restore_backup(file: UploadFile = File(...)):
     tmp = config.BACKUP_DIR / "restore-upload.db"
     content = await file.read()
     if len(content) < 4096:
-        raise HTTPException(status_code=400, detail="uploaded file is too small")
+        raise HTTPException(status_code=400, detail="上传的备份文件过小")
     tmp.write_bytes(content)
     try:
         probe = sqlite3.connect(str(tmp))
@@ -849,10 +849,10 @@ async def restore_backup(file: UploadFile = File(...)):
         probe.close()
     except sqlite3.DatabaseError as exc:
         tmp.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail=f"not a valid SQLite database: {exc}")
+        raise HTTPException(status_code=400, detail=f"不是有效的 SQLite 数据库：{exc}")
     if "nodes" not in tables or "airports" not in tables:
         tmp.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="database is not a NodePool backup")
+        raise HTTPException(status_code=400, detail="这不是 NodePool 的备份文件")
     safety = config.BACKUP_DIR / f"pre-restore-{datetime.now():%Y%m%d-%H%M%S}.db"
     shutil.copy2(config.DB_PATH, safety)
     db.reset_connection()
@@ -908,7 +908,7 @@ def _serve_sub(token: str | None, fmt: str | None, ua: str,
             fmt = repaired.split("format=", 1)[1]
     fmt = _clean_param(fmt) if fmt else fmt
     if not expected or not secrets.compare_digest(token, expected):
-        raise HTTPException(status_code=403, detail="invalid subscription token")
+        raise HTTPException(status_code=403, detail="订阅 Token 无效")
     if not fmt:
         low = ua.lower()
         if "sing-box" in low or "singbox" in low:
@@ -926,7 +926,7 @@ def _serve_sub(token: str | None, fmt: str | None, ua: str,
     try:
         fmt, content = builder.read(fmt)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="subscription not generated yet")
+        raise HTTPException(status_code=404, detail="订阅尚未生成")
     media = {"clash": "text/yaml; charset=utf-8", "singbox": "application/json; charset=utf-8",
              "base64": "text/plain; charset=utf-8"}[fmt]
     ext = {"clash": "yaml", "singbox": "json", "base64": "txt"}[fmt]

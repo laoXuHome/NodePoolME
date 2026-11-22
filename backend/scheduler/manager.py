@@ -506,7 +506,7 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                     "total": state.total, "published": state.last_error is None,
                     "stopped": stopped, "reason": reason}
         except Exception as exc:
-            state.last_error = f"{type(exc).__name__}: {exc}"
+            state.last_error = f"检测批次失败：{type(exc).__name__}: {exc}"
             db.execute("UPDATE batches SET finished_at=?, status='failed', note=? WHERE id=?",
                        (db.now(), state.last_error[:500], batch_id))
             db.append_log("ERROR", "检测", f"批次 #{batch_id} 失败：{state.last_error}")
@@ -529,7 +529,7 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None,
         return {"ok": False, "error": "已有检测批次在运行，请完成后重试"}
     node = db.row("SELECT * FROM nodes WHERE id=?", (node_id,))
     if not node:
-        return {"ok": False, "error": "node not found"}
+        return {"ok": False, "error": "节点不存在"}
     node["params"] = db.loads(node.get("params"), {})
     groups = []
     if mode != "latency":
@@ -576,9 +576,9 @@ async def fetch_now(airport_id: int, trigger: str = "manual") -> dict:
         return {"ok": False, "error": "已有检测批次在运行，请完成后重试"}
     airport = fetcher.airport_by_id(airport_id)
     if not airport:
-        return {"ok": False, "error": "airport not found"}
+        return {"ok": False, "error": "机场不存在"}
     if not airport["enabled"]:
-        return {"ok": False, "error": "airport disabled: enable it first, its cached nodes return without refetching"}
+        return {"ok": False, "error": "机场已停用：请先启用该机场；启用后会直接恢复缓存节点，不会重新拉取"}
     state.fetching.add(airport_id)
     try:
         return await fetcher.fetch_airport(airport, trigger=trigger)

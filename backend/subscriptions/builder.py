@@ -257,20 +257,20 @@ def validate(fmt: str, content: str, nodes: list[dict]) -> None:
     if fmt == "clash":
         doc = yaml.safe_load(content)
         if not isinstance(doc, dict) or not isinstance(doc.get("proxies"), list):
-            raise ValueError("clash output is not a valid proxies document")
+            raise ValueError("Clash 输出不是有效的 proxies 文档")
         if nodes and not doc["proxies"]:
-            raise ValueError("clash output has no proxies")
+            raise ValueError("Clash 输出没有 proxies")
     elif fmt == "singbox":
         doc = json.loads(content)
         if not isinstance(doc.get("outbounds"), list):
-            raise ValueError("sing-box output has no outbounds")
+            raise ValueError("sing-box 输出没有 outbounds")
     elif fmt == "base64":
         if nodes:
             decoded = base64.b64decode(content).decode()
             if "://" not in decoded:
-                raise ValueError("base64 output is not a link list")
+                raise ValueError("Base64 输出不是节点链接列表")
     else:
-        raise ValueError(f"unknown format {fmt}")
+        raise ValueError(f"未知订阅格式：{fmt}")
 
 
 FORMATS = {"clash": ("sub_all.yaml", build_clash),
