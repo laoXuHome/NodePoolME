@@ -177,6 +177,20 @@ function airportPublishRate(row) {
   if (!pool) return 0
   return Math.min(100, Math.round((row.published_count || 0) / pool * 100))
 }
+function airportClock(ts) {
+  if (!ts) return '—'
+  const d = new Date(String(ts).replace(' ', 'T'))
+  if (Number.isNaN(d.getTime())) return shortTs(ts)
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const diff = Math.round((day - today) / 86400000)
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  if (diff === 0) return hm
+  if (diff === 1) return `明天 ${hm}`
+  if (diff === -1) return `昨天 ${hm}`
+  return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${hm}`
+}
 function airportStateText(row) {
   if (!row.enabled) return '未启用'
   if (row.last_status === 'ok') return '正常'
@@ -229,12 +243,10 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
       <div class="np-card np-dash-pool">
         <div class="np-section-title">
           <span class="np-dot" :class="(data.fetch?.error || data.fetch?.fetching) ? 'is-warning' : 'is-success'" />
-          节点池
+          节点缓存池
           <el-tag :type="fetchState.type" size="small" effect="plain">
             {{ data.fetch?.fetching ? fetchState.text : data.fetch?.error ? `${data.fetch.error} 个机场失败` : `${data.fetch?.ok || 0}/${data.fetch?.total || 0} 机场正常` }}
           </el-tag>
-          <div class="np-flex" />
-          <span class="np-pull-next">下次拉取 {{ data.fetch?.next_at ? shortTs(data.fetch.next_at) : '—' }}</span>
         </div>
 
         <div class="np-pool-hero">
@@ -275,17 +287,24 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 <span v-else>{{ row.node_count }} 缓存</span>
                 <span v-if="!row.enabled" class="np-pool-off">未启用</span>
               </div>
-              <div class="np-pool-airport-meta">
-                <span>上次拉取 {{ shortTs(row.last_success_at) }}</span>
-                <span>下次拉取 {{ !row.enabled ? '未启用' : row.next_run_at ? shortTs(row.next_run_at) : '仅手动' }}</span>
+              <div class="np-pool-airport-meta"
+                   :title="`上次拉取 ${formatTs(row.last_success_at)} · 下次拉取 ${!row.enabled ? '未启用' : row.next_run_at ? formatTs(row.next_run_at) : '仅手动'}`">
+                <span>上次 {{ airportClock(row.last_success_at) }}</span>
+                <span>下次 {{ !row.enabled ? '未启用' : row.next_run_at ? airportClock(row.next_run_at) : '仅手动' }}</span>
               </div>
             </div>
             <div class="np-pool-metric">
-              <div class="np-pool-caption"><span>节点占比</span><b>{{ airportNodeShare(row) }}%</b></div>
+              <div class="np-pool-caption">
+                <span>节点占比</span>
+                <span class="np-pool-metric-value"><b>{{ airportNodeShare(row) }}%</b><em>{{ row.pool_count }} / {{ data.nodes_total }}</em></span>
+              </div>
               <div class="np-pool-track"><i :style="{ width: `${airportNodeShare(row)}%` }" /></div>
             </div>
             <div class="np-pool-metric">
-              <div class="np-pool-caption"><span>下发率</span><b>{{ row.published_count }} / {{ row.pool_count }}</b></div>
+              <div class="np-pool-caption">
+                <span>下发率</span>
+                <span class="np-pool-metric-value"><b>{{ airportPublishRate(row) }}%</b><em>{{ row.enabled ? `${row.published_count} / ${row.pool_count}` : '未参与' }}</em></span>
+              </div>
               <div class="np-pool-track is-publish"><i :style="{ width: `${airportPublishRate(row)}%` }" /></div>
             </div>
           </div>
