@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, formatTs, logLevelLabel, logSourceLabel } from '../api'
 
 const data = ref(null)
+const AIRPORT_COLORS = ['#3f8cff', '#2fbf71', '#f5a524', '#9b6cf2', '#26b6c9', '#ef5b5b', '#71b33a', '#e07aa8']
 const loading = ref(false)
 const running = ref(false)
 const logs = ref([])
@@ -177,6 +178,38 @@ function airportPublishRate(row) {
   if (!pool) return 0
   return Math.min(100, Math.round((row.published_count || 0) / pool * 100))
 }
+function airportColor(row) {
+  const rows = data.value?.airport_list || []
+  const index = rows.findIndex((item) => item.id === row.id)
+  if (!row.enabled) return '#c7c7cc'
+  return AIRPORT_COLORS[Math.max(0, index) % AIRPORT_COLORS.length]
+}
+function chartAmount(row, key) {
+  return row.enabled ? (row[key] || 0) : 0
+}
+function chartTotal(rows, key) {
+  return (rows || []).reduce((sum, row) => sum + chartAmount(row, key), 0)
+}
+function chartShare(rows, row, key) {
+  const total = chartTotal(rows, key)
+  if (!total) return 0
+  return Math.round(chartAmount(row, key) / total * 100)
+}
+function donutStyle(rows, key) {
+  const total = chartTotal(rows, key)
+  if (!total) return { background: '#edf0f4' }
+  let acc = 0
+  const stops = []
+  for (const row of rows || []) {
+    const value = chartAmount(row, key)
+    if (!value) continue
+    const from = acc / total * 100
+    acc += value
+    const to = acc / total * 100
+    stops.push(`${airportColor(row)} ${from.toFixed(2)}% ${to.toFixed(2)}%`)
+  }
+  return { background: `conic-gradient(${stops.join(', ')})` }
+}
 function airportClock(ts) {
   if (!ts) return '—'
   const d = new Date(String(ts).replace(' ', 'T'))
@@ -272,8 +305,45 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           </div>
         </div>
 
+        <div v-if="data.airport_list?.length" class="np-pool-charts">
+          <div class="np-pool-chart">
+            <div class="np-pool-chart-head"><b>节点占比</b><span>按机场</span></div>
+            <div class="np-pool-chart-body">
+              <div class="np-donut" :style="donutStyle(data.airport_list, 'pool_count')"
+                   :title="`节点池 ${data.nodes_total} 个节点`">
+                <div class="np-donut-center"><strong>{{ data.nodes_total }}</strong><span>节点</span></div>
+              </div>
+              <div class="np-donut-legend">
+                <div v-for="row in data.airport_list" :key="`node-${row.id}`"
+                     class="np-donut-legend-row" :class="{ 'is-off': !row.enabled }">
+                  <i :style="{ background: airportColor(row) }" />
+                  <span>{{ row.name }}</span>
+                  <b>{{ chartShare(data.airport_list, row, 'pool_count') }}%</b>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="np-pool-chart">
+            <div class="np-pool-chart-head"><b>下发占比</b><span>占下发总数</span></div>
+            <div class="np-pool-chart-body">
+              <div class="np-donut" :style="donutStyle(data.airport_list, 'published_count')"
+                   :title="`已下发 ${chartTotal(data.airport_list, 'published_count')} 个节点`">
+                <div class="np-donut-center"><strong>{{ chartTotal(data.airport_list, 'published_count') }}</strong><span>已下发</span></div>
+              </div>
+              <div class="np-donut-legend">
+                <div v-for="row in data.airport_list" :key="`pub-${row.id}`"
+                     class="np-donut-legend-row" :class="{ 'is-off': !row.enabled }">
+                  <i :style="{ background: airportColor(row) }" />
+                  <span>{{ row.name }}</span>
+                  <b>{{ row.enabled && row.published_count ? `${chartShare(data.airport_list, row, 'published_count')}%` : '—' }}</b>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="np-pool-subhead">
-          <span>机场 · 节点与下发分布</span>
+          <span>机场明细</span>
           <span>节点占比 · 下发率 · 上次 / 下次拉取</span>
         </div>
 
@@ -294,18 +364,12 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               </div>
             </div>
             <div class="np-pool-metric">
-              <div class="np-pool-caption">
-                <span>节点占比</span>
-                <span class="np-pool-metric-value"><b>{{ airportNodeShare(row) }}%</b><em>{{ row.pool_count }} / {{ data.nodes_total }}</em></span>
-              </div>
-              <div class="np-pool-track"><i :style="{ width: `${airportNodeShare(row)}%` }" /></div>
+              <span class="np-pool-metric-label">节点占比</span>
+              <div class="np-pool-metric-value"><b>{{ airportNodeShare(row) }}%</b><em>{{ row.pool_count }} / {{ data.nodes_total }}</em></div>
             </div>
             <div class="np-pool-metric">
-              <div class="np-pool-caption">
-                <span>下发率</span>
-                <span class="np-pool-metric-value"><b>{{ airportPublishRate(row) }}%</b><em>{{ row.enabled ? `${row.published_count} / ${row.pool_count}` : '未参与' }}</em></span>
-              </div>
-              <div class="np-pool-track is-publish"><i :style="{ width: `${airportPublishRate(row)}%` }" /></div>
+              <span class="np-pool-metric-label">下发率</span>
+              <div class="np-pool-metric-value"><b>{{ airportPublishRate(row) }}%</b><em>{{ row.enabled ? `${row.published_count} / ${row.pool_count}` : '未参与' }}</em></div>
             </div>
           </div>
         </div>
