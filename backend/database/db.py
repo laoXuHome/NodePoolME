@@ -210,15 +210,19 @@ def init_db() -> None:
         conn.execute("ALTER TABLE latency_results ADD COLUMN target TEXT NOT NULL DEFAULT 'G'")
     conn.commit()
     if get("latency_dual_enabled") != "1":
-        set_setting("latency_test_url2", config.DEFAULT_SETTINGS["latency_test_url2"])
-        set_setting("sub_max_latency2", config.DEFAULT_SETTINGS["sub_max_latency2"])
+        # Upgrade defaults once; never overwrite user-customized ceilings on later starts.
+        if not get("latency_test_url2"):
+            set_setting("latency_test_url2", config.DEFAULT_SETTINGS["latency_test_url2"])
+        if get("sub_max_latency2") is None:
+            set_setting("sub_max_latency2", config.DEFAULT_SETTINGS["sub_max_latency2"])
+        for key in ("latency_test_name", "latency_test_name2"):
+            if not get(key):
+                set_setting(key, config.DEFAULT_SETTINGS[key])
+        set_setting("latency_dual_enabled", "1")
+        append_log("INFO", "设置", "已启用双延迟目标（默认 Google + Wikipedia）")
     for key in ("latency_test_name", "latency_test_name2"):
         if not get(key):
             set_setting(key, config.DEFAULT_SETTINGS[key])
-        if get("sub_max_latency") in (None, "", "500"):
-            set_setting("sub_max_latency", "1000")
-        set_setting("latency_dual_enabled", "1")
-        append_log("INFO", "设置", "已启用双延迟目标（默认 Google + Wikipedia，各 1000ms）")
     # Migration: "degraded" is no longer a state; status is just available/unavailable
     conn.execute("UPDATE nodes SET status='available' WHERE status='degraded'")
     conn.commit()

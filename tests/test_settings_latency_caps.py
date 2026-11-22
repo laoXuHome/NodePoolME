@@ -31,6 +31,16 @@ def test_both_latency_caps_roundtrip():
         assert settings["sub_max_latency"] == "777"
         assert settings["sub_max_latency2"] == "555"
 
+        # Simulate a restart: migrations must not overwrite user-customized ceilings.
+        assert client.patch("/api/settings", json={
+            "sub_max_latency": 500,
+            "sub_max_latency2": 555,
+        }).status_code == 200
+        db.init_db()
+        settings = client.get("/api/settings").json()["settings"]
+        assert settings["sub_max_latency"] == "500", settings
+        assert settings["sub_max_latency2"] == "555", settings
+
 
 if __name__ == "__main__":
     test_both_latency_caps_roundtrip()

@@ -103,6 +103,14 @@ function targetName(target) { return latencyLabels.value[target]?.name || target
 function targetShort(target) { return latencyLabels.value[target]?.short || target }
 function shortTs(ts) { const full = formatTs(ts); return full === '—' ? full : full.slice(5, 16) }
 function latencyType(n) { if (!n) return 'info'; if (n < 200) return 'success'; if (n < 500) return 'warning'; return 'danger' }
+function latencyValue(row, target) {
+  return row?.latency_targets?.[target]?.min ?? row?.latency_targets?.[target]?.best ?? null
+}
+function overCap(row, target) {
+  const value = latencyValue(row, target)
+  const cap = row?.latency_targets?.[target]?.cap
+  return value != null && cap > 0 && value > cap
+}
 function groupCell(row, gid) {
   const res = row.results[String(gid)]
   if (!res) return null
@@ -190,8 +198,11 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <el-table-column :label="`延迟 ${targetShort('G')} / ${targetShort('W')}`" width="132">
           <template #default="{ row }">
             <div class="np-mono" style="font-size:12px">
-              {{ targetShort('G') }} {{ row.latency_targets?.G?.min ?? row.latency_targets?.G?.best ?? '—' }} /
-              {{ targetShort('W') }} {{ row.latency_targets?.W?.min ?? row.latency_targets?.W?.best ?? '—' }}
+              {{ targetShort('G') }}
+              <span :class="{ 'np-latency-over': overCap(row, 'G') }">{{ latencyValue(row, 'G') ?? '—' }}</span>
+              /
+              {{ targetShort('W') }}
+              <span :class="{ 'np-latency-over': overCap(row, 'W') }">{{ latencyValue(row, 'W') ?? '—' }}</span>
             </div>
             <div class="np-muted" style="font-size:11px">上限 {{ row.latency_targets?.G?.cap }} / {{ row.latency_targets?.W?.cap }}</div>
           </template>
@@ -294,3 +305,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.np-latency-over { color: var(--el-color-danger); font-weight: 600; }
+</style>
