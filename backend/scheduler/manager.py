@@ -231,17 +231,21 @@ def _apply_latency_gate(node: dict, probes: list[dict], per_probe: dict[str, lis
 
 async def _latency_task(nodes: list[dict], probes: list[dict], batch_id: int, global_sem,
                         node_locks: dict, counters: dict) -> None:
-    for node in nodes:
+    """Probe every node in parallel, but keep each node's own rounds strictly serial.
+
+    The global semaphore caps total in-flight requests. Within one node the order is
+    always G, W, G, W and never two targets at the same time, so a weak node cannot be
+    flooded. Running only one node at a time here made a 100+ node batch look frozen.
+    """
+
+    async def one(node: dict) -> None:
         per_probe: dict[str, list] = {}
         try:
             await _control_point()
-            # Strictly alternating G, W, G, W; one request in flight per node. Never
-            # run the two targets concurrently, or a weak node may stop responding.
+            # Strictly alternating G, W, G, W; one request in flight per node.
             for _round in range(LATENCY_ROUNDS):
                 for probe in probes:
-                    # Always take the node lock before the global slot. Taking them the
-                    # other way round lets group tasks hold every global slot while
-                    # waiting for nodes that latency tasks have locked -> deadlock.
+                    # Node lock first, then the global slot: see _test_one for why.
                     async with node_locks[node["id"]]:
                         async with global_sem:
                             await _control_point()
@@ -257,14 +261,16 @@ async def _latency_task(nodes: list[dict], probes: list[dict], batch_id: int, gl
                     if item["name"] == probe["name"]:
                         item["done"] = counters["groups"][probe["name"]]
             counters["done"] += len(probes)
+            state.done = counters["done"]
             if counters["done"] % 10 == 0 and state.batch_id == batch_id:
-                state.done = counters["done"]
                 db.execute("UPDATE batches SET processed_count=? WHERE id=?",
                            (counters["done"], batch_id))
         except CycleStopped:
             return
         except Exception as exc:  # never let one node abort the probe
             db.append_log("ERROR", "延迟", f"{node['raw_name']}：延迟检测异常：{exc}")
+
+    await asyncio.gather(*(one(node) for node in nodes))
 
 
 # ---------------------------------------------------------------------------- results
@@ -348,17 +354,23 @@ async def _group_task(group: dict, nodes: list[dict], batch_id: int, global_sem,
                       manage_status: bool = True) -> dict:
     group_sem = asyncio.Semaphore(max(1, db.get_int("group_concurrency", 5)))
     failures = 0
-    for node in nodes:
+
+    async def one(node: dict) -> None:
+        nonlocal failures
         try:
+            if state.stop_requested:
+                return
             await _control_point()
             await _test_one(node, group, batch_id, global_sem, group_sem,
                             node_locks[node["id"]], ip_sems, subnet_sems,
                             counters, manage_status=manage_status)
         except CycleStopped:
-            return {"group": group["name"], "nodes": 0, "failures": failures, "stopped": True}
+            return
         except Exception as exc:  # one node must never abort the group
             failures += 1
             db.append_log("ERROR", "检测", f"{group['name']} / {node['raw_name']}：检测异常：{exc}")
+
+    await asyncio.gather(*(one(node) for node in nodes))
     db.execute("UPDATE test_groups SET last_run_at=? WHERE id=?", (db.now(), group["id"]))
     db.append_log("INFO", "检测", f"检测组 {group['name']} 完成本批（{len(nodes)} 个节点）")
     return {"group": group["name"], "nodes": len(nodes), "failures": failures}
