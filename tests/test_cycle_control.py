@@ -113,8 +113,55 @@ def test_stopped_schedule_keeps_interval():
     assert db.get("sub_last_auto_publish") == datetime.now().strftime("%Y-%m-%d")
 
 
+
+
+def test_small_global_pool_does_not_deadlock():
+    """Groups used to hold every global slot while waiting for a node locked by latency."""
+    db.init_db()
+    db.execute("DELETE FROM test_groups")
+    db.execute("DELETE FROM nodes")
+    db.execute("DELETE FROM airports")
+    ap = db.execute("INSERT INTO airports (name,url,interval_minutes,created_at,updated_at,enabled) "
+                    "VALUES ('并发','http://x',30,datetime('now'),datetime('now'),1)")
+    for i in range(8):
+        db.execute(
+            "INSERT INTO nodes (airport_id,raw_name,protocol,server,port,params,fingerprint,status,"
+            "latency,fail_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))",
+            (ap, f"n{i}", "ss", f"10.0.0.{i + 1}", 443,
+             db.dumps({"cipher": "aes-128-gcm", "password": "pw"}), f"fp{i}", "available", 100, 0))
+    for i in range(5):
+        db.execute(
+            "INSERT INTO test_groups (name,ident,url,method,timeout,expect_status,expect_body,"
+            "max_latency,interval_minutes,enabled,sort_order,is_default,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+            (f"G{i}", f"T{i}", "http://example.com", "GET", 8, "200-399", "", 1000, 30, 1, i, 0))
+    db.set_setting("global_concurrency", 3)
+    db.set_setting("group_concurrency", 5)
+    db.set_setting("ip_concurrency", 1)
+    db.set_setting("subnet_concurrency", 2)
+
+    class FastEngine:
+        name = "fake"
+
+        async def prepare(self, block):
+            await asyncio.sleep(0)
+
+        async def test(self, node, probe):
+            await asyncio.sleep(0.005)
+            return SimpleNamespace(ok=True, latency_ms=50, error_type=None, message="ok")
+
+    manager.engine_mod.engine_manager = FastEngine()
+    manager.engine_mod.jitter_ms = lambda: 0
+
+    result = asyncio.run(asyncio.wait_for(manager.run_cycle(force=True, reason="manual"), timeout=6))
+    assert result["ok"] and not result["stopped"], result
+    assert result["processed"] == result["total"], result
+
+
 if __name__ == "__main__":
     test_pause_and_stop_publish_partial()
     print("PASS pause/stop partial publish")
     test_stopped_schedule_keeps_interval()
     print("PASS stopped schedule keeps interval")
+    test_small_global_pool_does_not_deadlock()
+    print("PASS small global pool completes")

@@ -239,8 +239,11 @@ async def _latency_task(nodes: list[dict], probes: list[dict], batch_id: int, gl
             # run the two targets concurrently, or a weak node may stop responding.
             for _round in range(LATENCY_ROUNDS):
                 for probe in probes:
-                    async with global_sem:
-                        async with node_locks[node["id"]]:
+                    # Always take the node lock before the global slot. Taking them the
+                    # other way round lets group tasks hold every global slot while
+                    # waiting for nodes that latency tasks have locked -> deadlock.
+                    async with node_locks[node["id"]]:
+                        async with global_sem:
                             await _control_point()
                             await asyncio.sleep(engine_mod.jitter_ms())
                             outcome = await engine_mod.engine_manager.test(node, probe)
@@ -311,9 +314,9 @@ async def _test_one(node: dict, group: dict, batch_id: int | None, global_sem, g
         pass
 
     async with group_sem:
-        async with global_sem:
-            # One request per node at a time, shared with the latency probes.
-            async with node_lock:
+        # Same order everywhere: node lock first, then the global concurrency slot.
+        async with node_lock:
+            async with global_sem:
                 if ip_sem is not None:
                     await ip_sem.acquire()
                 if subnet_sem is not None:
