@@ -108,6 +108,13 @@ async def dashboard():
     for node in selected:
         aid = node.get("airport_id")
         published_by_airport[aid] = published_by_airport.get(aid, 0) + 1
+    status_by_airport: dict[int, dict[str, int]] = {}
+    for row in db.rows(
+        """SELECT n.airport_id, n.status, COUNT(*) AS c FROM nodes n
+           JOIN airports a ON a.id=n.airport_id AND a.enabled=1
+           GROUP BY n.airport_id, n.status"""
+    ):
+        status_by_airport.setdefault(row["airport_id"], {})[row["status"]] = row["c"]
     now = datetime.now().astimezone()
     fetch_next: list[str] = []
     manual_only = 0
@@ -125,6 +132,24 @@ async def dashboard():
         payload["next_run_at"] = airport["next_run_at"]
         payload["manual_only"] = airport["manual_only"]
         payload["published_count"] = published_by_airport.get(airport["id"], 0)
+        states = status_by_airport.get(airport["id"], {})
+        pool_count = payload["pool_count"]
+        avail_count = states.get("available", 0)
+        payload["available_count"] = avail_count
+        payload["unavailable_count"] = states.get("unavailable", 0)
+        payload["unknown_count"] = states.get("unknown", 0)
+        if airport["enabled"] and pool_count:
+            # 综合评分：可用率 45% + 下发率 45% + 池占比 10%
+            share = pool_count / nodes_total if nodes_total else 0
+            health = avail_count / pool_count
+            publish_rate = payload["published_count"] / pool_count
+            score = round(100 * (0.45 * health + 0.45 * publish_rate + 0.10 * share))
+            payload["score"] = max(0, min(100, score))
+            payload["score_grade"] = ("优" if score >= 80 else "良" if score >= 65
+                                      else "中" if score >= 50 else "低")
+        else:
+            payload["score"] = None
+            payload["score_grade"] = "停用" if not airport["enabled"] else "空"
         airport_list.append(payload)
     enabled_airports = [a for a in airports if a["enabled"]]
     fetch_ok = sum(1 for a in enabled_airports if a["last_status"] == "ok")
@@ -154,6 +179,19 @@ async def dashboard():
         "cells": len(group_rows) and nodes_total * group_total or 0,
         "passed": sum(g["passed"] for g in group_rows if g["enabled"]),
     }
+    builder.ensure_share_history()
+    history = builder.share_history(11)
+    history.append({
+        "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "live": True,
+        "total_nodes": nodes_total,
+        "total_published": len(selected),
+        "airports": {
+            str(row["id"]): {"pool_count": row["pool_count"], "published_count": row["published_count"]}
+            for row in airport_list
+        },
+    })
+    history = history[-12:]
     publish_block = {
         "last_batch_at": last_publish["finished_at"] if last_publish else (last_batch["finished_at"] if last_batch else None),
         "last_auto": db.get("sub_last_auto_publish"),
@@ -167,7 +205,9 @@ async def dashboard():
         "nodes_total": nodes_total,
         "nodes_available": available,
         "nodes_unavailable": unavailable,
+        "nodes_unknown": max(0, nodes_total - available - unavailable),
         "nodes_qualified": len(selected),
+        "share_history": history,
         "groups": _group_stats(),
         "airport_list": airport_list,
         "batch": last_batch,

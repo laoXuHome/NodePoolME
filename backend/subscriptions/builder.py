@@ -2,6 +2,7 @@
 import base64
 import json
 import os
+from collections import Counter
 from datetime import datetime
 
 import yaml
@@ -195,6 +196,105 @@ def collect_nodes(batch_id: int | None = None) -> tuple[list[dict], dict]:
     stats = {"total": len(nodes), "selected": len(selected), "skipped": skipped,
              "groups": len(enabled_groups)}
     return selected, stats
+
+
+def _pool_counts() -> tuple[dict[int, int], int]:
+    rows = db.rows(
+        """SELECT n.airport_id, COUNT(*) AS c FROM nodes n
+           JOIN airports a ON a.id=n.airport_id AND a.enabled=1
+           GROUP BY n.airport_id"""
+    )
+    counts = {row["airport_id"]: row["c"] for row in rows}
+    return counts, sum(counts.values())
+
+
+def _batch_pool_counts(batch_id: int) -> tuple[dict[int, int], int]:
+    rows = db.rows(
+        """SELECT n.airport_id, COUNT(DISTINCT x.node_id) AS c FROM (
+               SELECT node_id FROM results WHERE batch_id=?
+               UNION
+               SELECT node_id FROM latency_results WHERE batch_id=?
+           ) x
+           JOIN nodes n ON n.id=x.node_id
+           JOIN airports a ON a.id=n.airport_id AND a.enabled=1
+           GROUP BY n.airport_id""",
+        (batch_id, batch_id),
+    )
+    counts = {row["airport_id"]: row["c"] for row in rows}
+    return counts, sum(counts.values())
+
+
+def record_share_snapshot(nodes: list[dict], batch_id: int | None = None, reason: str = "publish",
+                          ts: str | None = None, pool_counts: dict[int, int] | None = None,
+                          total_nodes: int | None = None) -> None:
+    """Persist one per-airport pool/publish snapshot for the dashboard trend charts."""
+    if pool_counts is None:
+        pool_counts, total_nodes = _pool_counts()
+    total_nodes = total_nodes if total_nodes is not None else sum(pool_counts.values())
+    published_by_airport = Counter(n.get("airport_id") for n in nodes)
+    stamp = ts or _fmt_ts()
+    for airport_id, pool_count in pool_counts.items():
+        db.execute(
+            """INSERT OR REPLACE INTO share_history
+               (ts, batch_id, reason, airport_id, pool_count, published_count, total_nodes, total_published)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (stamp, batch_id, reason, airport_id, pool_count,
+             published_by_airport.get(airport_id, 0), total_nodes, len(nodes)),
+        )
+
+
+def ensure_share_history(limit: int = 8) -> None:
+    """One-time backfill from recent published batches so the line charts start with history."""
+    if db.get("share_history_seeded") == "1":
+        return
+    try:
+        if not db.row("SELECT COUNT(*) AS c FROM share_history")["c"]:
+            batches = db.rows(
+                """SELECT id, started_at, finished_at FROM batches
+                   WHERE published=1 ORDER BY id DESC LIMIT ?""",
+                (limit,),
+            )
+            for batch in reversed(batches):
+                selected, _ = collect_nodes(batch["id"])
+                stamp = batch["finished_at"] or batch["started_at"]
+                rows = db.rows(
+                    """SELECT n.airport_id, COUNT(*) AS c FROM nodes n
+                       JOIN airports a ON a.id=n.airport_id AND a.enabled=1
+                       WHERE n.created_at <= ? GROUP BY n.airport_id""",
+                    (stamp,),
+                )
+                pool_counts = {row["airport_id"]: row["c"] for row in rows}
+                total_nodes = sum(pool_counts.values())
+                if not total_nodes:
+                    pool_counts, total_nodes = _batch_pool_counts(batch["id"])
+                if not total_nodes:
+                    continue
+                record_share_snapshot(
+                    selected, batch["id"], "backfill",
+                    ts=stamp, pool_counts=pool_counts, total_nodes=total_nodes,
+                )
+    except Exception as exc:  # history is diagnostic, never block the dashboard
+        db.append_log("WARN", "仪表盘", f"占比历史回填失败：{exc}")
+    finally:
+        db.set_setting("share_history_seeded", "1")
+
+
+def share_history(limit: int = 12) -> list[dict]:
+    rows = db.rows(
+        """SELECT ts, batch_id, total_nodes, total_published, airport_id, pool_count, published_count
+           FROM share_history ORDER BY id DESC LIMIT ?""",
+        (max(1, limit) * 16,),
+    )
+    points: dict[str, dict] = {}
+    for row in reversed(rows):
+        point = points.setdefault(row["ts"], {
+            "ts": row["ts"], "batch_id": row["batch_id"], "total_nodes": row["total_nodes"],
+            "total_published": row["total_published"], "airports": {},
+        })
+        point["airports"][str(row["airport_id"])] = {
+            "pool_count": row["pool_count"], "published_count": row["published_count"],
+        }
+    return list(points.values())[-limit:]
 
 
 def build_clash(nodes: list[dict], sub_name: str) -> str:
@@ -430,6 +530,10 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
     if str(reason).startswith("batch#"):
         reason_cn = "批次 #" + str(reason)[6:]
     db.append_log("INFO", "下发", f"订阅已下发（{len(nodes)} 个节点，原因：{reason_cn}）")
+    try:
+        record_share_snapshot(nodes, batch_id, reason, ts=manifest["updated_at"], total_nodes=stats.get("total"))
+    except Exception as exc:
+        db.append_log("WARN", "仪表盘", f"占比历史写入失败：{exc}")
     return manifest
 
 

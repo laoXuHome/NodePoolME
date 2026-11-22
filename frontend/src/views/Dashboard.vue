@@ -105,23 +105,152 @@ async function runNow() {
   }
 }
 
-const poolPct = computed(() => {
-  const d = data.value
-  if (!d || !d.nodes_total) return 0
-  return Math.round(d.nodes_available / d.nodes_total * 100)
-})
-const qualifyPct = computed(() => {
-  const d = data.value
-  if (!d || !d.nodes_total) return 0
-  return Math.round((d.nodes_qualified || 0) / d.nodes_total * 100)
-})
-const unavailablePct = computed(() => 100 - poolPct.value)
 const publishTotal = computed(() => chartTotal(data.value?.airport_list || [], 'published_count'))
 const nodeChartRows = computed(() => rankRows(data.value?.airport_list || [], 'pool_count'))
 const publishChartRows = computed(() => rankRows(data.value?.airport_list || [], 'published_count'))
 const nodeShareLabels = computed(() => shareLabels(nodeChartRows.value, 'pool_count'))
 const publishShareLabels = computed(() => shareLabels(publishChartRows.value, 'published_count'))
-const rankedAirports = computed(() => rankRows(data.value?.airport_list || [], 'pool_count'))
+
+const statusSegments = computed(() => {
+  const d = data.value
+  if (!d?.nodes_total) return []
+  const total = d.nodes_total
+  const available = Math.min(d.nodes_available || 0, total)
+  const qualified = Math.min(d.nodes_qualified || 0, available)
+  const unavailable = Math.min(d.nodes_unavailable || 0, total)
+  const unknown = Math.max(0, total - available - unavailable)
+  const availableOnly = Math.max(0, available - qualified)
+  const raw = [
+    { key: 'qualified', label: '下发达标', count: qualified, color: '#3f8cff', side: '#2563c9', light: '#7db4ff' },
+    { key: 'available', label: '可用未达标', count: availableOnly, color: '#34c759', side: '#1f8f45', light: '#7bdf95' },
+    { key: 'unknown', label: '未检测', count: unknown, color: '#c7c7cc', side: '#97979d', light: '#e2e2e6' },
+    { key: 'unavailable', label: '不可用', count: unavailable, color: '#ee7b76', side: '#c94b46', light: '#f6a6a2' },
+  ].filter((item) => item.count > 0)
+  if (!raw.length) return []
+  const sum = raw.reduce((acc, item) => acc + item.count, 0)
+  const exact = raw.map((item) => item.count / sum * 100)
+  const floors = exact.map((value) => Math.floor(value))
+  let assigned = floors.reduce((acc, value) => acc + value, 0)
+  const queue = exact.map((value, index) => ({ index, fraction: value - floors[index] }))
+    .sort((a, b) => b.fraction - a.fraction)
+  for (let i = 0; assigned < 100 && i < queue.length; i += 1) {
+    floors[queue[i].index] += 1
+    assigned += 1
+  }
+  return raw.map((item, index) => ({
+    ...item, percent: floors[index], height: item.count / sum * 100,
+  }))
+})
+const statusTopColor = computed(() => statusSegments.value[0]?.color || '#c7c7cc')
+const statusCounts = computed(() => ({
+  qualified: data.value?.nodes_qualified || 0,
+  available: data.value?.nodes_available || 0,
+  unavailable: data.value?.nodes_unavailable || 0,
+  unknown: data.value?.nodes_unknown || 0,
+}))
+
+function scoreTone(row) {
+  if (!row.enabled) return 'is-off'
+  if (row.score === null || row.score === undefined) return 'is-empty'
+  if (row.score >= 80) return 'is-good'
+  if (row.score >= 65) return 'is-ok'
+  if (row.score >= 50) return 'is-mid'
+  return 'is-low'
+}
+function scoreHint(row) {
+  const pool = row.pool_count || 0
+  if (!row.enabled) return '机场未启用，不参与评分'
+  if (!pool) return '缓存池为空，暂不评分'
+  const health = Math.round((row.available_count || 0) / pool * 100)
+  const publish = Math.round((row.published_count || 0) / pool * 100)
+  const share = Math.round(pool / (data.value?.nodes_total || 1) * 100)
+  const unknown = row.unknown_count || 0
+  return `可用率 ${health}% · 下发率 ${publish}% · 池占比 ${share}%${unknown ? ` · 未检测 ${unknown}` : ''} → 综合 ${row.score} 分`
+}
+const rankedAirports = computed(() => {
+  return [...(data.value?.airport_list || [])].sort((a, b) => {
+    if (!!a.enabled !== !!b.enabled) return a.enabled ? -1 : 1
+    const sa = Number.isFinite(a.score) ? a.score : -1
+    const sb = Number.isFinite(b.score) ? b.score : -1
+    if (sb !== sa) return sb - sa
+    return (b.pool_count || 0) - (a.pool_count || 0)
+  })
+})
+
+const historyPoints = computed(() => Array.isArray(data.value?.share_history) ? data.value.share_history : [])
+const historyPublishCount = computed(() => historyPoints.value.filter((point) => !point.live).length)
+const TREND = { w: 230, h: 112, left: 24, right: 6, top: 9, bottom: 7 }
+function trendCount(point, row, key) {
+  return point.airports?.[String(row.id)]?.[key] || 0
+}
+function trendShare(point, row, key) {
+  const total = key === 'pool_count' ? point.total_nodes : point.total_published
+  return total ? trendCount(point, row, key) / total * 100 : 0
+}
+function trendMax(key) {
+  const rows = data.value?.airport_list || []
+  let max = 0
+  for (const point of historyPoints.value) {
+    for (const row of rows) {
+      if (!row.enabled) continue
+      max = Math.max(max, trendShare(point, row, key))
+    }
+  }
+  return Math.max(20, Math.ceil(max / 10) * 10)
+}
+const nodeTrendMax = computed(() => trendMax('pool_count'))
+const publishTrendMax = computed(() => trendMax('published_count'))
+function trendXY(key, row, index, max) {
+  const n = historyPoints.value.length
+  const plotW = TREND.w - TREND.left - TREND.right
+  const plotH = TREND.h - TREND.top - TREND.bottom
+  const x = n <= 1 ? TREND.left + plotW / 2 : TREND.left + index / (n - 1) * plotW
+  const q = TREND.top + (1 - Math.min(100, trendShare(historyPoints.value[index], row, key)) / max) * plotH
+  return { x, y: q }
+}
+function trendPath(key, row, max) {
+  const points = historyPoints.value.map((_, index) => trendXY(key, row, index, max))
+  if (!points.length) return ''
+  if (points.length === 1) return `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`
+  let d = `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = points[i - 1]
+    const cur = points[i]
+    const mid = (prev.x + cur.x) / 2
+    d += ` C${mid.toFixed(1)} ${prev.y.toFixed(1)}, ${mid.toFixed(1)} ${cur.y.toFixed(1)}, ${cur.x.toFixed(1)} ${cur.y.toFixed(1)}`
+  }
+  return d
+}
+function trendDot(key, row, max) {
+  const last = historyPoints.value.length - 1
+  if (last < 0) return { x: 0, y: 0, v: 0 }
+  const p = trendXY(key, row, last, max)
+  return { ...p, v: trendCount(historyPoints.value[last], row, key) }
+}
+function trendHasValue(key, row) {
+  return historyPoints.value.some((point) => trendCount(point, row, key) > 0)
+}
+function trendPointLabel(point) {
+  if (point.live) return '当前'
+  const d = new Date(String(point.ts).replace(' ', 'T'))
+  if (Number.isNaN(d.getTime())) return ''
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+function trendTicks(max) {
+  const plotH = TREND.h - TREND.top - TREND.bottom
+  return [
+    { v: max, y: TREND.top },
+    { v: Math.round(max / 2), y: TREND.top + plotH / 2 },
+    { v: 0, y: TREND.top + plotH },
+  ]
+}
+const trendRangeText = computed(() => {
+  const points = historyPoints.value
+  if (!points.length) return '等待首次下发'
+  if (points.length === 1) return '当前'
+  const first = trendPointLabel(points[0])
+  return `${first} → 当前 · ${historyPublishCount.value} 次下发`
+})
 const fetchState = computed(() => {
   const f = data.value?.fetch
   if (!f) return { text: '—', type: 'info' }
@@ -175,11 +304,6 @@ const batchTone = computed(() => {
   if (s === 'running') return 'running'
   return s ? 'failed' : 'idle'
 })
-function statusBarHeight(value) {
-  const total = data.value?.nodes_total || 0
-  if (!total) return '0%'
-  return `${Math.max(4, Math.round((value || 0) / total * 100))}%`
-}
 function airportNodeShare(row) {
   const total = data.value?.nodes_total || 0
   if (!total) return 0
@@ -224,21 +348,6 @@ function rankRows(rows, key) {
     if (diff) return diff
     return (b.pool_count || 0) - (a.pool_count || 0)
   })
-}
-function donutStyle(rows, key) {
-  const total = chartTotal(rows, key)
-  if (!total) return { background: '#edf0f4' }
-  let acc = 0
-  const stops = []
-  for (const row of rows || []) {
-    const value = chartAmount(row, key)
-    if (!value) continue
-    const from = acc / total * 100
-    acc += value
-    const to = acc / total * 100
-    stops.push(`${airportColor(row)} ${from.toFixed(2)}% ${to.toFixed(2)}%`)
-  }
-  return { background: `conic-gradient(${stops.join(', ')})` }
 }
 function airportClock(ts) {
   if (!ts) return '—'
@@ -316,30 +425,24 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           <div class="np-pool-status">
             <div class="np-pool-status-title">节点池状态</div>
             <div class="np-pool-status-total"><strong>{{ data.nodes_total }}</strong><span>节点</span></div>
-            <div class="np-pool-columns">
-              <div class="np-pool-col is-qualified">
-                <div class="np-pool-col-track">
-                  <i class="np-pool-col-bar" :style="{ height: statusBarHeight(data.nodes_qualified) }" />
-                </div>
-                <b>{{ data.nodes_qualified }}</b>
-                <span>下发达标</span>
-                <em>{{ qualifyPct }}%</em>
+            <div class="np-pool-status-sub" title="可用包含下发达标节点">
+              <span>可用 {{ statusCounts.available }}</span><i>·</i><span>不可用 {{ statusCounts.unavailable }}</span>
+              <template v-if="statusCounts.unknown"><i>·</i><span>未检测 {{ statusCounts.unknown }}</span></template>
+            </div>
+            <div class="np-pool-stack-wrap" :style="{ '--stack-top': statusTopColor }">
+              <div class="np-pool-stack"
+                   :title="`达标 ${statusCounts.qualified} · 可用 ${statusCounts.available} · 不可用 ${statusCounts.unavailable} · 未检测 ${statusCounts.unknown}`">
+                <i v-for="segment in statusSegments" :key="segment.key"
+                   class="np-pool-stack-seg"
+                   :style="{ height: `${segment.height}%`, background: `linear-gradient(90deg, ${segment.side}, ${segment.color} 38%, ${segment.light} 70%, ${segment.color})` }" />
               </div>
-              <div class="np-pool-col is-ok">
-                <div class="np-pool-col-track">
-                  <i class="np-pool-col-bar" :style="{ height: statusBarHeight(data.nodes_available) }" />
+              <div class="np-pool-stack-legend">
+                <div v-for="segment in statusSegments" :key="`legend-${segment.key}`" class="np-pool-stack-row"
+                     :title="segment.key === 'unknown' ? '尚未完成检测的缓存节点' : segment.label">
+                  <i :style="{ background: segment.color }" />
+                  <span>{{ segment.label }}</span>
+                  <div class="np-pool-stack-values"><b>{{ segment.count }}</b><em>{{ segment.percent }}%</em></div>
                 </div>
-                <b>{{ data.nodes_available }}</b>
-                <span>可用</span>
-                <em>{{ poolPct }}%</em>
-              </div>
-              <div class="np-pool-col is-bad">
-                <div class="np-pool-col-track">
-                  <i class="np-pool-col-bar" :style="{ height: statusBarHeight(data.nodes_unavailable) }" />
-                </div>
-                <b>{{ data.nodes_unavailable }}</b>
-                <span>不可用</span>
-                <em>{{ unavailablePct }}%</em>
               </div>
             </div>
           </div>
@@ -347,31 +450,65 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           <div v-if="data.airport_list?.length" class="np-pool-charts">
             <div class="np-pool-chart">
               <div class="np-pool-chart-head">
-                <b>节点占比</b>
+                <b>节点占比趋势</b>
                 <span>{{ data.nodes_total }} 节点 · 高 → 低</span>
               </div>
               <div class="np-pool-chart-body">
-                <div class="np-pie" :style="donutStyle(nodeChartRows, 'pool_count')"
-                     :title="`节点池 ${data.nodes_total} 个节点`" />
-                <div class="np-donut-legend is-two-col">
+                <div class="np-trend">
+                  <svg :viewBox="`0 0 ${TREND.w} ${TREND.h}`" class="np-trend-svg" preserveAspectRatio="none">
+                    <line v-for="tick in trendTicks(nodeTrendMax)" :key="`node-grid-${tick.v}`"
+                          class="np-trend-grid" :x1="TREND.left" :x2="TREND.w - TREND.right"
+                          :y1="tick.y" :y2="tick.y" />
+                    <text v-for="tick in trendTicks(nodeTrendMax)" :key="`node-tick-${tick.v}`"
+                          class="np-trend-tick" :x="TREND.left - 4" :y="tick.y + 2.5" text-anchor="end">{{ tick.v }}%</text>
+                    <template v-for="row in nodeChartRows" :key="`node-line-${row.id}`">
+                      <g v-if="row.enabled && trendHasValue('pool_count', row)">
+                        <path :d="trendPath('pool_count', row, nodeTrendMax)"
+                              :stroke="airportColor(row)" class="np-trend-line" />
+                        <circle :cx="trendDot('pool_count', row, nodeTrendMax).x"
+                                :cy="trendDot('pool_count', row, nodeTrendMax).y"
+                                r="2.4" :fill="airportColor(row)" class="np-trend-dot" />
+                      </g>
+                    </template>
+                  </svg>
+                  <div class="np-trend-foot">{{ trendRangeText }}</div>
+                </div>
+                <div class="np-donut-legend">
                   <div v-for="row in nodeChartRows" :key="`node-${row.id}`"
                        class="np-donut-legend-row" :class="{ 'is-off': !row.enabled }">
                     <i :style="{ background: airportColor(row) }" />
                     <span>{{ row.name }}</span>
-                    <b>{{ nodeShareLabels[row.id] || 0 }}%</b>
+                    <b>{{ row.enabled ? `${nodeShareLabels[row.id] || 0}%` : '—' }}</b>
                   </div>
                 </div>
               </div>
             </div>
             <div class="np-pool-chart">
               <div class="np-pool-chart-head">
-                <b>下发占比</b>
+                <b>下发占比趋势</b>
                 <span>{{ publishTotal }} 已下发 · 高 → 低</span>
               </div>
               <div class="np-pool-chart-body">
-                <div class="np-pie" :style="donutStyle(publishChartRows, 'published_count')"
-                     :title="`已下发 ${publishTotal} 个节点`" />
-                <div class="np-donut-legend is-two-col">
+                <div class="np-trend">
+                  <svg :viewBox="`0 0 ${TREND.w} ${TREND.h}`" class="np-trend-svg" preserveAspectRatio="none">
+                    <line v-for="tick in trendTicks(publishTrendMax)" :key="`pub-grid-${tick.v}`"
+                          class="np-trend-grid" :x1="TREND.left" :x2="TREND.w - TREND.right"
+                          :y1="tick.y" :y2="tick.y" />
+                    <text v-for="tick in trendTicks(publishTrendMax)" :key="`pub-tick-${tick.v}`"
+                          class="np-trend-tick" :x="TREND.left - 4" :y="tick.y + 2.5" text-anchor="end">{{ tick.v }}%</text>
+                    <template v-for="row in publishChartRows" :key="`pub-line-${row.id}`">
+                      <g v-if="row.enabled && trendHasValue('published_count', row)">
+                        <path :d="trendPath('published_count', row, publishTrendMax)"
+                              :stroke="airportColor(row)" class="np-trend-line" />
+                        <circle :cx="trendDot('published_count', row, publishTrendMax).x"
+                                :cy="trendDot('published_count', row, publishTrendMax).y"
+                                r="2.4" :fill="airportColor(row)" class="np-trend-dot" />
+                      </g>
+                    </template>
+                  </svg>
+                  <div class="np-trend-foot">{{ trendRangeText }}</div>
+                </div>
+                <div class="np-donut-legend">
                   <div v-for="row in publishChartRows" :key="`pub-${row.id}`"
                        class="np-donut-legend-row" :class="{ 'is-off': !row.enabled }">
                     <i :style="{ background: airportColor(row) }" />
@@ -385,8 +522,8 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
         </div>
 
         <div class="np-pool-subhead">
-          <span>机场明细</span>
-          <span>按节点占比降序 · 上次 / 下次拉取</span>
+          <span title="综合评分 = 可用率 45% + 下发率 45% + 池占比 10%">机场明细</span>
+          <span>近 {{ historyPublishCount }} 次下发 · 按综合评分降序</span>
         </div>
 
         <div v-if="data.airport_list?.length" class="np-pool-airports">
@@ -400,21 +537,13 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 <span v-else>{{ row.node_count }} 缓存</span>
                 <span v-if="!row.enabled" class="np-pool-off">未启用</span>
               </div>
-              <div class="np-pool-airport-meta"
-                   :title="`上次拉取 ${formatTs(row.last_success_at)} · 下次拉取 ${!row.enabled ? '未启用' : row.next_run_at ? formatTs(row.next_run_at) : '仅手动'}`">
-                <span>上次 {{ airportClock(row.last_success_at) }}</span>
-                <span>下次 {{ !row.enabled ? '未启用' : row.next_run_at ? airportClock(row.next_run_at) : '仅手动' }}</span>
+              <div class="np-pool-airport-meta">
+                <span>可用 <b>{{ row.enabled ? `${row.available_count || 0}/${row.pool_count}` : '—' }}</b></span>
+                <span>下发 <b>{{ row.enabled ? `${row.published_count || 0}/${row.pool_count}` : '—' }}</b></span>
               </div>
             </div>
-            <div class="np-pool-metric">
-              <span class="np-pool-metric-label">节点</span>
-              <b>{{ airportNodeShare(row) }}%</b>
-              <em>{{ row.pool_count }} / {{ data.nodes_total }}</em>
-            </div>
-            <div class="np-pool-metric">
-              <span class="np-pool-metric-label">下发</span>
-              <b>{{ airportPublishRate(row) }}%</b>
-              <em>{{ row.enabled ? `${row.published_count} / ${row.pool_count}` : '未参与' }}</em>
+            <div class="np-pool-score" :class="scoreTone(row)" :title="scoreHint(row)">
+              <span>综合评分</span><b>{{ row.enabled && row.score !== null ? row.score : '—' }}</b><em>{{ row.score_grade }}</em>
             </div>
           </div>
         </div>

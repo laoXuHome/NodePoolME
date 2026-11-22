@@ -132,6 +132,20 @@ CREATE TABLE IF NOT EXISTS latency_results (
 CREATE INDEX IF NOT EXISTS idx_latency_node ON latency_results (node_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_latency_batch ON latency_results (batch_id);
 
+CREATE TABLE IF NOT EXISTS share_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    batch_id INTEGER,
+    reason TEXT NOT NULL DEFAULT 'publish',
+    airport_id INTEGER NOT NULL,
+    pool_count INTEGER NOT NULL DEFAULT 0,
+    published_count INTEGER NOT NULL DEFAULT 0,
+    total_nodes INTEGER NOT NULL DEFAULT 0,
+    total_published INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (ts, airport_id)
+);
+CREATE INDEX IF NOT EXISTS idx_share_history_ts ON share_history(ts);
+
 CREATE TABLE IF NOT EXISTS batches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT NOT NULL,
