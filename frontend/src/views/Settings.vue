@@ -1,13 +1,12 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { api, formatTs, prettyBytes, logLevelLabel, logSourceLabel } from '../api'
+import { api, prettyBytes } from '../api'
 
 const form = ref({})
 const system = ref({})
 const loading = ref(false)
 const saving = ref(false)
-const logs = ref([])
 const password = ref({ old_password: '', new_password: '' })
 const file = ref(null)
 const uploading = ref(false)
@@ -23,7 +22,6 @@ async function load() {
     system.value = res.system
     requiredTags.value = String(res.settings.sub_required_tags || '').split(',').filter(Boolean)
     groups.value = await api.get('/api/groups')
-    logs.value = await api.get('/api/logs?limit=120')
   } catch (e) { ElMessage.error(e.message) }
   finally { loading.value = false }
 }
@@ -245,19 +243,6 @@ onMounted(load)
               </el-select>
             </el-form-item>
           </el-form>
-        </div>
-
-        <div class="np-card" style="padding:20px;margin-top:16px">
-          <div class="np-section-title">系统日志</div>
-          <div class="np-log" style="max-height:320px;overflow:auto">
-            <div v-for="log in logs" :key="log.id">
-              <span class="np-muted">{{ formatTs(log.ts) }}</span>
-              <span :class="`lv-${log.level}`"> [{{ logLevelLabel(log.level) }}]</span>
-              <span class="np-muted">{{ logSourceLabel(log.source) }}</span>
-              {{ log.message }}
-            </div>
-            <div v-if="!logs.length" class="np-empty">暂无日志</div>
-          </div>
         </div>
       </el-col>
 

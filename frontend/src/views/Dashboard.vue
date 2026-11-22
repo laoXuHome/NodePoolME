@@ -6,7 +6,22 @@ import { api, formatTs, logLevelLabel, logSourceLabel } from '../api'
 const data = ref(null)
 const loading = ref(false)
 const running = ref(false)
+const logs = ref([])
+const logLevel = ref('ALL')
+const logsLoading = ref(false)
 const timer = ref(null)
+
+async function loadLogs() {
+  logsLoading.value = true
+  try {
+    const query = logLevel.value !== 'ALL' ? `&level=${encodeURIComponent(logLevel.value)}` : ''
+    logs.value = await api.get(`/api/logs?limit=300${query}`)
+  } catch (err) {
+    ElMessage.error(err.message)
+  } finally {
+    logsLoading.value = false
+  }
+}
 
 async function load() {
   loading.value = true
@@ -18,6 +33,7 @@ async function load() {
   } finally {
     loading.value = false
   }
+  await loadLogs()
 }
 
 async function pauseCycle() {
@@ -320,19 +336,6 @@ onUnmounted(() => clearInterval(timer.value))
       </el-col>
 
       <el-col :md="10" :xs="24">
-        <div class="np-card" style="padding:18px 20px">
-          <div class="np-section-title">最近日志</div>
-          <div class="np-log">
-            <div v-for="log in data?.logs || []" :key="log.id">
-              <span class="np-muted">{{ formatTs(log.ts) }}</span>
-              <span :class="`lv-${log.level}`"> [{{ logLevelLabel(log.level) }}]</span>
-              <span class="np-muted">{{ logSourceLabel(log.source) }}</span>
-              {{ log.message }}
-            </div>
-            <div v-if="!data?.logs?.length" class="np-empty">暂无日志</div>
-          </div>
-        </div>
-
         <div class="np-card" style="padding:18px 20px;margin-top:16px">
           <div class="np-section-title">最近批次</div>
           <div v-if="data?.batch">
@@ -353,5 +356,33 @@ onUnmounted(() => clearInterval(timer.value))
         </div>
       </el-col>
     </el-row>
+
+    <div class="np-card np-log-card">
+      <div class="np-section-title">
+        系统日志
+        <el-tag type="info" size="small" effect="plain">唯一入口</el-tag>
+        <div class="np-flex" />
+        <div class="np-log-tools">
+          <el-select v-model="logLevel" size="small" style="width:118px" @change="loadLogs">
+            <el-option label="全部级别" value="ALL" />
+            <el-option label="信息" value="INFO" />
+            <el-option label="警告" value="WARN" />
+            <el-option label="错误" value="ERROR" />
+            <el-option label="调试" value="DEBUG" />
+          </el-select>
+          <span class="np-muted">已载入 {{ logs.length }} 条（最多 300）· 自动刷新</span>
+          <el-button size="small" :loading="logsLoading" @click="loadLogs">刷新</el-button>
+        </div>
+      </div>
+      <div class="np-log np-log-full" v-loading="logsLoading">
+        <div v-for="log in logs" :key="log.id">
+          <span class="np-muted">{{ formatTs(log.ts) }}</span>
+          <span :class="`lv-${log.level}`"> [{{ logLevelLabel(log.level) }}]</span>
+          <span class="np-muted">{{ logSourceLabel(log.source) }}</span>
+          {{ log.message }}
+        </div>
+        <div v-if="!logs.length" class="np-empty">暂无日志</div>
+      </div>
+    </div>
   </div>
 </template>

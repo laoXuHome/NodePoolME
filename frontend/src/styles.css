@@ -218,6 +218,9 @@ a { color: var(--np-accent); }
 .np-log .lv-WARN { color: var(--np-warning); }
 .np-log .lv-ERROR { color: var(--np-danger); }
 .np-log .lv-INFO { color: var(--np-success); }
+.np-log-card { padding: 18px 20px; margin-top: 16px; }
+.np-log-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.np-log-full { max-height: 420px; padding-top: 2px; }
 
 /* ---------------------------------------------------------------- shell / sidebar */
 .np-shell { min-height: 100vh; background: var(--np-bg); display: flex; }
@@ -586,6 +589,10 @@ a { color: var(--np-accent); }
   .el-table th.el-table__cell { font-size: 11px; }
   .np-code { font-size: 11px; padding: 12px; max-height: 320px; border-radius: 14px; }
   .np-log { font-size: 11px; max-height: 300px; }
+  .np-log-card { padding: 15px 16px; }
+  .np-log-full { max-height: 360px; }
+  .np-log-tools { width: 100%; gap: 8px; }
+  .np-log-tools .np-muted { font-size: 11px; }
   .link-row { display: block; margin-bottom: 14px; }
   .link-label { width: auto; display: block; margin-bottom: 5px; color: var(--np-secondary); font-size: 12px; }
   .link-control { align-items: flex-start; }
