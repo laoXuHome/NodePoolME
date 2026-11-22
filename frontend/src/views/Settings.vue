@@ -39,6 +39,7 @@ async function save() {
       request_interval_min_ms: Number(form.value.request_interval_min_ms),
       request_interval_max_ms: Number(form.value.request_interval_max_ms),
       test_interval_minutes: Number(form.value.test_interval_minutes),
+      test_on_start: !!Number(form.value.test_on_start),
       fail_threshold: Number(form.value.fail_threshold),
       history_days: Number(form.value.history_days),
       dispersion_mask: Number(form.value.dispersion_mask),
@@ -221,6 +222,12 @@ onMounted(load)
                 <el-form-item label="检测批次间隔(分)"><el-input-number v-model="form.test_interval_minutes" :min="1" :max="1440" style="width:100%" /></el-form-item>
               </el-col>
             </el-row>
+            <el-form-item label="重启后立即检测">
+              <el-switch v-model="form.test_on_start" active-value="1" inactive-value="0" />
+              <span class="np-muted" style="margin-left:10px">
+                开启：重启后约 40 秒自动跑一次完整检测；关闭：重启后不跑，等一个「检测批次间隔」到点再自动检测，期间仍可手动运行。
+              </span>
+            </el-form-item>
             <el-row :gutter="12">
               <el-col :span="12">
                 <el-form-item label="连续失败阈值"><el-input-number v-model="form.fail_threshold" :min="1" :max="20" style="width:100%" /></el-form-item>

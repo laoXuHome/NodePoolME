@@ -679,7 +679,8 @@ async def preview_subscription(fmt: str = "clash"):
 # ---------------------------------------------------------------------------- settings
 SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "subnet_concurrency",
                 "request_interval_min_ms", "request_interval_max_ms", "test_timeout",
-                "test_interval_minutes", "fail_threshold", "history_days", "dispersion_mask",
+                "test_interval_minutes", "test_on_start", "fail_threshold", "history_days",
+                "dispersion_mask",
                 "sub_name", "latency_test_url", "latency_test_url2", "latency_test_name",
                 "latency_test_name2", "latency_test_status",
                 "latency_test_timeout", "sub_max_latency", "sub_max_latency2",

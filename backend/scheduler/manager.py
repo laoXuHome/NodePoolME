@@ -30,6 +30,7 @@ class RuntimeState:
         self.fetching: set[int] = set()
         self.last_cycle_at: datetime | None = None
         self.background_task = None
+        self.auto_cycle_anchor: datetime | None = None
         self.group_progress: list[dict] = []
         self.block_index = 0
         self.blocks = 0
@@ -609,7 +610,8 @@ async def job_cycle() -> None:
     if state.running:
         return
     interval = max(1, db.get_int("test_interval_minutes", 30))
-    if state.last_cycle_at and (datetime.now() - state.last_cycle_at) < timedelta(minutes=interval):
+    anchor = state.last_cycle_at or state.auto_cycle_anchor
+    if anchor and (datetime.now() - anchor) < timedelta(minutes=interval):
         return
     try:
         await run_cycle(reason="schedule")
@@ -755,6 +757,11 @@ async def job_maintenance() -> None:
 def start_scheduler() -> None:
     if scheduler.running:
         return
+    # With the startup test disabled, arm the first automatic cycle one full interval
+    # after boot instead of letting job_cycle fire as soon as it sees last_cycle_at=None.
+    state.auto_cycle_anchor = None
+    if db.get("test_on_start", "1") != "1":
+        state.auto_cycle_anchor = datetime.now()
     scheduler.add_job(job_fetch, "interval", minutes=1, id="fetch", max_instances=1,
                       coalesce=True, next_run_time=datetime.now() + timedelta(seconds=10))
     scheduler.add_job(job_cycle, "interval", minutes=1, id="cycle", max_instances=1,

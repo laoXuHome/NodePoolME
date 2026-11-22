@@ -3,7 +3,7 @@ import asyncio
 import os
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -16,6 +16,29 @@ os.environ["NODEPOOL_TEST_ENGINE"] = "tcp"
 
 from backend.database import db  # noqa: E402
 from backend.scheduler import manager  # noqa: E402
+
+
+def test_startup_anchor_delays_first_cycle_when_disabled():
+    db.init_db()
+    calls = []
+
+    async def fake_cycle(**kwargs):
+        calls.append(kwargs)
+        return {"ok": True}
+
+    original = manager.run_cycle
+    manager.run_cycle = fake_cycle
+    manager.state.last_cycle_at = None
+    manager.state.auto_cycle_anchor = datetime.now()
+    try:
+        asyncio.run(manager.job_cycle())
+        assert not calls, "recent anchor must suppress the first automatic cycle"
+        manager.state.auto_cycle_anchor = datetime.now() - timedelta(minutes=60)
+        asyncio.run(manager.job_cycle())
+        assert len(calls) == 1, "an expired anchor must allow the automatic cycle"
+    finally:
+        manager.run_cycle = original
+        manager.state.auto_cycle_anchor = None
 
 
 def test_disabled_does_nothing():

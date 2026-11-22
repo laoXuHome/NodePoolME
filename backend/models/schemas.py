@@ -77,6 +77,7 @@ class SettingsIn(BaseModel):
     request_interval_max_ms: Optional[int] = Field(default=None, ge=0, le=10000)
     test_timeout: Optional[int] = Field(default=None, ge=1, le=60)
     test_interval_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+    test_on_start: Optional[bool] = None
     fail_threshold: Optional[int] = Field(default=None, ge=1, le=20)
     history_days: Optional[int] = Field(default=None, ge=7, le=365)
     dispersion_mask: Optional[int] = None

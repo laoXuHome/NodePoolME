@@ -37,6 +37,13 @@ def test_bool_setting_roundtrip():
         nxt = datetime.strptime(next_at[:19], "%Y-%m-%d %H:%M:%S")
         assert timedelta(minutes=55) < (nxt - datetime.now()) <= timedelta(minutes=61), next_at
 
+        assert client.patch("/api/settings", json={"test_on_start": False}).status_code == 200
+        assert db.get("test_on_start") == "0"
+        settings = client.get("/api/settings").json()["settings"]
+        assert settings["test_on_start"] == "0"
+        client.patch("/api/settings", json={"test_on_start": True})
+        assert db.get("test_on_start") == "1"
+
         client.patch("/api/settings", json={"sub_publish_enabled": False})
         assert db.get("sub_publish_enabled") == "0"
         assert client.get("/api/dashboard").json()["publish_schedule"]["next_at"] is None
