@@ -344,13 +344,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
           </template>
         </el-table-column>
       </el-table>
-      <div class="np-section-title" style="margin-top:16px">
-        标签历史
-        <div class="np-flex" />
-        <el-button size="small" type="primary" plain
-                   :loading="testing === 'tags'" :disabled="!!testing && testing !== 'tags'"
-                   @click="testNode('tags')">只测标签</el-button>
-      </div>
+      <div class="np-section-title" style="margin-top:16px">标签历史</div>
       <el-table :data="history" size="small" max-height="260">
         <el-table-column label="时间" :width="isMobile ? 104 : 160">
           <template #default="{ row }">{{ isMobile ? shortTs(row.ts) : formatTs(row.ts) }}</template>
