@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, formatTs } from '../api'
 
@@ -9,6 +9,9 @@ const preview = ref('')
 const previewFmt = ref('clash')
 const loading = ref(false)
 const saving = ref(false)
+const isMobile = ref(false)
+let mq = null
+function syncMobile(e) { isMobile.value = e.matches }
 
 const fullLinks = computed(() => {
   if (!info.value) return {}
@@ -36,6 +39,15 @@ async function load() {
     form.value = { ...info.value.settings, regenerate_token: false }
   } catch (e) { ElMessage.error(e.message) }
   finally { loading.value = false }
+}
+
+function prettyLink(url) {
+  if (!url) return ''
+  const max = isMobile.value ? 38 : 78
+  if (url.length <= max) return url
+  const head = Math.ceil((max - 1) / 2)
+  const tail = max - 1 - head
+  return url.slice(0, head) + '…' + url.slice(-tail)
 }
 
 async function save() {
@@ -78,7 +90,14 @@ async function copy(text) {
 
 function regen() { form.value.regenerate_token = true; ElMessage.info('保存后生效') }
 
-onMounted(async () => { await load(); await loadPreview() })
+onMounted(async () => {
+  mq = window.matchMedia('(max-width: 768px)')
+  isMobile.value = mq.matches
+  mq.addEventListener('change', syncMobile)
+  await load()
+  await loadPreview()
+})
+onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 </script>
 
 <template>
@@ -99,11 +118,12 @@ onMounted(async () => { await load(); await loadPreview() })
             </el-radio-group>
             <div class="link-row" v-for="(label, key) in { clash: 'Clash / Mihomo', singbox: 'sing-box', base64: '通用 Base64' }" :key="key">
               <div class="link-label">{{ label }}</div>
-              <el-input :model-value="(shownLinks === 'queryless' ? querylessLinks : fullLinks)[key]" readonly size="small">
-                <template #append>
-                  <el-button @click="copy((shownLinks === 'queryless' ? querylessLinks : fullLinks)[key])">复制</el-button>
-                </template>
-              </el-input>
+              <div class="link-control">
+                <el-input :model-value="prettyLink((shownLinks === 'queryless' ? querylessLinks : fullLinks)[key])" readonly size="small"
+                          :title="(shownLinks === 'queryless' ? querylessLinks : fullLinks)[key]"
+                          :type="isMobile ? 'textarea' : 'text'" :autosize="{ minRows: 1, maxRows: 2 }" />
+                <el-button class="link-copy" @click="copy((shownLinks === 'queryless' ? querylessLinks : fullLinks)[key])">复制</el-button>
+              </div>
             </div>
             <div class="np-muted" style="margin-top:10px">
               反代转发会把 <span class="np-mono">&amp;</span> 转义坏，优先用「无参数」地址 <span class="np-mono">/sub/all/&lt;token&gt;/clash</span>；带 format 参数时按客户端 UA 自动选择。
@@ -111,7 +131,7 @@ onMounted(async () => { await load(); await loadPreview() })
           </div>
           <el-divider />
           <div class="np-section-title">当前订阅状态</div>
-          <el-descriptions v-if="info" :column="3" size="small" border>
+          <el-descriptions v-if="info" :column="isMobile ? 1 : 3" size="small" border>
             <el-descriptions-item label="节点数">{{ info.meta.nodes || 0 }}</el-descriptions-item>
             <el-descriptions-item label="最近生成">{{ formatTs(info.meta.updated_at) }}</el-descriptions-item>
             <el-descriptions-item label="名称">{{ info.meta.name }}</el-descriptions-item>
@@ -158,8 +178,3 @@ onMounted(async () => { await load(); await loadPreview() })
     </el-row>
   </div>
 </template>
-
-<style scoped>
-.link-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-.link-label { width: 112px; font-size: 13px; color: #4b5563; }
-</style>

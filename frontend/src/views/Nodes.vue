@@ -19,6 +19,7 @@ const history = ref([])
 const latencyLabels = ref({ G: { short: 'G', name: 'Google' }, W: { short: 'W', name: 'Wikipedia' } })
 const testing = ref('')   // '' | 'latency' | 'tags'
 const isMobile = ref(false)
+const filtersOpen = ref(false)
 const detailCols = computed(() => (isMobile.value ? 1 : 2))
 let mq = null
 function syncMobile(e) { isMobile.value = e.matches }
@@ -133,8 +134,12 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
     <div class="np-page-desc">展示去重后的缓存节点、最近一次各检测组结果与动态生成的最终名称。</div>
 
     <div class="np-toolbar np-node-toolbar">
-      <el-input v-model="filters.q" placeholder="搜索名称 / 服务器" style="width:220px" clearable
+      <el-input v-model="filters.q" class="np-search" placeholder="搜索名称 / 服务器" style="width:220px" clearable
                 @keyup.enter="search" @clear="search" />
+      <el-button v-if="isMobile" class="np-filter-toggle" @click="filtersOpen = !filtersOpen">
+        <el-icon><Operation /></el-icon>{{ filtersOpen ? '收起筛选' : '筛选' }}
+      </el-button>
+      <div v-show="!isMobile || filtersOpen" class="np-filters">
       <el-select v-model="filters.airport_id" placeholder="机场" clearable style="width:150px" @change="search">
         <el-option v-for="a in airports" :key="a.id" :label="a.name" :value="a.id" />
       </el-select>
@@ -169,13 +174,57 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <el-option label="按检测时间" value="tested" />
         <el-option label="按标签数量" value="tags" />
       </el-select>
-      <el-button @click="search"><el-icon><Search /></el-icon>查询</el-button>
-      <el-button @click="reset">重置</el-button>
-      <div class="np-flex" />
-      <span class="np-muted">共 {{ total }} 个节点</span>
+      </div>
+      <el-button class="np-query-btn" type="primary" @click="search"><el-icon><Search /></el-icon>查询</el-button>
+      <el-button class="np-reset-btn" @click="reset">重置</el-button>
+      <div class="np-flex np-spacer" />
+      <span class="np-muted np-node-total">共 {{ total }} 个节点</span>
     </div>
 
-    <div class="np-card">
+    <div v-if="isMobile" class="np-mobile-list">
+      <div v-for="row in items" :key="row.id" class="np-mobile-card" role="button" tabindex="0"
+           @click="openDetail(row)" @keyup.enter="openDetail(row)">
+        <div class="np-mobile-card-head">
+          <div class="np-mobile-title">
+            {{ row.display_name }}
+            <div class="np-mobile-sub">{{ row.airport_name }} · {{ row.server }}:{{ row.port }}</div>
+          </div>
+          <el-tag size="small" effect="plain" :type="row.publishable ? 'success' : 'info'">
+            {{ row.publishable ? '下发' : '不下发' }}
+          </el-tag>
+        </div>
+        <div class="np-metrics">
+          <div class="np-metric">
+            <span class="np-metric-label">{{ targetShort('G') }} ≤ {{ row.latency_targets?.G?.cap }}</span>
+            <span class="np-metric-value" :class="{ 'np-latency-over': overCap(row, 'G') }">
+              {{ latencyValue(row, 'G') ?? '—' }}
+            </span>
+          </div>
+          <div class="np-metric">
+            <span class="np-metric-label">{{ targetShort('W') }} ≤ {{ row.latency_targets?.W?.cap }}</span>
+            <span class="np-metric-value" :class="{ 'np-latency-over': overCap(row, 'W') }">
+              {{ latencyValue(row, 'W') ?? '—' }}
+            </span>
+          </div>
+          <div class="np-metric">
+            <span class="np-metric-label">标签</span>
+            <span class="np-metric-value">{{ row.passed_idents_count || 0 }}</span>
+          </div>
+          <div class="np-metric">
+            <span class="np-metric-label">最近检测</span>
+            <span class="np-metric-value muted" style="font-size:11px">{{ shortTs(row.last_tested_at) }}</span>
+          </div>
+        </div>
+        <div class="np-mobile-meta">
+          <span>{{ row.protocol }}</span>
+          <span>{{ row.region || '未知地区' }}</span>
+          <span v-if="row.publish_reason && !row.publishable">{{ row.publish_reason }}</span>
+        </div>
+      </div>
+      <div v-if="!items.length" class="np-empty">当前筛选条件下没有节点</div>
+    </div>
+
+    <div v-if="!isMobile" class="np-card">
       <el-table :data="items" size="small" @row-click="openDetail">
         <el-table-column label="节点名称" min-width="260">
           <template #default="{ row }">

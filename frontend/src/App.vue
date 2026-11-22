@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { checkAuth, logout, state } from './api'
-import { ElMessageBox, ElMessage } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 const router = useRouter()
@@ -12,22 +12,20 @@ const version = computed(() => state.version || '1.0.0')
 const repoUrl = 'https://github.com/laoXuHome/NodePoolME'
 
 const isLogin = computed(() => route.name === 'login')
-const navOpen = ref(false)
 const isMobile = ref(false)
 let mq = null
 function syncMobile(e) {
   isMobile.value = e.matches
-  if (!e.matches) navOpen.value = false
 }
 const title = computed(() => route.meta.title || 'NodePoolME')
 
 const menus = [
-  { path: '/dashboard', label: '仪表盘', icon: 'Odometer' },
-  { path: '/airports', label: '机场管理', icon: 'OfficeBuilding' },
-  { path: '/nodes', label: '节点池', icon: 'Connection' },
-  { path: '/groups', label: '节点标签', icon: 'Aim' },
-  { path: '/subscription', label: '订阅输出', icon: 'Link' },
-  { path: '/settings', label: '系统设置', icon: 'Setting' }
+  { path: '/dashboard', label: '仪表盘', short: '概览', icon: 'Odometer' },
+  { path: '/airports', label: '机场管理', short: '机场', icon: 'OfficeBuilding' },
+  { path: '/nodes', label: '节点池', short: '节点', icon: 'Connection' },
+  { path: '/groups', label: '节点标签', short: '标签', icon: 'Aim' },
+  { path: '/subscription', label: '订阅输出', short: '订阅', icon: 'Link' },
+  { path: '/settings', label: '系统设置', short: '设置', icon: 'Setting' }
 ]
 
 async function refresh() {
@@ -58,20 +56,24 @@ router.afterEach((to) => {
 
 function onMenu(path) {
   router.push(path)
-  navOpen.value = false
 }
 </script>
 
 <template>
-  <div v-if="!ready" style="padding:60px;text-align:center;color:#98a2b3">加载中…</div>
+  <div v-if="!ready" class="np-boot">正在载入…</div>
 
   <router-view v-else-if="isLogin" />
 
-  <el-container v-else-if="authed" style="min-height:100vh">
-    <el-aside v-if="!isMobile" width="208px" class="layout-sidebar">
+  <div v-else-if="authed" class="np-shell">
+    <aside v-if="!isMobile" class="layout-sidebar">
       <div class="brand">
-        <div class="name">NodePoolME</div>
-        <div class="sub">MULTI-AIRPORT · NODE POOL</div>
+        <div class="brand-row">
+          <span class="brand-mark">NP</span>
+          <div>
+            <div class="name">NodePoolME</div>
+            <div class="sub">MULTI-AIRPORT NODE POOL</div>
+          </div>
+        </div>
       </div>
       <el-menu :default-active="route.path" @select="onMenu">
         <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
@@ -79,42 +81,42 @@ function onMenu(path) {
           <span>{{ m.label }}</span>
         </el-menu-item>
       </el-menu>
-      <div style="padding:14px 20px;font-size:11px;color:#5f6c86;position:absolute;bottom:0">
-        <div>v{{ version }} · 本地缓存优先</div>
-        <a :href="repoUrl" target="_blank" rel="noopener"
-           style="color:#7aa2ff;text-decoration:none;display:inline-block;margin-top:4px">GitHub 仓库 ↗</a>
+      <div class="sidebar-foot">
+        <div class="sidebar-version">v{{ version }}</div>
+        <a :href="repoUrl" target="_blank" rel="noopener">GitHub 仓库 ↗</a>
       </div>
-    </el-aside>
-    <el-drawer v-model="navOpen" direction="ltr" size="240px" :with-header="false" class="np-nav-drawer">
-      <div class="brand">
-        <div class="name">NodePoolME</div>
-        <div class="sub">MULTI-AIRPORT · NODE POOL</div>
-      </div>
-      <el-menu :default-active="route.path" @select="onMenu">
-        <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
-          <el-icon><component :is="m.icon" /></el-icon>
-          <span>{{ m.label }}</span>
-        </el-menu-item>
-      </el-menu>
-      <div class="np-drawer-foot">v{{ version }} · <a :href="repoUrl" target="_blank" rel="noopener">GitHub ↗</a></div>
-    </el-drawer>
-    <el-container direction="vertical">
-      <el-header height="60px" class="header-bar">
-        <el-button v-if="isMobile" text class="nav-toggle" @click="navOpen = true">
-          <el-icon size="20"><Menu /></el-icon>
-        </el-button>
-        <span class="title">{{ title }}</span>
-        <div class="np-flex" />
-        <el-tag size="small" type="info" effect="plain">admin</el-tag>
-        <el-button link type="primary" @click="doLogout">退出</el-button>
-      </el-header>
-      <el-main style="padding:0;background:#f5f7fb">
-        <router-view />
-      </el-main>
-    </el-container>
-  </el-container>
+    </aside>
 
-  <div v-else style="padding:80px;text-align:center;color:#98a2b3">
+    <section class="np-workspace">
+      <header class="header-bar">
+        <div v-if="isMobile" class="np-mobile-brand">
+          <span class="brand-mark brand-mark-sm">NP</span>
+          <span>NodePoolME</span>
+        </div>
+        <span v-else class="title">{{ title }}</span>
+        <div class="np-flex" />
+        <span v-if="!isMobile" class="np-header-version">v{{ version }}</span>
+        <el-tag v-if="!isMobile" size="small" type="info" effect="plain" class="np-admin-tag">admin</el-tag>
+        <el-button v-if="!isMobile" link type="primary" @click="doLogout">退出</el-button>
+        <button v-else class="np-icon-btn" aria-label="退出登录" @click="doLogout">
+          <el-icon size="19"><SwitchButton /></el-icon>
+        </button>
+      </header>
+      <main class="np-main">
+        <router-view />
+      </main>
+    </section>
+
+    <nav v-if="isMobile" class="np-tabbar" aria-label="主导航">
+      <button v-for="m in menus" :key="m.path" class="np-tab"
+              :class="{ active: route.path === m.path }" @click="onMenu(m.path)">
+        <el-icon><component :is="m.icon" /></el-icon>
+        <span>{{ m.short }}</span>
+      </button>
+    </nav>
+  </div>
+
+  <div v-else class="np-boot">
     需要登录 · <el-button link type="primary" @click="router.replace('/login')">前往登录</el-button>
   </div>
 </template>

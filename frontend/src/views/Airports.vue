@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, formatTs } from '../api'
 
@@ -15,6 +15,9 @@ async function loadSystem() {
 const logsOpen = ref(false)
 const logs = ref([])
 const logsTitle = ref('')
+const isMobile = ref(false)
+let mq = null
+function syncMobile(e) { isMobile.value = e.matches }
 
 async function load() {
   loading.value = true
@@ -88,7 +91,14 @@ async function remove(row) {
   } catch (e) { ElMessage.error(e.message) }
 }
 
-onMounted(() => { load(); loadSystem() })
+onMounted(() => {
+  mq = window.matchMedia('(max-width: 768px)')
+  isMobile.value = mq.matches
+  mq.addEventListener('change', syncMobile)
+  load()
+  loadSystem()
+})
+onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 </script>
 
 <template>
@@ -106,14 +116,44 @@ onMounted(() => { load(); loadSystem() })
       <span class="np-muted">共 {{ items.length }} 个机场</span>
     </div>
 
-    <div class="np-card">
+    <div v-if="isMobile" class="np-mobile-list">
+      <div v-for="row in items" :key="row.id" class="np-mobile-card">
+        <div class="np-mobile-card-head">
+          <div class="np-mobile-title">
+            {{ row.name }}
+            <div class="np-mobile-sub np-mono">{{ row.url_masked }}</div>
+          </div>
+          <el-switch :model-value="row.enabled" size="small" @change="(v) => toggle(row, v)" />
+        </div>
+        <div class="np-mobile-meta">
+          <span>{{ row.node_count }} 个节点</span>
+          <span v-if="row.daily_time">每天 {{ row.daily_time }}</span>
+          <span v-else-if="row.interval_minutes > 0">每 {{ row.interval_minutes }} 分钟</span>
+          <span v-else>仅手动</span>
+          <span>{{ formatTs(row.last_success_at) }}</span>
+        </div>
+        <div class="np-mobile-actions">
+          <el-tag v-if="row.last_status === 'error'" type="danger" size="small">拉取失败</el-tag>
+          <el-tag v-else-if="row.last_status === 'ok'" type="success" size="small">正常</el-tag>
+          <el-tag v-else type="info" size="small">未拉取</el-tag>
+          <div class="np-flex" />
+          <el-button link type="primary" size="small" @click="fetchNow(row)">拉取</el-button>
+          <el-button link size="small" @click="showLogs(row)">历史</el-button>
+          <el-button link size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
+        </div>
+      </div>
+      <div v-if="!items.length" class="np-empty">暂无机场</div>
+    </div>
+
+    <div v-if="!isMobile" class="np-card">
       <el-table :data="items" size="default">
-        <el-table-column prop="name" label="机场名称" min-width="150" />
-        <el-table-column label="订阅地址" min-width="240">
+        <el-table-column prop="name" label="机场名称" min-width="130" />
+        <el-table-column label="订阅地址" min-width="200">
           <template #default="{ row }"><span class="np-mono">{{ row.url_masked }}</span></template>
         </el-table-column>
-        <el-table-column prop="node_count" label="节点" width="80" />
-        <el-table-column label="拉取周期" width="150">
+        <el-table-column prop="node_count" label="节点" width="64" />
+        <el-table-column label="拉取周期" width="120">
           <template #default="{ row }">
             <span v-if="row.daily_time">每天 {{ row.daily_time }}</span>
             <span v-else-if="row.interval_minutes > 0">每 {{ row.interval_minutes }} 分钟</span>
@@ -122,10 +162,10 @@ onMounted(() => { load(); loadSystem() })
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="最近成功" width="170">
+        <el-table-column label="最近成功" width="152">
           <template #default="{ row }">{{ formatTs(row.last_success_at) }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="120">
+        <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tooltip v-if="row.last_status === 'error'" :content="row.last_error || ''">
               <el-tag type="danger" size="small">拉取失败</el-tag>
@@ -134,7 +174,7 @@ onMounted(() => { load(); loadSystem() })
             <el-tag v-else type="info" size="small">未拉取</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="启用" width="150">
+        <el-table-column label="启用" width="120">
           <template #default="{ row }">
             <div class="np-flex" style="align-items:center;gap:8px">
               <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
@@ -144,7 +184,7 @@ onMounted(() => { load(); loadSystem() })
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="240">
           <template #default="{ row }">
             <el-button link type="primary" @click="fetchNow(row)">立即拉取</el-button>
             <el-button link @click="showLogs(row)">历史</el-button>

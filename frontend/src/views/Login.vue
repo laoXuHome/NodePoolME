@@ -49,19 +49,47 @@ async function submit() {
 
 <style scoped>
 .login-wrap {
-  min-height: 100vh; display: flex; align-items: center; justify-content: center;
-  background: radial-gradient(1200px 600px at 20% 0%, #1d2942 0%, #0f1420 55%, #0b0f18 100%);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(900px 500px at 18% -10%, rgba(10, 132, 255, .16), transparent 62%),
+    radial-gradient(800px 500px at 92% 12%, rgba(191, 90, 242, .1), transparent 60%),
+    linear-gradient(180deg, #fbfbfd 0%, #f2f2f7 100%);
+  overflow: hidden;
 }
 .login-card {
-  width: 380px; background: #fff; border-radius: 16px; padding: 34px 32px 26px;
-  box-shadow: 0 30px 60px rgba(0, 0, 0, .35);
+  position: relative;
+  width: 392px;
+  background: rgba(255, 255, 255, .78);
+  border: 1px solid rgba(255, 255, 255, .65);
+  border-radius: 28px;
+  padding: 38px 34px 28px;
+  box-shadow: 0 1px 0 rgba(255,255,255,.8) inset, 0 24px 70px rgba(0, 0, 0, .1);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  backdrop-filter: saturate(180%) blur(24px);
 }
-.logo-line { display: flex; gap: 12px; align-items: center; margin-bottom: 26px; }
+.logo-line { display: flex; gap: 14px; align-items: center; margin-bottom: 30px; }
 .logo {
-  width: 42px; height: 42px; border-radius: 11px; background: #141b2f; color: #8ab4ff;
-  font-weight: 700; display: flex; align-items: center; justify-content: center; letter-spacing: .5px;
+  width: 50px; height: 50px; border-radius: 14px;
+  background: linear-gradient(145deg, #0a84ff 0%, #0066cc 100%);
+  color: #fff; font-size: 16px; font-weight: 800; letter-spacing: -.04em;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 8px 20px rgba(0, 113, 227, .25), inset 0 1px 0 rgba(255,255,255,.3);
 }
-.name { font-size: 19px; font-weight: 700; }
-.sub { font-size: 12px; color: #8a94a6; }
-.hint { font-size: 12px; color: #98a2b3; margin-top: 18px; line-height: 1.6; }
+.name { font-size: 24px; line-height: 1.15; font-weight: 700; letter-spacing: -.03em; }
+.sub { font-size: 13px; color: #6e6e73; margin-top: 3px; }
+.hint {
+  font-size: 12px; color: #86868b; margin-top: 22px; line-height: 1.6;
+  padding-top: 17px; border-top: 1px solid rgba(60, 60, 67, .1);
+}
+@media (max-width: 768px) {
+  .login-wrap { padding: 18px; align-items: center; }
+  .login-card { width: 100%; max-width: 392px; padding: 30px 22px 22px; border-radius: 24px; }
+  .logo { width: 46px; height: 46px; border-radius: 13px; }
+  .name { font-size: 21px; }
+  .logo-line { margin-bottom: 25px; }
+}
 </style>

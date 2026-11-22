@@ -114,8 +114,8 @@ onMounted(load)
             <div class="np-flex" />
             <el-button type="primary" size="small" :loading="saving" @click="save">保存设置</el-button>
           </div>
-          <el-form label-width="150px" size="default">
-            <el-form-item label="目标 1（名称/链接/上限ms）">
+          <el-form label-width="120px" size="default">
+            <el-form-item label="目标 1">
               <div class="np-target-row">
                 <el-input v-model="form.latency_test_name" class="np-target-name" maxlength="16"
                           placeholder="名称（如 Google）" />
@@ -125,7 +125,7 @@ onMounted(load)
                                  class="np-target-cap" controls-position="right" />
               </div>
             </el-form-item>
-            <el-form-item label="目标 2（名称/链接/上限ms）">
+            <el-form-item label="目标 2">
               <div class="np-target-row">
                 <el-input v-model="form.latency_test_name2" class="np-target-name" maxlength="16"
                           placeholder="名称（如 Wikipedia）" />
@@ -142,7 +142,7 @@ onMounted(load)
                 </el-form-item>
               </el-col>
               <el-col :span="12" :xs="24">
-                <el-form-item label="检测超时(全局, s)">
+                <el-form-item label="检测超时(s)">
                   <el-input-number v-model="form.latency_test_timeout" :min="1" :max="60" style="width:100%" />
                 </el-form-item>
               </el-col>
@@ -192,7 +192,7 @@ onMounted(load)
             <div class="np-flex" />
             <el-button type="primary" size="small" :loading="saving" @click="save">保存设置</el-button>
           </div>
-          <el-form label-width="150px" size="default">
+          <el-form label-width="120px" size="default">
             <el-row :gutter="12">
               <el-col :span="12">
                 <el-form-item label="全局并发"><el-input-number v-model="form.global_concurrency" :min="1" :max="300" style="width:100%" /></el-form-item>
@@ -293,7 +293,10 @@ onMounted(load)
           <div class="np-muted" style="margin-bottom:10px">
             恢复会校验 SQLite 结构，覆盖前自动保存一份旧库到 backup 目录，并重建订阅。
           </div>
-          <input type="file" accept=".db,.sqlite,.sqlite3" @change="onFile" />
+          <label class="np-file">
+            <input type="file" accept=".db,.sqlite,.sqlite3" @change="onFile" />
+            <span>{{ file?.name || '选择备份文件' }}</span>
+          </label>
           <div style="margin-top:12px">
             <el-button type="warning" :loading="uploading" @click="restore">上传并恢复</el-button>
           </div>

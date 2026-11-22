@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, formatTs } from '../api'
 
@@ -10,6 +10,9 @@ const editing = ref(null)
 const blank = () => ({ name: '', ident: '', url: '', method: 'GET', expect_status: '200-399',
                        expect_body: '', max_latency: 0, enabled: true, sort_order: 10 })
 const form = ref(blank())
+const isMobile = ref(false)
+let mq = null
+function syncMobile(e) { isMobile.value = e.matches }
 
 async function load() {
   loading.value = true
@@ -62,7 +65,13 @@ async function runGroup(row) {
   } catch (e) { ElMessage.error(e.message) }
 }
 
-onMounted(load)
+onMounted(() => {
+  mq = window.matchMedia('(max-width: 768px)')
+  isMobile.value = mq.matches
+  mq.addEventListener('change', syncMobile)
+  load()
+})
+onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 </script>
 
 <template>
@@ -79,31 +88,60 @@ onMounted(load)
       <span class="np-muted">顺序决定节点名中间段的排列：{{ items.filter(i => i.enabled).map(i => i.ident).join('ᐧ') || '（无启用标签）' }}</span>
     </div>
 
-    <div class="np-card">
+    <div v-if="isMobile" class="np-mobile-list">
+      <div v-for="row in items" :key="row.id" class="np-mobile-card">
+        <div class="np-mobile-card-head">
+          <div class="np-mobile-title">
+            {{ row.name }}
+            <div class="np-mobile-sub">
+              <el-tag effect="plain" size="small">{{ row.ident }}</el-tag>
+              <span style="margin-left:6px">{{ row.method }}</span>
+            </div>
+          </div>
+          <el-switch :model-value="row.enabled" size="small" @change="(v) => toggle(row, v)" />
+        </div>
+        <div class="np-mobile-meta">
+          <span class="np-mono" style="max-width:100%;overflow:hidden;text-overflow:ellipsis">{{ row.url }}</span>
+          <span>状态 {{ row.expect_status }}</span>
+          <span v-if="row.expect_body">包含 {{ row.expect_body }}</span>
+          <span v-if="row.max_latency">≤ {{ row.max_latency }}ms</span>
+        </div>
+        <div class="np-mobile-actions">
+          <span class="np-muted">通过 {{ row.passed }} · {{ formatTs(row.last_run_at) }}</span>
+          <div class="np-flex" />
+          <el-button link type="primary" size="small" @click="runGroup(row)">运行</el-button>
+          <el-button link size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button link type="danger" size="small" :disabled="row.is_default" @click="remove(row)">删除</el-button>
+        </div>
+      </div>
+      <div v-if="!items.length" class="np-empty">暂无检测组</div>
+    </div>
+
+    <div v-if="!isMobile" class="np-card">
       <el-table :data="items">
-        <el-table-column prop="name" label="名称（内部）" width="150" />
-        <el-table-column label="标识（节点名）" width="120">
-          <template #default="{ row }"><el-tag effect="dark" size="small">{{ row.ident }}</el-tag></template>
+        <el-table-column prop="name" label="名称（内部）" width="120" />
+        <el-table-column label="标识" width="100">
+          <template #default="{ row }"><el-tag effect="plain" size="small">{{ row.ident }}</el-tag></template>
         </el-table-column>
-        <el-table-column prop="url" label="检测 URL" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="method" label="方法" width="80" />
-        <el-table-column label="成功条件" min-width="170">
+        <el-table-column prop="url" label="检测 URL" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="method" label="方法" width="70" />
+        <el-table-column label="成功条件" min-width="160">
           <template #default="{ row }">
             <div class="np-mono">状态: {{ row.expect_status }}</div>
             <div class="np-mono" v-if="row.expect_body">包含: {{ row.expect_body }}</div>
             <div class="np-mono" v-if="row.max_latency">延迟 ≤ {{ row.max_latency }}ms</div>
           </template>
         </el-table-column>
-        <el-table-column prop="passed" label="通过" width="80" />
-        <el-table-column label="最近运行" width="160">
+        <el-table-column prop="passed" label="通过" width="60" />
+        <el-table-column label="最近运行" width="150">
           <template #default="{ row }">{{ formatTs(row.last_run_at) }}</template>
         </el-table-column>
-        <el-table-column label="启用" width="80">
+        <el-table-column label="启用" width="70">
           <template #default="{ row }">
             <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-button link type="primary" @click="runGroup(row)">运行</el-button>
             <el-button link @click="openEdit(row)">编辑</el-button>
