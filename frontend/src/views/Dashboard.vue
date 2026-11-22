@@ -161,8 +161,9 @@ function scoreHint(row) {
   const health = Math.round((row.available_count || 0) / pool * 100)
   const publish = Math.round((row.published_count || 0) / pool * 100)
   const share = Math.round(pool / (data.value?.nodes_total || 1) * 100)
+  const tag = Math.round((row.tag_ok_count || 0) / pool * 100)
   const unknown = row.unknown_count || 0
-  return `可用率 ${health}% · 下发率 ${publish}% · 池占比 ${share}%${unknown ? ` · 未检测 ${unknown}` : ''} → 综合 ${row.score} 分`
+  return `可用率 ${health}% · 下发率 ${publish}% · 池占比 ${share}% · 标签合格率 ${tag}%${unknown ? ` · 未检测 ${unknown}` : ''} → 综合 ${row.score} 分`
 }
 const rankedAirports = computed(() => {
   return [...(data.value?.airport_list || [])].sort((a, b) => {
@@ -540,7 +541,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
         </div>
 
         <div class="np-pool-subhead">
-          <span title="综合评分 = 可用率 45% + 下发率 45% + 池占比 10%">机场明细</span>
+          <span title="综合评分 = 可用率 40% + 下发率 40% + 池占比 10% + 标签合格率 10%">机场明细</span>
           <span>最近 {{ historyPoints.length }} 个批次 · 按综合评分降序</span>
         </div>
 
@@ -558,6 +559,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               <div class="np-pool-airport-meta">
                 <span>可用 <b>{{ row.enabled ? `${row.available_count || 0}/${row.pool_count}` : '—' }}</b></span>
                 <span>下发 <b>{{ row.enabled ? `${row.published_count || 0}/${row.pool_count}` : '—' }}</b></span>
+                <span>标签 <b>{{ row.enabled ? `${row.tag_ok_count || 0}/${row.pool_count}` : '—' }}</b></span>
               </div>
             </div>
             <div class="np-pool-score" :class="scoreTone(row)" :title="scoreHint(row)">

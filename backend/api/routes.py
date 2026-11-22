@@ -115,6 +115,22 @@ async def dashboard():
            GROUP BY n.airport_id, n.status"""
     ):
         status_by_airport.setdefault(row["airport_id"], {})[row["status"]] = row["c"]
+    # 标签合格：每个节点在任一启用标签的最新一次检测中通过，即视为“能打标签”
+    tag_by_airport: dict[int, int] = {
+        row["airport_id"]: row["c"]
+        for row in db.rows(
+            """SELECT n.airport_id, COUNT(DISTINCT r.node_id) AS c
+               FROM results r
+               JOIN (SELECT node_id, group_id, MAX(id) AS mx FROM results
+                     GROUP BY node_id, group_id) m
+                 ON m.node_id=r.node_id AND m.group_id=r.group_id AND m.mx=r.id
+               JOIN test_groups g ON g.id=r.group_id AND g.enabled=1
+               JOIN nodes n ON n.id=r.node_id
+               JOIN airports a ON a.id=n.airport_id AND a.enabled=1
+               WHERE r.ok=1
+               GROUP BY n.airport_id"""
+        )
+    }
     now = datetime.now().astimezone()
     fetch_next: list[str] = []
     manual_only = 0
@@ -138,12 +154,16 @@ async def dashboard():
         payload["available_count"] = avail_count
         payload["unavailable_count"] = states.get("unavailable", 0)
         payload["unknown_count"] = states.get("unknown", 0)
+        tag_count = min(pool_count, tag_by_airport.get(airport["id"], 0))
+        payload["tag_ok_count"] = tag_count
+        payload["tag_rate"] = round(tag_count / pool_count * 100, 1) if pool_count else 0.0
         if airport["enabled"] and pool_count:
-            # 综合评分：可用率 45% + 下发率 45% + 池占比 10%
+            # 综合评分：可用率 40% + 下发率 40% + 池占比 10% + 标签合格率 10%
             share = pool_count / nodes_total if nodes_total else 0
             health = avail_count / pool_count
             publish_rate = payload["published_count"] / pool_count
-            score = round(100 * (0.45 * health + 0.45 * publish_rate + 0.10 * share))
+            tag_rate = tag_count / pool_count
+            score = round(100 * (0.40 * health + 0.40 * publish_rate + 0.10 * share + 0.10 * tag_rate))
             payload["score"] = max(0, min(100, score))
             payload["score_grade"] = ("优" if score >= 80 else "良" if score >= 65
                                       else "中" if score >= 50 else "低")

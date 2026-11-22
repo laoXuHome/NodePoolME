@@ -41,7 +41,7 @@ def test_dashboard_has_latency_probe():
             for airport_row in point.get("airports", {}).values():
                 assert "available_count" in airport_row
         for airport in data.get("airport_list", []):
-            assert {"available_count", "unavailable_count", "score", "score_grade"} <= set(airport)
+            assert {"available_count", "unavailable_count", "tag_ok_count", "tag_rate", "score", "score_grade"} <= set(airport)
 
 
 if __name__ == "__main__":
