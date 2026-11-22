@@ -818,8 +818,6 @@ a { color: var(--np-accent); }
 .np-pool-status-total { display: flex; align-items: baseline; justify-content: center; gap: 3px; margin-top: 1px; }
 .np-pool-status-total strong { font-size: 29px; line-height: 1; font-weight: 700; letter-spacing: -.05em; color: var(--np-text); font-variant-numeric: tabular-nums; }
 .np-pool-status-total span { font-size: 9px; color: var(--np-tertiary); }
-.np-pool-status-sub { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 3px; margin-top: -2px; font-size: 8.5px; line-height: 1.25; color: var(--np-secondary); font-variant-numeric: tabular-nums; }
-.np-pool-status-sub i { font-style: normal; color: #c0c4cc; }
 .np-pool-stack-wrap { flex: 1; min-height: 0; margin-top: 3px; display: flex; align-items: stretch; justify-content: center; }
 .np-pool-stack {
   position: relative; width: 88px; height: 100%; min-height: 170px;
@@ -865,9 +863,15 @@ a { color: var(--np-accent); }
 .np-trend-range button:hover { color: var(--np-text); }
 .np-trend-range button.is-active { background: #fff; color: var(--np-text); font-weight: 650; box-shadow: 0 1px 3px rgba(20, 30, 50, .12); }
 .np-pool-chart { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 8px 10px 6px; border: 1px solid var(--np-separator-soft); border-radius: 12px; background: #fbfbfd; }
-.np-pool-chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.np-pool-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
 .np-pool-chart-head b { font-size: 12.5px; font-weight: 650; color: var(--np-text); white-space: nowrap; }
 .np-pool-chart-head span { font-size: 9.5px; color: var(--np-tertiary); white-space: nowrap; }
+.np-pool-chart-head .np-pool-chart-total {
+  display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 8px 2px 9px;
+  border: 1px solid rgba(20, 30, 50, .06); border-radius: 7px;
+  background: #f1f4f9; color: #6b7280; font-size: 10.5px; font-weight: 600;
+}
+.np-pool-chart-total b { font-size: 16px; line-height: 1; font-weight: 750; color: var(--np-text); font-variant-numeric: tabular-nums; }
 .np-pool-chart-body { flex: 1; display: flex; min-width: 0; min-height: 0; }
 .np-trend { flex: 1; min-width: 0; display: flex; }
 .np-trend-svg { flex: 1; width: 100%; min-height: 0; overflow: hidden; }
@@ -877,7 +881,8 @@ a { color: var(--np-accent); }
 .np-trend-area { opacity: .022; pointer-events: none; }
 .np-trend-line { fill: none; stroke-width: 1.55; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .np-trend-dot { stroke: #fff; stroke-width: .8; vector-effect: non-scaling-stroke; }
-.np-trend-label { fill: #fff; font-size: 8.2px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.np-trend-label { fill: #fff; font-size: 8px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.np-trend-label-count { fill: rgba(255, 255, 255, .84); font-size: 7.4px; font-weight: 500; }
 .np-score-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   margin: 12px 0 4px; padding-top: 10px; border-top: 1px solid var(--np-separator-soft);

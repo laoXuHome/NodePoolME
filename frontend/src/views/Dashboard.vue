@@ -219,7 +219,7 @@ const historyPoints = computed(() => {
   return rows
 })
 const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
-const TREND = { w: 336, h: 148, left: 30, right: 72, top: 12, bottom: 18 }
+const TREND = { w: 336, h: 148, left: 30, right: 108, top: 12, bottom: 18 }
 function trendCount(point, row, key) {
   return point.airports?.[String(row.id)]?.[key] || 0
 }
@@ -277,10 +277,11 @@ function trendDot(key, row, max) {
   const p = trendXY(key, row, last, max)
   return { ...p, v: trendCount(historyPoints.value[last], row, key) }
 }
-function trendLabelWidth(row, value) {
+function trendLabelWidth(row, value, count) {
   const nameWidth = [...row.name].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 127 ? 9 : 5), 0)
-  const valueWidth = String(Math.round(value)).length * 4.8 + 8
-  return Math.max(38, Math.min(64, Math.round(nameWidth + valueWidth + 7)))
+  const valueWidth = String(Math.round(value)).length * 4.8 + 7
+  const countWidth = String(count).length * 4.8 + 23
+  return Math.max(64, Math.min(98, Math.round(nameWidth + valueWidth + countWidth + 14)))
 }
 function trendEndLabels(key, max) {
   const labels = (data.value?.airport_list || [])
@@ -288,14 +289,15 @@ function trendEndLabels(key, max) {
     .map((row) => {
       const dot = trendDot(key, row, max)
       return { id: row.id, name: row.name, color: airportColor(row), y: dot.y,
+               count: row.pool_count || 0,
                pct: Math.round(trendShare(historyPoints.value[historyPoints.value.length - 1], row, key)),
-               width: trendLabelWidth(row, trendShare(historyPoints.value[historyPoints.value.length - 1], row, key)) }
+               width: trendLabelWidth(row, trendShare(historyPoints.value[historyPoints.value.length - 1], row, key), row.pool_count || 0) }
     })
     .sort((a, b) => a.y - b.y)
   let cursor = TREND.top + 6
   for (const label of labels) {
     label.y = Math.max(label.y, cursor)
-    cursor = label.y + 14
+    cursor = label.y + 15
   }
   const bottom = TREND.h - TREND.bottom - 2
   const overflow = labels.length ? labels[labels.length - 1].y - bottom : 0
@@ -337,7 +339,8 @@ const trendCharts = computed(() => [
   {
     key: 'publish',
     title: '下发占比趋势',
-    totalText: `${publishTotal.value} 已下发`,
+    totalLabel: '已下发',
+    totalCount: publishTotal.value,
     field: 'published_count',
     rows: publishChartRows.value,
     max: publishTrendMax.value,
@@ -345,7 +348,8 @@ const trendCharts = computed(() => [
   {
     key: 'available',
     title: '可用占比趋势',
-    totalText: `${data.value?.nodes_available || 0} 可用`,
+    totalLabel: '可用',
+    totalCount: data.value?.nodes_available || 0,
     field: 'available_count',
     rows: nodeChartRows.value,
     max: availableTrendMax.value,
@@ -536,7 +540,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
             <div v-for="chart in trendCharts" :key="chart.key" class="np-pool-chart">
               <div class="np-pool-chart-head">
                 <b>{{ chart.title }}</b>
-                <span>{{ chart.totalText }}</span>
+                <span class="np-pool-chart-total">当前{{ chart.totalLabel }} <b>{{ chart.totalCount }}</b></span>
               </div>
               <div class="np-pool-chart-body">
                 <div class="np-trend">
@@ -560,7 +564,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                     </template>
                     <g v-for="label in trendEndLabels(chart.field, chart.max)" :key="`${chart.key}-label-${label.id}`">
                       <rect :x="TREND.w - TREND.right + 4" :y="label.y - 6.25" :width="label.width" height="12.5" rx="3" :fill="label.color" />
-                      <text class="np-trend-label" :x="TREND.w - TREND.right + 8" :y="label.y + 3.4">{{ label.name }} {{ label.pct }}%</text>
+                      <text class="np-trend-label" :x="TREND.w - TREND.right + 8" :y="label.y + 3.4">{{ label.name }} {{ label.pct }}% <tspan class="np-trend-label-count">· {{ label.count }} 节点</tspan></text>
                     </g>
                     <text v-for="label in trendXLabels()" :key="`${chart.key}-x-${label.x}`"
                           class="np-trend-axis" :x="label.x" :y="TREND.h - 3" :text-anchor="label.anchor">{{ label.text }}</text>

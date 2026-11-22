@@ -357,7 +357,7 @@ async def update_airport(airport_id: int, payload: AirportPatch):
     airport = fetcher.airport_by_id(airport_id)
     if not airport:
         raise HTTPException(status_code=404, detail="机场不存在")
-    data = payload.dict(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True)
     if "name" in data and data["name"]:
         if db.row("SELECT id FROM airports WHERE name=? AND id<>?", (data["name"], airport_id)):
             raise HTTPException(status_code=400, detail="机场名称已被使用")
@@ -489,7 +489,7 @@ async def update_group(group_id: int, payload: GroupPatch):
     group = db.row("SELECT * FROM test_groups WHERE id=?", (group_id,))
     if not group:
         raise HTTPException(status_code=404, detail="节点标签不存在")
-    data = payload.dict(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True)
     # timeout and cadence are global now: ignore whatever the client still sends
     data.pop("timeout", None)
     data.pop("interval_minutes", None)
@@ -886,7 +886,7 @@ async def get_settings():
 
 @api.patch("/settings", dependencies=protected)
 async def update_settings(payload: SettingsIn):
-    data = payload.dict(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True)
     if "sub_required_tags" in data:
         wanted = data.pop("sub_required_tags") or []
         enabled = db.rows("SELECT ident FROM test_groups WHERE enabled=1")
