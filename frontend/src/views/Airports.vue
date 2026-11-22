@@ -15,6 +15,14 @@ async function loadSystem() {
 const logsOpen = ref(false)
 const logs = ref([])
 const logsTitle = ref('')
+const filterOpen = ref(false)
+const filterLoading = ref(false)
+const filterSaving = ref(false)
+const filterAirport = ref(null)
+const filterKeywords = ref([])
+const filterNodes = ref([])
+const filterDefaultKeywords = ref([])
+const filterNewKeyword = ref('')
 const isMobile = ref(false)
 let mq = null
 function syncMobile(e) { isMobile.value = e.matches }
@@ -74,6 +82,68 @@ async function fetchNow(row) {
   } catch (e) { ElMessage.error(e.message) }
 }
 
+async function reloadFilter() {
+  if (!filterAirport.value) return
+  filterLoading.value = true
+  try {
+    const res = await api.get(`/api/airports/${filterAirport.value.id}/filter`)
+    filterAirport.value = res.airport
+    filterKeywords.value = res.keywords || []
+    filterNodes.value = res.nodes || []
+    filterDefaultKeywords.value = res.default_keywords || []
+  } catch (e) { ElMessage.error(e.message) }
+  finally { filterLoading.value = false }
+}
+
+async function openFilter(row) {
+  filterAirport.value = row
+  filterOpen.value = true
+  filterNewKeyword.value = ''
+  await reloadFilter()
+}
+
+function addKeyword() {
+  const added = String(filterNewKeyword.value || '').split(/[,，、\n]/)
+  for (const raw of added) {
+    const word = raw.trim()
+    if (!word || word.length > 24) continue
+    if (!filterKeywords.value.some(k => k.toLowerCase() === word.toLowerCase())) {
+      filterKeywords.value.push(word)
+    }
+  }
+  filterNewKeyword.value = ''
+}
+
+function removeKeyword(word) {
+  filterKeywords.value = filterKeywords.value.filter(k => k !== word)
+}
+
+function resetKeywords() {
+  filterKeywords.value = [...filterDefaultKeywords.value]
+}
+
+async function saveFilter() {
+  if (!filterAirport.value) return
+  filterSaving.value = true
+  try {
+    await api.patch(`/api/airports/${filterAirport.value.id}`, { filter_keywords: filterKeywords.value })
+    ElMessage.success('关键词已保存，现有缓存已重新归类')
+    await load()
+    await reloadFilter()
+  } catch (e) { ElMessage.error(e.message) }
+  finally { filterSaving.value = false }
+}
+
+async function admitNode(node) {
+  if (!filterAirport.value) return
+  try {
+    const res = await api.post(`/api/airports/${filterAirport.value.id}/filter/admit`, { fingerprint: node.fingerprint })
+    ElMessage.success(`已加入节点池，当前 ${res.node_count} 个节点`)
+    await load()
+    await reloadFilter()
+  } catch (e) { ElMessage.error(e.message) }
+}
+
 async function showLogs(row) {
   logsTitle.value = `${row.name} · 拉取历史`
   logs.value = await api.get(`/api/airports/${row.id}/logs`)
@@ -123,6 +193,9 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             {{ row.name }}
             <div class="np-mobile-sub np-mono">{{ row.url_masked }}</div>
           </div>
+          <el-tag v-if="row.last_status === 'error'" type="danger" size="small" style="margin-top:2px">拉取失败</el-tag>
+          <el-tag v-else-if="row.last_status === 'ok'" type="success" size="small" style="margin-top:2px">正常</el-tag>
+          <el-tag v-else type="info" size="small" style="margin-top:2px">未拉取</el-tag>
           <el-switch :model-value="row.enabled" size="small" @change="(v) => toggle(row, v)" />
         </div>
         <div class="np-mobile-meta">
@@ -133,11 +206,9 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
           <span>{{ formatTs(row.last_success_at) }}</span>
         </div>
         <div class="np-mobile-actions">
-          <el-tag v-if="row.last_status === 'error'" type="danger" size="small">拉取失败</el-tag>
-          <el-tag v-else-if="row.last_status === 'ok'" type="success" size="small">正常</el-tag>
-          <el-tag v-else type="info" size="small">未拉取</el-tag>
           <div class="np-flex" />
           <el-button link type="primary" size="small" @click="fetchNow(row)">拉取</el-button>
+          <el-button link size="small" @click="openFilter(row)">过滤{{ row.filtered_count ? ' ' + row.filtered_count : '' }}</el-button>
           <el-button link size="small" @click="showLogs(row)">历史</el-button>
           <el-button link size="small" @click="openEdit(row)">编辑</el-button>
           <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
@@ -148,8 +219,8 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 
     <div v-if="!isMobile" class="np-card">
       <el-table :data="items" size="default">
-        <el-table-column prop="name" label="机场名称" min-width="130" />
-        <el-table-column label="订阅地址" min-width="200">
+        <el-table-column prop="name" label="机场名称" min-width="120" />
+        <el-table-column label="订阅地址" min-width="190">
           <template #default="{ row }"><span class="np-mono">{{ row.url_masked }}</span></template>
         </el-table-column>
         <el-table-column prop="node_count" label="节点" width="64" />
@@ -162,10 +233,10 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="最近成功" width="152">
+        <el-table-column label="最近成功" width="144">
           <template #default="{ row }">{{ formatTs(row.last_success_at) }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" width="86">
           <template #default="{ row }">
             <el-tooltip v-if="row.last_status === 'error'" :content="row.last_error || ''">
               <el-tag type="danger" size="small">拉取失败</el-tag>
@@ -174,7 +245,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             <el-tag v-else type="info" size="small">未拉取</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="启用" width="120">
+        <el-table-column label="启用" width="112">
           <template #default="{ row }">
             <div class="np-flex" style="align-items:center;gap:8px">
               <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
@@ -184,9 +255,10 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240">
+        <el-table-column label="操作" width="286">
           <template #default="{ row }">
             <el-button link type="primary" @click="fetchNow(row)">立即拉取</el-button>
+            <el-button link type="primary" @click="openFilter(row)">过滤{{ row.filtered_count ? ' ' + row.filtered_count : '' }}</el-button>
             <el-button link @click="showLogs(row)">历史</el-button>
             <el-button link @click="openEdit(row)">编辑</el-button>
             <el-button link type="danger" @click="remove(row)">删除</el-button>
@@ -222,6 +294,81 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
         <el-button type="primary" @click="submit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="filterOpen" :title="filterAirport ? filterAirport.name + ' · 过滤节点' : '过滤节点'"
+               width="760px" :fullscreen="isMobile">
+      <div v-loading="filterLoading">
+        <div class="np-filter-tip">
+          原始节点名包含任一关键词时，整条不导入节点池，<b>从不检测、从不下发</b>；清空关键词则不过滤。
+          手动加入节点池的节点会记住准入，之后同名节点即使仍命中关键词也会保留。
+        </div>
+
+        <div class="np-filter-head">
+          <b>过滤关键词</b>
+          <el-tag type="info" size="small">{{ filterKeywords.length }} 个</el-tag>
+          <div class="np-flex" />
+          <el-button link type="primary" @click="resetKeywords">恢复默认</el-button>
+        </div>
+        <div class="np-keyword-list">
+          <el-tag v-for="word in filterKeywords" :key="word" closable type="info" @close="removeKeyword(word)">
+            {{ word }}
+          </el-tag>
+          <span v-if="!filterKeywords.length" class="np-muted">未设置关键词，当前不过滤任何节点</span>
+        </div>
+        <div class="np-keyword-add">
+          <el-input v-model="filterNewKeyword" size="small" maxlength="24"
+                    placeholder="输入关键词后回车，支持逗号分隔" @keyup.enter="addKeyword" />
+          <el-button size="small" @click="addKeyword">添加</el-button>
+        </div>
+        <div class="np-filter-save">
+          <span class="np-muted">保存后立即对现有缓存重新归类，无需重新拉取；清空后保存表示不过滤。</span>
+        </div>
+
+        <div class="np-filter-head" style="margin-top:22px">
+          <b>被过滤节点</b>
+          <el-tag type="info" size="small">{{ filterNodes.length }} 个</el-tag>
+          <div class="np-flex" />
+          <span class="np-muted">最近一次拉取中命中的条目</span>
+        </div>
+
+        <div v-if="isMobile" class="np-filter-list">
+          <div v-for="node in filterNodes" :key="node.fingerprint" class="np-filter-item">
+            <div class="np-filter-name">{{ node.raw_name }}</div>
+            <div class="np-filter-meta">
+              <el-tag type="warning" size="small">{{ node.keyword }}</el-tag>
+              <span class="np-mono">{{ node.server }}:{{ node.port }}</span>
+            </div>
+            <div class="np-filter-item-actions">
+              <el-button size="small" type="primary" plain @click="admitNode(node)">加入节点池</el-button>
+            </div>
+          </div>
+          <div v-if="!filterNodes.length" class="np-empty">没有被过滤的节点</div>
+        </div>
+
+        <el-table v-else :data="filterNodes" size="small" max-height="340">
+          <el-table-column prop="raw_name" label="原始节点名" min-width="190" show-overflow-tooltip />
+          <el-table-column label="命中关键词" width="96">
+            <template #default="{ row }"><el-tag type="warning" size="small">{{ row.keyword }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="服务器" min-width="130" show-overflow-tooltip>
+            <template #default="{ row }"><span class="np-mono">{{ row.server }}:{{ row.port }}</span></template>
+          </el-table-column>
+          <el-table-column label="更新时间" width="138">
+            <template #default="{ row }">{{ formatTs(row.updated_at) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="96">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="admitNode(row)">加入节点池</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div v-if="!isMobile && !filterNodes.length" class="np-empty">没有被过滤的节点</div>
+      </div>
+      <template #footer>
+        <el-button @click="filterOpen = false">关闭</el-button>
+        <el-button type="primary" :loading="filterSaving" @click="saveFilter">保存关键词</el-button>
       </template>
     </el-dialog>
 

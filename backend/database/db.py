@@ -63,6 +63,24 @@ CREATE TABLE IF NOT EXISTS nodes (
 CREATE INDEX IF NOT EXISTS idx_nodes_airport ON nodes (airport_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_server ON nodes (server);
 
+CREATE TABLE IF NOT EXISTS airport_filtered_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    airport_id INTEGER NOT NULL,
+    raw_name TEXT NOT NULL,
+    protocol TEXT NOT NULL,
+    server TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    params TEXT NOT NULL,
+    region TEXT,
+    keyword TEXT NOT NULL DEFAULT '',
+    admitted INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (airport_id, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_filtered_airport ON airport_filtered_nodes (airport_id);
+
 CREATE TABLE IF NOT EXISTS test_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -184,6 +202,11 @@ def init_db() -> None:
     conn = connect()
     conn.executescript(SCHEMA)
     conn.commit()
+    # Migration: per-airport node-name filter keywords (JSON array)
+    airport_cols = {r["name"] for r in conn.execute("PRAGMA table_info(airports)").fetchall()}
+    if "filter_keywords" not in airport_cols:
+        conn.execute("ALTER TABLE airports ADD COLUMN filter_keywords TEXT NOT NULL DEFAULT '[]'")
+        conn.commit()
     # Migration: first upgrade to the latency-probe model gets a 500 ms publish ceiling
     if get("latency_test_url") is None:
         set_setting("sub_max_latency", config.DEFAULT_SETTINGS["sub_max_latency"])

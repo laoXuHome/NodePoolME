@@ -34,6 +34,7 @@
 - **拉取与检测解耦**：检测只读取 SQLite 本地缓存，永远不会因为检测而重新拉取机场订阅。
 - **失败保护**：下载失败、空内容、解析失败时旧缓存原样保留；新数据先完整解析校验，再事务性替换。
 - **启停与缓存池联动**：停用某个机场后，它的缓存节点立即退出节点池（不计入统计、不参与检测与下发，也不会进入 `/sub/all`）；重新启用时直接从缓存恢复，不会重新拉取订阅，且会顺延下一次自动拉取。
+- **按机场过滤公告节点**：每个机场可单独维护一组过滤关键词（默认「官网、工单、客服、下载、失效、复制、客户端、如果、网站、剩余、套餐、重置、到期、流量」）。原始节点名命中任一关键词时，整条不进入节点池，**从不检测、从不下发**；被过滤节点集中展示，可随时改关键词（立即对缓存重新归类，无需重新拉取），也可把某个被过滤节点手动加入节点池并记住准入。
 - **机场拉取周期**：每个机场可单独设「间隔拉取」分钟数与「每天定时」时刻；两者都设时谁先到谁拉。间隔填 `0` 且定时留空 = **仅手动拉取**，系统永不自动拉取（检测批次只读本地缓存，也不会触发拉取）。
 - **指纹去重**：按协议 + 服务器 + 端口 + 关键参数生成指纹，同名不同参数不会被误合并；默认只在同一机场内去重。
 - **双目标延迟决定下发**：每轮对全部节点跑两个可自定义名称/链接的探测（默认 Google `http://www.google.com/favicon.ico`、Wikipedia `http://www.wikipedia.org/favicon.ico`），每个链接各测 3 轮（G→W 交替执行、不并发）；每个链接只要有一轮 ≤ 自己的上限（默认各 1000ms）就算达标，**两个链接都达标**才进入 `/sub/all`。每个节点同一时刻只允许一个测试请求在途：两个目标按 G→W→G→W→G→W 交替，标签检测与延迟检测共用同一把节点锁；不同节点之间按全局并发并行推进，所以单节点不会被并发打挂，整批也不会退化成一次只测一个节点。节点标签只在通过延迟后做可选筛选（不勾选不限制，勾多个须全部命中）。两个目标名称可在系统设置里任意修改，节点池/仪表盘用名称首字展示。
@@ -108,7 +109,7 @@ docker run -d --name nodepool --restart unless-stopped \
 | 来源 | 地址 |
 | --- | --- |
 | GHCR（GitHub Actions 构建，多架构） | `ghcr.io/laoxuhome/nodepoolme:latest` |
-| 版本标签 | `ghcr.io/laoxuhome/nodepoolme:v1.2.31`、`sha-xxxxxxx` |
+| 版本标签 | `ghcr.io/laoxuhome/nodepoolme:v1.2.32`、`sha-xxxxxxx` |
 
 支持 `linux/amd64` 与 `linux/arm64`（含 Mihomo 内核）。
 
@@ -343,7 +344,9 @@ python tests/test_engine_live.py    # 需要 /tmp/mihomo 内核，验证真实 H
 | --- | --- | --- |
 | POST | `/api/auth/login` `/logout` `/api/auth/password` | 登录 / 退出 / 改密码 |
 | GET | `/api/dashboard` | 统计、检测组通过数、运行状态、日志 |
-| GET/POST/PATCH/DELETE | `/api/airports[/{id}]` | 机场增删改查 |
+| GET/POST/PATCH/DELETE | `/api/airports[/{id}]` | 机场增删改查；`filter_keywords` 为每机场过滤关键词 |
+| GET | `/api/airports/{id}/filter` | 过滤关键词与被过滤节点 |
+| POST | `/api/airports/{id}/filter/admit` | 把被过滤节点手动加入节点池，body `{fingerprint}` |
 | POST | `/api/airports/{id}/fetch` | 立即拉取 |
 | GET | `/api/airports/{id}/logs` | 拉取历史 |
 | GET | `/api/nodes` | 搜索、筛选、排序、分页 |

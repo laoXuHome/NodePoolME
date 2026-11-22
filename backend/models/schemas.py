@@ -19,6 +19,7 @@ class AirportIn(BaseModel):
     enabled: bool = True
     interval_minutes: int = Field(default=60, ge=0, le=1440)   # 0 = manual only
     daily_time: Optional[str] = None
+    filter_keywords: Optional[list[str]] = None
 
 
 class AirportPatch(BaseModel):
@@ -27,6 +28,7 @@ class AirportPatch(BaseModel):
     enabled: Optional[bool] = None
     interval_minutes: Optional[int] = Field(default=None, ge=0, le=1440)
     daily_time: Optional[str] = None
+    filter_keywords: Optional[list[str]] = None
 
 
 class GroupIn(BaseModel):

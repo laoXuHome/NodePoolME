@@ -190,6 +190,8 @@ def _airport_payload(row: dict) -> dict:
         "last_attempt_at": row["last_attempt_at"], "last_success_at": row["last_success_at"],
         "last_status": row["last_status"], "last_error": row["last_error"],
         "node_count": row["node_count"],
+        "filter_keywords": fetcher.normalize_keywords(row.get("filter_keywords")),
+        "filtered_count": fetcher.filtered_count(row["id"]),
         "url_masked": (row["url"][:32] + "...") if len(row["url"]) > 40 else row["url"],
     }
 
@@ -205,11 +207,13 @@ async def create_airport(payload: AirportIn):
     if exists:
         raise HTTPException(status_code=400, detail="airport name already used")
     stamp = db.now()
+    keywords = (fetcher.normalize_keywords(payload.filter_keywords)
+                if payload.filter_keywords is not None else list(config.DEFAULT_FILTER_KEYWORDS))
     airport_id = db.execute(
-        """INSERT INTO airports (name, url, enabled, interval_minutes, daily_time, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?)""",
+        """INSERT INTO airports (name, url, enabled, interval_minutes, daily_time, filter_keywords,
+           created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)""",
         (payload.name.strip(), payload.url.strip(), int(payload.enabled), payload.interval_minutes,
-         payload.daily_time, stamp, stamp),
+         payload.daily_time, db.dumps(keywords), stamp, stamp),
     )
     db.append_log("INFO", "机场", f"新增机场：{payload.name}")
     return _airport_payload(fetcher.airport_by_id(airport_id))
@@ -233,12 +237,17 @@ async def update_airport(airport_id: int, payload: AirportPatch):
         airport["enabled"] = int(bool(data["enabled"]))
     if data.get("interval_minutes") is not None:
         airport["interval_minutes"] = int(data["interval_minutes"])
+    keywords_changed = "filter_keywords" in data
+    keywords = (fetcher.normalize_keywords(data.get("filter_keywords"))
+                if keywords_changed else fetcher.normalize_keywords(airport.get("filter_keywords")))
     db.execute(
-        """UPDATE airports SET name=?, url=?, enabled=?, interval_minutes=?, daily_time=?, updated_at=?
-           WHERE id=?""",
+        """UPDATE airports SET name=?, url=?, enabled=?, interval_minutes=?, daily_time=?,
+           filter_keywords=?, updated_at=? WHERE id=?""",
         (airport["name"], airport["url"], airport["enabled"], airport["interval_minutes"],
-         airport["daily_time"], db.now(), airport_id),
+         airport["daily_time"], db.dumps(keywords), db.now(), airport_id),
     )
+    if keywords_changed:
+        fetcher.reclassify_airport(airport_id, keywords, publish=True)
     if bool(airport["enabled"]) != was_enabled:
         if airport["enabled"]:
             # re-enable: cached nodes come back instantly, no immediate pull
@@ -262,11 +271,41 @@ async def delete_airport(airport_id: int):
         raise HTTPException(status_code=404, detail="airport not found")
     affected = db.row("SELECT COUNT(*) AS c FROM nodes WHERE airport_id=?", (airport_id,))["c"]
     db.execute("DELETE FROM nodes WHERE airport_id=?", (airport_id,))
+    db.execute("DELETE FROM airport_filtered_nodes WHERE airport_id=?", (airport_id,))
     db.execute("DELETE FROM fetch_logs WHERE airport_id=?", (airport_id,))
     db.execute("DELETE FROM airports WHERE id=?", (airport_id,))
     db.append_log("WARN", "机场", f"删除机场 {airport['name']}，移除 {affected} 个缓存节点")
     return {"ok": True, "removed_nodes": affected,
             "note": "airport, its cached nodes and fetch history were removed; test history is retained"}
+
+
+@api.get("/airport-filter-defaults", dependencies=protected)
+async def airport_filter_defaults():
+    return {"keywords": list(config.DEFAULT_FILTER_KEYWORDS)}
+
+
+@api.get("/airports/{airport_id}/filter", dependencies=protected)
+async def airport_filter(airport_id: int):
+    airport = fetcher.airport_by_id(airport_id)
+    if not airport:
+        raise HTTPException(status_code=404, detail="airport not found")
+    return {
+        "airport": _airport_payload(airport),
+        "keywords": fetcher.normalize_keywords(airport.get("filter_keywords")),
+        "default_keywords": list(config.DEFAULT_FILTER_KEYWORDS),
+        "nodes": fetcher.filtered_nodes(airport_id),
+    }
+
+
+@api.post("/airports/{airport_id}/filter/admit", dependencies=protected)
+async def airport_filter_admit(airport_id: int, body: dict):
+    fingerprint = str(body.get("fingerprint") or "").strip()
+    if not fingerprint:
+        raise HTTPException(status_code=400, detail="fingerprint required")
+    result = fetcher.admit_filtered_node(airport_id, fingerprint)
+    if not result:
+        raise HTTPException(status_code=404, detail="filtered node not found")
+    return result
 
 
 @api.post("/airports/{airport_id}/fetch", dependencies=protected)

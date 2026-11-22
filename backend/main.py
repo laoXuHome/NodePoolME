@@ -12,6 +12,8 @@ from backend import config
 from backend.api import routes
 from backend.database import db
 from backend.scheduler import manager
+from backend.services import fetcher
+from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -35,6 +37,12 @@ def setup_logging() -> None:
 async def lifespan(app: FastAPI):
     setup_logging()
     db.init_db()
+    migrated = fetcher.migrate_filter_defaults()
+    if migrated:
+        try:
+            builder.publish(reason="filter defaults migration")
+        except Exception as exc:
+            log.warning("过滤默认关键词迁移后重建订阅失败：%s", exc)
     db.append_log("INFO", "系统", f"NodePool {config.VERSION} 启动，数据目录 {config.DATA_DIR}")
     await engine_mod.engine_manager.start()
     manager.start_scheduler()

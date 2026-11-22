@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NodePoolME"
-VERSION = "1.2.31"
+VERSION = "1.2.32"
 
 DATA_DIR = Path(os.getenv("NODEPOOL_DATA_DIR", "./data")).resolve()
 CONFIG_DIR = Path(os.getenv("NODEPOOL_CONFIG_DIR", str(DATA_DIR / "config"))).resolve()
@@ -50,6 +50,12 @@ DEFAULT_GROUPS = [
         "expect_status": "204",
         "sort_order": 3,
     },
+]
+
+# 机场节点名过滤：命中任一关键词的节点整条不导入，既不检测也不下发
+DEFAULT_FILTER_KEYWORDS = [
+    "官网", "工单", "客服", "下载", "失效", "复制", "客户端",
+    "如果", "网站", "剩余", "套餐", "重置", "到期", "流量",
 ]
 
 DEFAULT_SETTINGS = {
