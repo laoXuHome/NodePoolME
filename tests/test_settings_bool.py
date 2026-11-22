@@ -13,6 +13,7 @@ os.environ["NODEPOOL_BACKUP_DIR"] = os.path.join(_TMP, "backup")
 os.environ["NODEPOOL_ADMIN_PASSWORD"] = "test123"
 os.environ["NODEPOOL_TEST_ENGINE"] = "tcp"
 
+import asyncio  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from backend.database import db  # noqa: E402
 from backend.main import app  # noqa: E402
@@ -21,6 +22,8 @@ from backend.main import app  # noqa: E402
 def test_bool_setting_roundtrip():
     with TestClient(app) as client:
         assert client.post("/api/auth/login", json={"password": "test123"}).status_code == 200
+        fav = client.get("/favicon.ico")
+        assert fav.status_code == 204 and not fav.content, fav
         assert client.patch("/api/settings", json={
             "sub_publish_enabled": True,
             "sub_publish_mode": "interval",
@@ -50,6 +53,13 @@ def test_bool_setting_roundtrip():
         assert client.get("/api/dashboard").json()["publish_schedule"]["enabled"] is False
 
 
+def test_favicon_204_has_no_body():
+    from backend.main import favicon
+    res = asyncio.run(favicon())
+    assert res.status_code == 204
+    assert getattr(res, "body", b"") == b""
+
+
 def test_legacy_true_string_is_migrated():
     db.init_db()
     db.set_setting("sub_publish_enabled", "True")
@@ -62,3 +72,5 @@ if __name__ == "__main__":
     print("PASS test_bool_setting_roundtrip")
     test_legacy_true_string_is_migrated()
     print("PASS test_legacy_true_string_is_migrated")
+    test_favicon_204_has_no_body()
+    print("PASS favicon 204 no body")

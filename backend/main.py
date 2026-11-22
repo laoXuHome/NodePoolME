@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from backend import config
@@ -79,7 +79,9 @@ async def favicon():
     icon = STATIC_DIR / "favicon.ico"
     if icon.exists():
         return FileResponse(icon)
-    return JSONResponse(status_code=204, content=None)
+    # A 204 response must not carry a body. JSONResponse(None) serialises "null"
+    # and uvicorn then raises "Response content longer than Content-Length".
+    return Response(status_code=204)
 
 
 @app.get("/{path:path}")
