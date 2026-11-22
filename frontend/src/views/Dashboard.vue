@@ -119,6 +119,8 @@ const unavailablePct = computed(() => 100 - poolPct.value)
 const publishTotal = computed(() => chartTotal(data.value?.airport_list || [], 'published_count'))
 const nodeChartRows = computed(() => rankRows(data.value?.airport_list || [], 'pool_count'))
 const publishChartRows = computed(() => rankRows(data.value?.airport_list || [], 'published_count'))
+const nodeShareLabels = computed(() => shareLabels(nodeChartRows.value, 'pool_count'))
+const publishShareLabels = computed(() => shareLabels(publishChartRows.value, 'published_count'))
 const rankedAirports = computed(() => rankRows(data.value?.airport_list || [], 'pool_count'))
 const fetchState = computed(() => {
   const f = data.value?.fetch
@@ -195,10 +197,20 @@ function chartAmount(row, key) {
 function chartTotal(rows, key) {
   return (rows || []).reduce((sum, row) => sum + chartAmount(row, key), 0)
 }
-function chartShare(rows, row, key) {
+function shareLabels(rows, key) {
   const total = chartTotal(rows, key)
-  if (!total) return 0
-  return Math.round(chartAmount(row, key) / total * 100)
+  if (!total) return {}
+  const entries = (rows || []).map((row) => {
+    const exact = chartAmount(row, key) / total * 100
+    return { id: row.id, label: Math.floor(exact), fraction: exact - Math.floor(exact) }
+  }).filter((item) => item.label > 0 || item.fraction > 0)
+  let assigned = entries.reduce((sum, item) => sum + item.label, 0)
+  const queue = [...entries].sort((a, b) => b.fraction - a.fraction)
+  for (let i = 0; assigned < 100 && i < queue.length; i += 1) {
+    queue[i].label += 1
+    assigned += 1
+  }
+  return Object.fromEntries(entries.map((item) => [item.id, item.label]))
 }
 function rankRows(rows, key) {
   return [...(rows || [])].sort((a, b) => {
@@ -324,7 +336,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                        class="np-donut-legend-row" :class="{ 'is-off': !row.enabled }">
                     <i :style="{ background: airportColor(row) }" />
                     <span>{{ row.name }}</span>
-                    <b>{{ chartShare(nodeChartRows, row, 'pool_count') }}%</b>
+                    <b>{{ nodeShareLabels[row.id] || 0 }}%</b>
                   </div>
                 </div>
               </div>
@@ -342,7 +354,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                        class="np-donut-legend-row" :class="{ 'is-off': !row.enabled }">
                     <i :style="{ background: airportColor(row) }" />
                     <span>{{ row.name }}</span>
-                    <b>{{ row.enabled && row.published_count ? `${chartShare(publishChartRows, row, 'published_count')}%` : '—' }}</b>
+                    <b>{{ row.enabled && row.published_count ? `${publishShareLabels[row.id] || 0}%` : '—' }}</b>
                   </div>
                 </div>
               </div>
