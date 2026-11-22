@@ -65,7 +65,7 @@ app.include_router(routes.sub_router)
 @app.exception_handler(Exception)
 async def unhandled(request: Request, exc: Exception):
     db.append_log("ERROR", "接口", f"{request.method} {request.url.path} 未处理异常：{type(exc).__name__}: {exc}")
-    return JSONResponse(status_code=500, content={"detail": "internal error"})
+    return JSONResponse(status_code=500, content={"detail": "服务器内部错误，请查看系统日志"})
 
 
 if (STATIC_DIR / "assets").exists():
@@ -79,7 +79,7 @@ async def index():
     if file.exists():
         return FileResponse(file)
     return JSONResponse({"app": "NodePoolME", "api": "/api", "docs": "/api/docs",
-                         "note": "frontend bundle not built"})
+                         "note": "前端资源尚未构建"})
 
 
 @app.get("/favicon.ico")
@@ -96,8 +96,8 @@ async def favicon():
 async def spa(path: str):
     """Fallback so the Vue router works for deep links."""
     if path.startswith(("api/", "sub/", "assets/", "healthz")):
-        return JSONResponse(status_code=404, content={"detail": "not found"})
+        return JSONResponse(status_code=404, content={"detail": "页面不存在"})
     file = STATIC_DIR / "index.html"
     if file.exists():
         return FileResponse(file)
-    return JSONResponse(status_code=404, content={"detail": "not found"})
+    return JSONResponse(status_code=404, content={"detail": "页面不存在"})

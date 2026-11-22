@@ -15,6 +15,7 @@ os.environ["NODEPOOL_TEST_ENGINE"] = "tcp"
 
 from fastapi.testclient import TestClient  # noqa: E402
 from backend.main import app  # noqa: E402
+from backend.parsers.subscription import parse_text_full  # noqa: E402
 
 
 def test_error_messages_are_chinese():
@@ -31,6 +32,11 @@ def test_error_messages_are_chinese():
         assert client.get("/api/nodes/99999").json()["detail"] == "节点不存在"
         assert client.get("/api/airports/99999/filter").json()["detail"] == "机场不存在"
         assert client.delete("/api/groups/99999").json()["detail"] == "检测组不存在"
+
+    nodes, errors, _ = parse_text_full("proxies:\n  a: b")
+    assert nodes == [] and errors == ["YAML 中没有 proxies 列表"]
+    nodes, errors, _ = parse_text_full("")
+    assert nodes == [] and errors == ["订阅内容为空"]
 
 
 if __name__ == "__main__":

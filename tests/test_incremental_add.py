@@ -100,7 +100,7 @@ def test_no_subscription_is_noop():
     if meta_path.exists():
         meta_path.unlink()
     res = builder.add_published_node(999)
-    assert res["ok"] is False and res["reason"] == "no existing subscription", res
+    assert res["ok"] is False and res["reason"] == "当前还没有已生成的订阅", res
 
 
 if __name__ == "__main__":

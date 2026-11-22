@@ -276,7 +276,7 @@ async def delete_airport(airport_id: int):
     db.execute("DELETE FROM airports WHERE id=?", (airport_id,))
     db.append_log("WARN", "机场", f"删除机场 {airport['name']}，移除 {affected} 个缓存节点")
     return {"ok": True, "removed_nodes": affected,
-            "note": "airport, its cached nodes and fetch history were removed; test history is retained"}
+            "note": "机场及其缓存节点、拉取记录已删除；检测历史保留"}
 
 
 @api.get("/airport-filter-defaults", dependencies=protected)
@@ -598,7 +598,7 @@ async def test_node(node_id: int, payload: NodeTestIn | None = None):
         result["subscription"] = builder.add_published_node(node_id)
     except Exception as exc:  # a publish hiccup must not fail the test itself
         db.append_log("ERROR", "下发", f"手动测试节点 #{node_id} 增量下发失败：{exc}")
-        result["subscription"] = {"ok": False, "reason": str(exc)}
+        result["subscription"] = {"ok": False, "reason": "节点已检测，但订阅下发失败，请查看系统日志"}
     return result
 
 
@@ -849,7 +849,7 @@ async def restore_backup(file: UploadFile = File(...)):
         probe.close()
     except sqlite3.DatabaseError as exc:
         tmp.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail=f"不是有效的 SQLite 数据库：{exc}")
+        raise HTTPException(status_code=400, detail="文件不是有效的 SQLite 数据库")
     if "nodes" not in tables or "airports" not in tables:
         tmp.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="这不是 NodePool 的备份文件")

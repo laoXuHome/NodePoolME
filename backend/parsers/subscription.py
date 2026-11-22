@@ -439,16 +439,16 @@ def parse_text_full(text: str) -> tuple[list[dict], list[str], dict]:
     stats = {"total": 0, "parsed": 0, "unsupported": {}}
     text = (text or "").strip()
     if not text:
-        return nodes, ["empty subscription"], stats
+        return nodes, ["订阅内容为空"], stats
 
     if text.startswith("proxies:") or "\nproxies:" in text or text.startswith("proxy-providers:"):
         try:
             doc = yaml.safe_load(text) or {}
         except yaml.YAMLError as exc:
-            return nodes, [f"yaml error: {exc}"]
+            return nodes, ["YAML 解析失败"], stats
         proxies = doc.get("proxies") if isinstance(doc, dict) else None
         if not isinstance(proxies, list):
-            return nodes, ["no proxies list in yaml"]
+            return nodes, ["YAML 中没有 proxies 列表"], stats
         stats["total"] = len(proxies)
         for item in proxies:
             node = clash_to_node(item)
@@ -457,7 +457,7 @@ def parse_text_full(text: str) -> tuple[list[dict], list[str], dict]:
             else:
                 kind = str(item.get("type") or "unknown") if isinstance(item, dict) else "unknown"
                 stats["unsupported"][kind] = stats["unsupported"].get(kind, 0) + 1
-                errors.append(f"unsupported proxy: {kind}")
+                errors.append(f"不支持的代理类型：{kind}")
         stats["parsed"] = len(nodes)
         return nodes, errors, stats
 
@@ -480,10 +480,10 @@ def parse_text_full(text: str) -> tuple[list[dict], list[str], dict]:
         else:
             scheme = line.split("://", 1)[0].lower()
             stats["unsupported"][scheme] = stats["unsupported"].get(scheme, 0) + 1
-            errors.append(f"unsupported link: {line[:60]}")
+            errors.append(f"不支持的链接：{line[:60]}")
     stats["parsed"] = len(nodes)
     if not nodes and not errors:
-        errors.append("no supported node found")
+        errors.append("没有找到支持的节点")
     return nodes, errors[:10], stats
 
 

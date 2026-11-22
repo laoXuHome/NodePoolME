@@ -43,7 +43,7 @@ async def _download(url: str) -> str:
                 "InvalidURL": "订阅地址无效",
                 "SSLError": "TLS 证书校验失败",
             }.get(name, "网络请求异常")
-            last_error = f"{friendly}（{name}）"
+            last_error = friendly
         await asyncio.sleep(1.5 * (attempt + 1))
     raise RuntimeError(last_error or "下载失败")
 
@@ -401,7 +401,9 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
         if detail.startswith(("服务器返回", "订阅文件", "未解析到支持", "下载失败")):
             message = detail[:300]
         else:
-            message = f"拉取失败：{detail}"[:300]
+            message = "拉取失败，请查看系统日志"
+            db.append_log("ERROR", "拉取",
+                          f"机场 {airport['name']} 拉取失败：{type(exc).__name__}：{exc}")
         db.execute(
             "UPDATE airports SET last_status='error', last_error=?, updated_at=? WHERE id=?",
             (message, db.now(), airport_id),

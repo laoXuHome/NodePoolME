@@ -64,7 +64,8 @@ class TcpEngine(BaseEngine):
         except asyncio.TimeoutError:
             return Outcome(False, None, "timeout", "TCP 连接超时")
         except OSError as exc:
-            return Outcome(False, None, "connect", f"TCP 连接失败：{exc}"[:300])
+            reason = "TCP 连接被拒绝" if isinstance(exc, ConnectionRefusedError) else "TCP 连接失败"
+            return Outcome(False, None, "connect", reason)
         finally:
             if writer is not None:
                 writer.close()
@@ -196,9 +197,9 @@ class MihomoEngine(BaseEngine):
                     if r.status_code in (200, 204):
                         await asyncio.sleep(0.35)
                         return
-                    last_error = f"HTTP {r.status_code}: {r.text[:200]}"
+                    last_error = f"服务器返回 HTTP {r.status_code}"
             except Exception as exc:  # core may be restarting
-                last_error = str(exc)
+                last_error = "无法连接检测内核"
             await asyncio.sleep(0.5)
         raise RuntimeError(f"mihomo 配置重载失败：{last_error}")
 
@@ -231,9 +232,9 @@ class MihomoEngine(BaseEngine):
         except httpx.TimeoutException:
             return Outcome(False, None, "timeout", f"{timeout:g} 秒内无响应")
         except httpx.HTTPError as exc:
-            return Outcome(False, None, "connect", f"代理或传输错误：{type(exc).__name__}: {exc}"[:300])
+            return Outcome(False, None, "connect", "代理或传输错误，请查看系统日志")
         except Exception as exc:  # defensive: never let a test crash a batch
-            return Outcome(False, None, "engine", f"检测异常：{type(exc).__name__}: {exc}"[:300])
+            return Outcome(False, None, "engine", "检测异常，请查看系统日志")
 
         body = ""
         if group.get("expect_body"):
@@ -284,8 +285,8 @@ class EngineManager:
                 await candidate.start()
                 self.engine = candidate
             except Exception as exc:
-                self.error = str(exc)
-                db.append_log("WARN", "测试内核", f"Mihomo 不可用（{exc}），改用 TCP 引擎")
+                self.error = "Mihomo 内核启动失败，已降级为 TCP 引擎"
+                db.append_log("WARN", "测试内核", f"Mihomo 内核启动失败（{type(exc).__name__}），改用 TCP 引擎")
                 self.engine = TcpEngine()
         self.ready = True
 

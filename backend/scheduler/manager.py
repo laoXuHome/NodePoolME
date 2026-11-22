@@ -491,8 +491,8 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                 db.execute("UPDATE batches SET published=1 WHERE id=?", (batch_id,))
                 state.last_error = None
             except Exception as exc:
-                state.last_error = f"订阅下发失败：{exc}"
-                db.append_log("ERROR", "下发", state.last_error)
+                state.last_error = "订阅下发失败，请查看系统日志"
+                db.append_log("ERROR", "下发", f"{state.last_error}（{type(exc).__name__}：{exc}）")
                 db.execute("UPDATE batches SET note=? WHERE id=?",
                            (state.last_error, batch_id))
             if stopped:
@@ -506,10 +506,10 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                     "total": state.total, "published": state.last_error is None,
                     "stopped": stopped, "reason": reason}
         except Exception as exc:
-            state.last_error = f"检测批次失败：{type(exc).__name__}: {exc}"
+            state.last_error = "检测批次失败，请查看系统日志"
             db.execute("UPDATE batches SET finished_at=?, status='failed', note=? WHERE id=?",
                        (db.now(), state.last_error[:500], batch_id))
-            db.append_log("ERROR", "检测", f"批次 #{batch_id} 失败：{state.last_error}")
+            db.append_log("ERROR", "检测", f"批次 #{batch_id} 失败：{state.last_error}（{type(exc).__name__}：{exc}）")
             return {"ok": False, "batch_id": batch_id, "error": state.last_error}
         finally:
             state.running = False

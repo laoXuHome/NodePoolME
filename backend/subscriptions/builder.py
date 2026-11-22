@@ -337,7 +337,7 @@ def add_published_node(node_id: int) -> dict:
     """
     previous = meta()
     if not previous.get("nodes") or not (config.SUB_DIR / "sub_all.yaml").exists():
-        return {"ok": False, "reason": "no existing subscription"}
+        return {"ok": False, "reason": "当前还没有已生成的订阅"}
 
     ids = previous.get("node_ids")
     names = {int(x["id"]): x["name"] for x in (previous.get("node_names") or [])}
@@ -349,12 +349,12 @@ def add_published_node(node_id: int) -> dict:
         nodes = _live_snapshot() or collect_nodes()[0]
 
     if any(n["id"] == node_id for n in nodes):
-        return {**previous, "ok": True, "added": False, "reason": "already published"}
+        return {**previous, "ok": True, "added": False, "reason": "该节点已在订阅中"}
 
     fresh = collect_nodes()[0]
     entry = next((n for n in fresh if n["id"] == node_id), None)
     if not entry:
-        return {"ok": False, "reason": "node does not meet the publish gate"}
+        return {"ok": False, "reason": "节点未达到下发条件"}
     nodes.append(entry)
 
     sub_name = db.get("sub_name", "NodePool Unified") or "NodePool Unified"

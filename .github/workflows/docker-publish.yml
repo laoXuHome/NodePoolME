@@ -49,6 +49,7 @@ jobs:
           python tests/test_incremental_add.py
           python tests/test_latency_serial.py
           python tests/test_cycle_control.py
+          python tests/test_error_messages_cn.py
 
   build:
     needs: test
