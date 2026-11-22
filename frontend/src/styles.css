@@ -135,6 +135,23 @@ a { color: var(--np-accent); }
   gap: 16px;
   margin-bottom: 18px;
 }
+.np-dash-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 14fr) minmax(0, 10fr);
+  grid-template-areas:
+    "detect side"
+    "airport batch";
+  gap: 16px;
+}
+.np-dash-detect { grid-area: detect; }
+.np-dash-airport { grid-area: airport; }
+.np-dash-batch { grid-area: batch; }
+.np-dash-side {
+  grid-area: side;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 0;
+}
+.np-dash-side .np-board-card { min-width: 0; }
 .np-board-card {
   background: var(--np-panel);
   border: 1px solid var(--np-separator-soft);
@@ -665,3 +682,10 @@ a { color: var(--np-accent); }
   color: var(--np-secondary);
 }
 .np-filter-item-actions { margin-top: 10px; display: flex; justify-content: flex-end; }
+
+@media (max-width: 1100px) {
+  .np-dash-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "side" "detect" "airport" "batch";
+  }
+}

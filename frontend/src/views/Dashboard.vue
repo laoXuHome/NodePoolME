@@ -170,7 +170,66 @@ onUnmounted(() => clearInterval(timer.value))
     <h2 class="np-page-title">仪表盘</h2>
     <div class="np-page-desc">机场拉取、节点缓存与检测批次总览。检测只读取本地缓存，不会触发机场重新拉取。</div>
 
-    <div class="np-board" v-if="data">
+    <div class="np-dash-layout" v-if="data">
+        <div class="np-card np-dash-detect" style="padding:18px 20px">
+          <div class="np-section-title">
+            检测任务
+            <el-tag v-if="data?.runtime.running" :type="runTagType" size="small">{{ runStateText }}</el-tag>
+            <el-tag v-else type="success" size="small">空闲</el-tag>
+            <div class="np-flex" />
+            <div class="np-flex" style="gap:8px;flex-wrap:wrap">
+              <el-button v-if="!data?.runtime.running" size="small" type="primary" @click="runNow">立即检测并下发</el-button>
+              <el-button v-if="data?.runtime.running && !data.runtime.paused"
+                         size="small" :disabled="data.runtime.stop_requested" @click="pauseCycle">暂停</el-button>
+              <el-button v-if="data?.runtime.running && data.runtime.paused"
+                         size="small" type="success" :disabled="data.runtime.stop_requested" @click="resumeCycle">继续</el-button>
+              <el-button v-if="data?.runtime.running" size="small" type="danger" plain
+                         :disabled="data.runtime.stop_requested" @click="stopCycle">
+                {{ data.runtime.stop_requested ? '正在停止' : '停止并下发' }}
+              </el-button>
+            </div>
+          </div>
+          <div v-if="data">
+            <el-progress v-if="data.runtime.running" :percentage="data.runtime.progress"
+                         :stroke-width="12" :striped="!data.runtime.paused" :striped-flow="!data.runtime.paused" />
+            <div class="np-muted" style="margin:10px 0 14px">
+              引擎 {{ data.runtime.engine }} · 批次 #{{ data.runtime.batch_id || '—' }} ·
+              进度 {{ data.runtime.done }}/{{ data.runtime.total }} ·
+              块 {{ data.runtime.block_index || 0 }}/{{ data.runtime.blocks || 0 }}（{{ data.runtime.block_size || 0 }} 节点）·
+              {{ data.runtime.phase }} · 上次启动 {{ formatTs(data.runtime.last_cycle_at) }}
+            </div>
+            <div class="np-muted" style="margin:0 0 10px">
+              延迟检测（每轮必跑，各 3 轮）<span class="np-mono">{{ data.latency_probe?.url }} / {{ data.latency_probe?.url2 }}</span> ·
+              期望 {{ data.latency_probe?.status }} · 上限 {{ data.latency_probe?.names?.G?.short || 'G' }} {{ data.latency_probe?.ceiling || '不限' }}ms · {{ data.latency_probe?.names?.W?.short || 'W' }} {{ data.latency_probe?.ceiling2 || '不限' }}ms ·
+              通过 {{ data.latency_probe?.passed }} 个节点 ·
+              定时下发 {{ publishText }}
+            </div>
+            <el-table :data="data.groups" size="small">
+              <el-table-column prop="name" label="检测组" />
+              <el-table-column prop="ident" label="标识" width="80" />
+              <el-table-column prop="url" label="目标" show-overflow-tooltip />
+              <el-table-column label="本轮进度" width="190">
+                <template #default="{ row }">
+                  <div class="np-flex" style="gap:8px">
+                    <el-progress :percentage="roundPercent(row.name)" :stroke-width="8" style="flex:1" />
+                    <span class="np-muted">{{ roundDone(row.name) }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="passed" label="累计通过" width="100" />
+              <el-table-column label="状态" width="90">
+                <template #default="{ row }">
+                  <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
+                    {{ row.enabled ? '启用' : '停用' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </div>
+
+
+    <div class="np-dash-side np-board">
       <!-- 节点拉取 -->
       <div class="np-board-card">
         <div class="np-board-head">
@@ -256,66 +315,8 @@ onUnmounted(() => clearInterval(timer.value))
       </div>
     </div>
 
-    <el-row :gutter="16" style="margin-top:16px">
-      <el-col :md="14" :xs="24">
-        <div class="np-card" style="padding:18px 20px">
-          <div class="np-section-title">
-            检测任务
-            <el-tag v-if="data?.runtime.running" :type="runTagType" size="small">{{ runStateText }}</el-tag>
-            <el-tag v-else type="success" size="small">空闲</el-tag>
-            <div class="np-flex" />
-            <div class="np-flex" style="gap:8px;flex-wrap:wrap">
-              <el-button v-if="!data?.runtime.running" size="small" type="primary" @click="runNow">立即检测并下发</el-button>
-              <el-button v-if="data?.runtime.running && !data.runtime.paused"
-                         size="small" :disabled="data.runtime.stop_requested" @click="pauseCycle">暂停</el-button>
-              <el-button v-if="data?.runtime.running && data.runtime.paused"
-                         size="small" type="success" :disabled="data.runtime.stop_requested" @click="resumeCycle">继续</el-button>
-              <el-button v-if="data?.runtime.running" size="small" type="danger" plain
-                         :disabled="data.runtime.stop_requested" @click="stopCycle">
-                {{ data.runtime.stop_requested ? '正在停止' : '停止并下发' }}
-              </el-button>
-            </div>
-          </div>
-          <div v-if="data">
-            <el-progress v-if="data.runtime.running" :percentage="data.runtime.progress"
-                         :stroke-width="12" :striped="!data.runtime.paused" :striped-flow="!data.runtime.paused" />
-            <div class="np-muted" style="margin:10px 0 14px">
-              引擎 {{ data.runtime.engine }} · 批次 #{{ data.runtime.batch_id || '—' }} ·
-              进度 {{ data.runtime.done }}/{{ data.runtime.total }} ·
-              块 {{ data.runtime.block_index || 0 }}/{{ data.runtime.blocks || 0 }}（{{ data.runtime.block_size || 0 }} 节点）·
-              {{ data.runtime.phase }} · 上次启动 {{ formatTs(data.runtime.last_cycle_at) }}
-            </div>
-            <div class="np-muted" style="margin:0 0 10px">
-              延迟检测（每轮必跑，各 3 轮）<span class="np-mono">{{ data.latency_probe?.url }} / {{ data.latency_probe?.url2 }}</span> ·
-              期望 {{ data.latency_probe?.status }} · 上限 {{ data.latency_probe?.names?.G?.short || 'G' }} {{ data.latency_probe?.ceiling || '不限' }}ms · {{ data.latency_probe?.names?.W?.short || 'W' }} {{ data.latency_probe?.ceiling2 || '不限' }}ms ·
-              通过 {{ data.latency_probe?.passed }} 个节点 ·
-              定时下发 {{ publishText }}
-            </div>
-            <el-table :data="data.groups" size="small">
-              <el-table-column prop="name" label="检测组" />
-              <el-table-column prop="ident" label="标识" width="80" />
-              <el-table-column prop="url" label="目标" show-overflow-tooltip />
-              <el-table-column label="本轮进度" width="190">
-                <template #default="{ row }">
-                  <div class="np-flex" style="gap:8px">
-                    <el-progress :percentage="roundPercent(row.name)" :stroke-width="8" style="flex:1" />
-                    <span class="np-muted">{{ roundDone(row.name) }}</span>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column prop="passed" label="累计通过" width="100" />
-              <el-table-column label="状态" width="90">
-                <template #default="{ row }">
-                  <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
-                    {{ row.enabled ? '启用' : '停用' }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
-        </div>
 
-        <div class="np-card" style="padding:18px 20px;margin-top:16px">
+        <div class="np-card np-dash-airport" style="padding:18px 20px">
           <div class="np-section-title">机场状态</div>
           <el-table :data="data?.airport_list || []" size="small">
             <el-table-column prop="name" label="机场" />
@@ -333,10 +334,8 @@ onUnmounted(() => clearInterval(timer.value))
           </el-table>
           <div v-if="!data?.airport_list?.length" class="np-empty">还没有机场，先到「机场管理」添加订阅。</div>
         </div>
-      </el-col>
 
-      <el-col :md="10" :xs="24">
-        <div class="np-card" style="padding:18px 20px;margin-top:16px">
+        <div class="np-card np-dash-batch" style="padding:18px 20px">
           <div class="np-section-title">最近批次</div>
           <div v-if="data?.batch">
             <el-descriptions :column="1" size="small" border>
@@ -354,8 +353,7 @@ onUnmounted(() => clearInterval(timer.value))
           </div>
           <div v-else class="np-empty">尚未运行过检测批次</div>
         </div>
-      </el-col>
-    </el-row>
+    </div>
 
     <div class="np-card np-log-card">
       <div class="np-section-title">
