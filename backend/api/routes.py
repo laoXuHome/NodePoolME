@@ -180,7 +180,7 @@ async def dashboard():
         "passed": sum(g["passed"] for g in group_rows if g["enabled"]),
     }
     builder.ensure_share_history()
-    history = builder.share_history(11)
+    history = builder.share_history(20)
     history.append({
         "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
         "live": True,
@@ -191,7 +191,7 @@ async def dashboard():
             for row in airport_list
         },
     })
-    history = history[-12:]
+    history = history[-20:]
     publish_block = {
         "last_batch_at": last_publish["finished_at"] if last_publish else (last_batch["finished_at"] if last_batch else None),
         "last_auto": db.get("sub_last_auto_publish"),

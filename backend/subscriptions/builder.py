@@ -243,7 +243,7 @@ def record_share_snapshot(nodes: list[dict], batch_id: int | None = None, reason
         )
 
 
-def ensure_share_history(limit: int = 8) -> None:
+def ensure_share_history(limit: int = 20) -> None:
     """One-time backfill from recent published batches so the line charts start with history."""
     if db.get("share_history_seeded") == "1":
         return
@@ -279,7 +279,7 @@ def ensure_share_history(limit: int = 8) -> None:
         db.set_setting("share_history_seeded", "1")
 
 
-def share_history(limit: int = 12) -> list[dict]:
+def share_history(limit: int = 20) -> list[dict]:
     rows = db.rows(
         """SELECT ts, batch_id, total_nodes, total_published, airport_id, pool_count, published_count
            FROM share_history ORDER BY id DESC LIMIT ?""",
