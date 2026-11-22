@@ -122,6 +122,20 @@ function groupCell(row, gid) {
   if (!res) return null
   return res
 }
+function groupCellText(row, gid) {
+  const res = groupCell(row, gid)
+  if (!res) return ''
+  if (res.ok) return res.latency_ms ?? ''
+  // 只有“延迟超过标签上限”保留具体数值；超时和其他失败仍显示叉号
+  if (res.error_type === 'slow' && res.latency_ms != null) return res.latency_ms
+  return '✕'
+}
+function groupCellTip(row, gid) {
+  const res = groupCell(row, gid)
+  if (!res) return '—'
+  if (res.ok) return `延迟 ${res.latency_ms}ms`
+  return `${errorTypeLabel(res.error_type)}${res.message ? '：' + res.message : ''}`
+}
 
 onMounted(async () => {
   mq = window.matchMedia('(max-width: 768px)')
@@ -242,10 +256,12 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <el-table-column prop="region" label="地区" width="70" />
         <el-table-column v-for="g in groups" :key="g.id" :label="g.ident" width="76">
           <template #default="{ row }">
-            <el-tag v-if="groupCell(row, g.id)" :type="groupCell(row, g.id).ok ? 'success' : 'danger'"
-                    size="small" effect="plain">
-              {{ groupCell(row, g.id).ok ? (groupCell(row, g.id).latency_ms + '') : '✕' }}
-            </el-tag>
+            <el-tooltip v-if="groupCell(row, g.id)" :content="groupCellTip(row, g.id)" placement="top">
+              <el-tag :type="groupCell(row, g.id).ok ? 'success' : 'danger'"
+                      size="small" effect="plain">
+                {{ groupCellText(row, g.id) }}
+              </el-tag>
+            </el-tooltip>
             <span v-else class="np-muted">—</span>
           </template>
         </el-table-column>
