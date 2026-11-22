@@ -106,7 +106,7 @@ async function runNow() {
 }
 
 const publishTotal = computed(() => chartTotal(data.value?.airport_list || [], 'published_count'))
-const nodeChartRows = computed(() => rankRows(data.value?.airport_list || [], 'pool_count'))
+const nodeChartRows = computed(() => rankRows(data.value?.airport_list || [], 'available_count'))
 const publishChartRows = computed(() => rankRows(data.value?.airport_list || [], 'published_count'))
 const statusSegments = computed(() => {
   const d = data.value
@@ -118,8 +118,8 @@ const statusSegments = computed(() => {
   const unknown = Math.max(0, total - available - unavailable)
   const availableOnly = Math.max(0, available - qualified)
   const raw = [
-    { key: 'qualified', label: '下发达标', short: '下发', count: qualified, color: '#3f8cff', side: '#2563c9', light: '#7db4ff', ink: '#ffffff' },
-    { key: 'available', label: '可用待发', short: '待发', count: availableOnly, color: '#34c759', side: '#1f8f45', light: '#7bdf95', ink: '#ffffff' },
+    { key: 'qualified', label: '下发', short: '下发', count: qualified, color: '#34c759', side: '#1f8f45', light: '#7bdf95', ink: '#ffffff' },
+    { key: 'available', label: '可用', short: '可用', count: availableOnly, color: '#3f8cff', side: '#2563c9', light: '#7db4ff', ink: '#ffffff' },
     { key: 'unknown', label: '未检测', short: '未检', count: unknown, color: '#c7c7cc', side: '#97979d', light: '#e2e2e6', ink: '#59595f' },
     { key: 'unavailable', label: '不可用', short: '不可用', count: unavailable, color: '#ee7b76', side: '#c94b46', light: '#f6a6a2', ink: '#ffffff' },
   ].filter((item) => item.count > 0)
@@ -180,7 +180,8 @@ function trendCount(point, row, key) {
   return point.airports?.[String(row.id)]?.[key] || 0
 }
 function trendShare(point, row, key) {
-  const total = key === 'pool_count' ? point.total_nodes : point.total_published
+  const total = key === 'available_count' ? point.total_available
+    : key === 'pool_count' ? point.total_nodes : point.total_published
   return total ? trendCount(point, row, key) / total * 100 : 0
 }
 function trendMax(key) {
@@ -194,7 +195,7 @@ function trendMax(key) {
   }
   return Math.max(20, Math.ceil(max / 10) * 10)
 }
-const nodeTrendMax = computed(() => trendMax('pool_count'))
+const availableTrendMax = computed(() => trendMax('available_count'))
 const publishTrendMax = computed(() => trendMax('published_count'))
 function trendXY(key, row, index, max) {
   const n = historyPoints.value.length
@@ -451,7 +452,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
             </div>
             <div class="np-pool-stack-wrap" :style="{ '--stack-top': statusTopColor }">
               <div class="np-pool-stack"
-                   :title="`达标 ${statusCounts.qualified} · 可用 ${statusCounts.available} · 不可用 ${statusCounts.unavailable} · 未检测 ${statusCounts.unknown}`">
+                   :title="`下发 ${statusCounts.qualified} · 可用（未达标）${statusCounts.qualified ? statusCounts.available - statusCounts.qualified : statusCounts.available} · 不可用 ${statusCounts.unavailable}`">
                 <div v-for="segment in statusSegments" :key="segment.key"
                      class="np-pool-stack-seg" :class="{ 'is-thin': segment.height < 9 }"
                      :style="{ height: `${segment.height}%`, background: `linear-gradient(90deg, ${segment.side}, ${segment.color} 38%, ${segment.light} 70%, ${segment.color})` }">
@@ -467,30 +468,30 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           <div v-if="data.airport_list?.length" class="np-pool-charts">
             <div class="np-pool-chart">
               <div class="np-pool-chart-head">
-                <b>节点占比趋势</b>
-                <span>{{ data.nodes_total }} 节点</span>
+                <b>可用占比趋势</b>
+                <span>{{ data.nodes_available }} 可用</span>
               </div>
               <div class="np-pool-chart-body">
                 <div class="np-trend">
                   <svg :viewBox="`0 0 ${TREND.w} ${TREND.h}`" class="np-trend-svg">
-                    <line v-for="tick in trendTicks(nodeTrendMax)" :key="`node-grid-${tick.v}`"
+                    <line v-for="tick in trendTicks(availableTrendMax)" :key="`node-grid-${tick.v}`"
                           class="np-trend-grid" :x1="TREND.left" :x2="TREND.w - TREND.right"
                           :y1="tick.y" :y2="tick.y" />
-                    <text v-for="tick in trendTicks(nodeTrendMax)" :key="`node-tick-${tick.v}`"
+                    <text v-for="tick in trendTicks(availableTrendMax)" :key="`node-tick-${tick.v}`"
                           class="np-trend-tick" :x="TREND.left - 5" :y="tick.y + 3" text-anchor="end">{{ tick.v }}</text>
                     <template v-for="row in nodeChartRows" :key="`node-line-${row.id}`">
-                      <g v-if="row.enabled && trendHasValue('pool_count', row)">
-                        <path :d="trendArea('pool_count', row, nodeTrendMax)"
+                      <g v-if="row.enabled && trendHasValue('available_count', row)">
+                        <path :d="trendArea('available_count', row, availableTrendMax)"
                               :fill="airportColor(row)" class="np-trend-area" />
-                        <path :d="trendPath('pool_count', row, nodeTrendMax)"
+                        <path :d="trendPath('available_count', row, availableTrendMax)"
                               :stroke="airportColor(row)" class="np-trend-line" />
                         <circle v-for="(point, index) in historyPoints" :key="`node-dot-${row.id}-${index}`"
-                                :cx="trendXY('pool_count', row, index, nodeTrendMax).x"
-                                :cy="trendXY('pool_count', row, index, nodeTrendMax).y"
+                                :cx="trendXY('available_count', row, index, availableTrendMax).x"
+                                :cy="trendXY('available_count', row, index, availableTrendMax).y"
                                 r="2.4" :fill="airportColor(row)" class="np-trend-dot" />
                       </g>
                     </template>
-                    <g v-for="label in trendEndLabels('pool_count', nodeTrendMax)" :key="`node-label-${label.id}`">
+                    <g v-for="label in trendEndLabels('available_count', availableTrendMax)" :key="`node-label-${label.id}`">
                       <rect :x="TREND.w - TREND.right + 4" :y="label.y - 6.25" :width="label.width" height="12.5" rx="3" :fill="label.color" />
                       <text class="np-trend-label" :x="TREND.w - TREND.right + 8" :y="label.y + 3.4">{{ label.name }} {{ label.pct }}%</text>
                     </g>

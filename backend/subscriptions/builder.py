@@ -208,6 +208,16 @@ def _pool_counts() -> tuple[dict[int, int], int]:
     return counts, sum(counts.values())
 
 
+def _available_counts() -> tuple[dict[int, int], int]:
+    rows = db.rows(
+        """SELECT n.airport_id, COUNT(*) AS c FROM nodes n
+           JOIN airports a ON a.id=n.airport_id AND a.enabled=1
+           WHERE n.status='available' GROUP BY n.airport_id"""
+    )
+    counts = {row["airport_id"]: row["c"] for row in rows}
+    return counts, sum(counts.values())
+
+
 def _batch_pool_counts(batch_id: int) -> tuple[dict[int, int], int]:
     rows = db.rows(
         """SELECT n.airport_id, COUNT(DISTINCT x.node_id) AS c FROM (
@@ -231,15 +241,18 @@ def record_share_snapshot(nodes: list[dict], batch_id: int | None = None, reason
     if pool_counts is None:
         pool_counts, total_nodes = _pool_counts()
     total_nodes = total_nodes if total_nodes is not None else sum(pool_counts.values())
+    available_by_airport, total_available = _available_counts()
     published_by_airport = Counter(n.get("airport_id") for n in nodes)
     stamp = ts or _fmt_ts()
     for airport_id, pool_count in pool_counts.items():
         db.execute(
             """INSERT OR REPLACE INTO share_history
-               (ts, batch_id, reason, airport_id, pool_count, published_count, total_nodes, total_published)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (ts, batch_id, reason, airport_id, pool_count, published_count,
+                available_count, total_nodes, total_published, total_available)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (stamp, batch_id, reason, airport_id, pool_count,
-             published_by_airport.get(airport_id, 0), total_nodes, len(nodes)),
+             published_by_airport.get(airport_id, 0), available_by_airport.get(airport_id, 0),
+             total_nodes, len(nodes), total_available),
         )
 
 
@@ -281,7 +294,8 @@ def ensure_share_history(limit: int = 20) -> None:
 
 def share_history(limit: int = 20) -> list[dict]:
     rows = db.rows(
-        """SELECT ts, batch_id, total_nodes, total_published, airport_id, pool_count, published_count
+        """SELECT ts, batch_id, total_nodes, total_published, total_available,
+                  airport_id, pool_count, published_count, available_count
            FROM share_history ORDER BY id DESC LIMIT ?""",
         (max(1, limit) * 16,),
     )
@@ -289,10 +303,12 @@ def share_history(limit: int = 20) -> list[dict]:
     for row in reversed(rows):
         point = points.setdefault(row["ts"], {
             "ts": row["ts"], "batch_id": row["batch_id"], "total_nodes": row["total_nodes"],
-            "total_published": row["total_published"], "airports": {},
+            "total_published": row["total_published"], "total_available": row["total_available"],
+            "airports": {},
         })
         point["airports"][str(row["airport_id"])] = {
             "pool_count": row["pool_count"], "published_count": row["published_count"],
+            "available_count": row["available_count"],
         }
     return list(points.values())[-limit:]
 

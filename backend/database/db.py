@@ -140,8 +140,10 @@ CREATE TABLE IF NOT EXISTS share_history (
     airport_id INTEGER NOT NULL,
     pool_count INTEGER NOT NULL DEFAULT 0,
     published_count INTEGER NOT NULL DEFAULT 0,
+    available_count INTEGER NOT NULL DEFAULT 0,
     total_nodes INTEGER NOT NULL DEFAULT 0,
     total_published INTEGER NOT NULL DEFAULT 0,
+    total_available INTEGER NOT NULL DEFAULT 0,
     UNIQUE (ts, airport_id)
 );
 CREATE INDEX IF NOT EXISTS idx_share_history_ts ON share_history(ts);
@@ -291,6 +293,32 @@ def init_db() -> None:
                     g["name"], g["ident"], g["url"], "GET", 8, g["expect_status"], "", 0, 30, 1,
                     g["sort_order"], 1, now(),
                 ),
+            )
+        conn.commit()
+    # Migration: available-node share history (older rows get the current availability once)
+    share_cols = {r["name"] for r in conn.execute("PRAGMA table_info(share_history)").fetchall()}
+    availability_added = False
+    for column, ddl in (
+        ("available_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("total_available", "INTEGER NOT NULL DEFAULT 0"),
+    ):
+        if column not in share_cols:
+            conn.execute(f"ALTER TABLE share_history ADD COLUMN {column} {ddl}")
+            availability_added = True
+    conn.commit()
+    if availability_added:
+        rows = conn.execute(
+            """SELECT n.airport_id, COUNT(*) AS c FROM nodes n
+               JOIN airports a ON a.id=n.airport_id AND a.enabled=1
+               WHERE n.status='available' GROUP BY n.airport_id"""
+        ).fetchall()
+        counts = {row["airport_id"]: row["c"] for row in rows}
+        total = sum(counts.values())
+        conn.execute("UPDATE share_history SET available_count=0, total_available=?", (total,))
+        for airport_id, count in counts.items():
+            conn.execute(
+                "UPDATE share_history SET available_count=? WHERE airport_id=?",
+                (count, airport_id),
             )
         conn.commit()
     # Anything left mid-flight from a previous run must not be treated as live

@@ -36,6 +36,10 @@ def test_dashboard_has_latency_probe():
         assert {"count", "hits", "passed"} <= set(data["group_summary"].keys())
         assert {"last_auto", "nodes"} <= set(data["publish"].keys())
         assert isinstance(data.get("share_history"), list)
+        for point in data.get("share_history", []):
+            assert "total_available" in point
+            for airport_row in point.get("airports", {}).values():
+                assert "available_count" in airport_row
         for airport in data.get("airport_list", []):
             assert {"available_count", "unavailable_count", "score", "score_grade"} <= set(airport)
 

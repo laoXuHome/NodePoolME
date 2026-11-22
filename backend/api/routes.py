@@ -186,8 +186,13 @@ async def dashboard():
         "live": True,
         "total_nodes": nodes_total,
         "total_published": len(selected),
+        "total_available": available,
         "airports": {
-            str(row["id"]): {"pool_count": row["pool_count"], "published_count": row["published_count"]}
+            str(row["id"]): {
+                "pool_count": row["pool_count"],
+                "published_count": row["published_count"],
+                "available_count": row["available_count"],
+            }
             for row in airport_list
         },
     })

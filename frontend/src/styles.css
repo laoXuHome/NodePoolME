@@ -805,12 +805,12 @@ a { color: var(--np-accent); }
 .np-dash-pool { display: flex; flex-direction: column; padding: 20px 22px; height: 100%; }
 .np-pool-overview {
   flex: 1; min-height: 438px;
-  display: grid; grid-template-columns: 118px minmax(0, 1fr);
+  display: grid; grid-template-columns: 132px minmax(0, 1fr);
   gap: 12px; margin-top: 6px; align-items: stretch;
 }
 .np-pool-status {
   min-width: 0; display: flex; flex-direction: column;
-  gap: 5px; padding: 10px 10px 12px;
+  gap: 5px; padding: 10px 8px 12px;
   border: 1px solid var(--np-separator-soft); border-radius: 14px;
   background: linear-gradient(180deg, #fbfcfe, #f6f7fa);
 }
@@ -822,7 +822,7 @@ a { color: var(--np-accent); }
 .np-pool-status-sub i { font-style: normal; color: #c0c4cc; }
 .np-pool-stack-wrap { flex: 1; min-height: 0; margin-top: 3px; display: flex; align-items: stretch; justify-content: center; }
 .np-pool-stack {
-  position: relative; width: 66px; height: 100%; min-height: 170px;
+  position: relative; width: 88px; height: 100%; min-height: 170px;
   display: flex; flex-direction: column;
   border-radius: 10px 10px 4px 4px; overflow: hidden; background: #edf0f4;
   box-shadow: 0 8px 16px rgba(31, 42, 61, .12), inset 0 0 0 1px rgba(255, 255, 255, .25);
@@ -841,17 +841,17 @@ a { color: var(--np-accent); }
 .np-pool-stack-seg { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 2px; position: relative; }
 .np-pool-stack-seg + .np-pool-stack-seg { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55); }
 .np-pool-stack-label {
-  position: relative; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  position: relative; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   max-width: 100%; padding: 0 2px; white-space: nowrap;
   font-variant-numeric: tabular-nums; pointer-events: none;
 }
-.np-pool-stack-label em { font-style: normal; font-size: 7.5px; line-height: 1; font-weight: 600; opacity: .88; letter-spacing: .04em; }
-.np-pool-stack-label b { font-size: 12px; line-height: 1; font-weight: 700; letter-spacing: -.02em; }
-.np-pool-stack-label i { font-style: normal; font-size: 7px; line-height: 1; opacity: .9; }
+.np-pool-stack-label em { font-style: normal; font-size: 9px; line-height: 1; font-weight: 600; opacity: .92; letter-spacing: .04em; }
+.np-pool-stack-label b { font-size: 14px; line-height: 1; font-weight: 700; letter-spacing: -.02em; }
+.np-pool-stack-label i { font-style: normal; font-size: 8.5px; line-height: 1; opacity: .92; }
 .np-pool-stack-seg.is-thin .np-pool-stack-label { flex-direction: row; align-items: baseline; gap: 3px; }
 .np-pool-stack-seg.is-thin .np-pool-stack-label em { display: none; }
-.np-pool-stack-seg.is-thin .np-pool-stack-label b { font-size: 9.5px; }
-.np-pool-stack-seg.is-thin .np-pool-stack-label i { font-size: 7.5px; }
+.np-pool-stack-seg.is-thin .np-pool-stack-label b { font-size: 10px; }
+.np-pool-stack-seg.is-thin .np-pool-stack-label i { font-size: 8px; }
 .np-pool-charts { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .np-pool-chart { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 8px 10px 6px; border: 1px solid var(--np-separator-soft); border-radius: 12px; background: #fbfbfd; }
 .np-pool-chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
@@ -906,8 +906,12 @@ a { color: var(--np-accent); }
 
 @media (max-width: 760px) {
   .np-pool-overview { flex: none; min-height: 0; grid-template-columns: 1fr; }
-  .np-pool-status { min-height: 330px; }
-  .np-pool-stack { width: 72px; }
+  .np-pool-status { min-height: 430px; }
+  .np-pool-stack { width: 92px; min-height: 300px; }
+  .np-pool-stack-label { gap: 1px; }
+  .np-pool-stack-label em { font-size: 8px; }
+  .np-pool-stack-label b { font-size: 12px; }
+  .np-pool-stack-label i { font-size: 7.5px; }
   .np-pool-charts { flex: none; }
   .np-pool-chart { flex: none; min-height: 210px; }
   .np-pool-airport-row { grid-template-columns: minmax(0, 1fr) 104px; gap: 8px; min-height: 40px; }
