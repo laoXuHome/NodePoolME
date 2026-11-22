@@ -9,8 +9,9 @@ const loading = ref(false)
 const groups = ref([])
 const enabledGroups = computed(() => (groups.value || []).filter(g => g && g.enabled))
 const airports = ref([])
-const filters = ref({ q: '', airport_id: null, protocol: '', region: '', group_id: null,
-                     tags: [], passed: '', publishable: '', sort: 'latency', limit: 50 })
+const filters = ref({ q: '', airport_id: null, protocol: '', region: '', status: '',
+                     group_id: null, tags: [], passed: '', publishable: '',
+                     sort: 'latency', limit: 50 })
 const page = ref(1)
 const detail = ref(null)
 const detailOpen = ref(false)
@@ -22,7 +23,12 @@ const detailCols = computed(() => (isMobile.value ? 1 : 2))
 let mq = null
 function syncMobile(e) { isMobile.value = e.matches }
 
-const protocolOptions = computed(() => ['ss', 'vmess', 'vless', 'trojan', 'hysteria2', 'tuic', 'socks5', 'http'])
+const protocols = ref([])
+const regions = ref([])
+const protocolOptions = computed(() => protocols.value.length
+  ? protocols.value
+  : ['ss', 'ssr', 'vmess', 'vless', 'trojan', 'hysteria', 'hysteria2', 'tuic', 'socks5', 'http'])
+
 
 async function load() {
   loading.value = true
@@ -37,6 +43,8 @@ async function load() {
     items.value = res.items
     total.value = res.total
     if (res.latency_labels) latencyLabels.value = res.latency_labels
+    if (res.protocols) protocols.value = res.protocols
+    if (res.regions) regions.value = res.regions
   } catch (e) { ElMessage.error(e.message) }
   finally { loading.value = false }
 }
@@ -52,8 +60,9 @@ function search() {
   load()
 }
 function reset() {
-  filters.value = { q: '', airport_id: null, protocol: '', region: '', group_id: null,
-                    tags: [], passed: '', publishable: '', sort: 'latency', limit: 50 }
+  filters.value = { q: '', airport_id: null, protocol: '', region: '', status: '',
+                     group_id: null, tags: [], passed: '', publishable: '',
+                     sort: 'latency', limit: 50 }
   page.value = 1
   load()
 }
@@ -83,6 +92,11 @@ async function testNode(mode) {
   } catch (e) { ElMessage.error(e.message) }
   finally { testing.value = '' }
 }
+
+const hasActiveFilters = computed(() => Object.entries(filters.value).some(([k, v]) => {
+  if (k === 'sort' || k === 'limit') return false
+  return Array.isArray(v) ? v.length > 0 : v !== '' && v !== null
+}))
 
 function latencyText(n) { return n ? `${n} ms` : '—' }
 function targetName(target) { return latencyLabels.value[target]?.name || target }
@@ -118,6 +132,13 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
       </el-select>
       <el-select v-model="filters.protocol" placeholder="协议" clearable style="width:130px" @change="search">
         <el-option v-for="p in protocolOptions" :key="p" :label="p" :value="p" />
+      </el-select>
+      <el-select v-model="filters.region" placeholder="地区" clearable style="width:120px" @change="search">
+        <el-option v-for="r in regions" :key="r" :label="r" :value="r" />
+      </el-select>
+      <el-select v-model="filters.status" placeholder="状态" clearable style="width:120px" @change="search">
+        <el-option label="可用" value="available" />
+        <el-option label="不可用" value="unavailable" />
       </el-select>
       <el-select v-model="filters.group_id" placeholder="检测组" clearable style="width:140px" @change="search">
         <el-option v-for="g in enabledGroups" :key="g.id" :label="`${g.ident} · ${g.name}`" :value="g.ident" />
@@ -189,7 +210,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         </el-table-column>
       </el-table>
       <div v-if="!items.length" class="np-empty">
-        {{ total ? '没有符合筛选条件的节点' : (filters.q || filters.airport_id || filters.protocol || filters.region || filters.group_id || filters.tags.length || filters.passed || filters.publishable ? '当前筛选条件下没有节点' : '节点池为空，请先拉取机场订阅') }}
+        {{ total ? '没有符合筛选条件的节点' : (hasActiveFilters ? '当前筛选条件下没有节点' : '节点池为空，请先拉取机场订阅') }}
       </div>
       <div style="display:flex;justify-content:flex-end;padding:12px">
         <el-pagination v-model:current-page="page" :page-size="filters.limit" :total="total"

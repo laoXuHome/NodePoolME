@@ -76,6 +76,13 @@ def test_filters():
         assert names(publishable="1", protocol="ss") == ["hit-all"]
         # group_id also accepts the ident, and unknown groups must not crash
         assert names(group_id="TG", passed="1") == ["hit-all"]
+        # The "miss" mode applies to the selected group only; tags stay a positive AND.
+        assert names(group_id="TG", passed="miss", tags="G") == ["hit-one"]
+        assert names(tags="G,TG", passed="miss") == ["hit-all"]
+        assert names(group_id="G", passed="miss", tags="TG") == []
+        assert names(region="JP") == ["hit-one"]
+        assert names(status="available") == ["hit-all", "hit-one"]
+        assert names(status="unavailable") == []
         assert names(group_id="NOPE") == []
         assert names(tags="G,TG", group_id="TG", passed="1", publishable="1") == ["hit-all"]
         assert names(sort="tags") == ["hit-all", "hit-one"]

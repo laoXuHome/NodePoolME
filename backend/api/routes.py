@@ -458,15 +458,17 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
         if group_key:
             res = node["results"].get(group_key)
             ok = bool(res.get("ok")) if res else False
-            # hit_mode means "the user asked for misses"; a node without a record counts as miss
-            if ok == hit_mode:
+            # "未命中所选组": no record or a failed record both count as a miss.
+            # This mode belongs to the group filter only and never flips the tag filter.
+            if hit_mode:
+                if ok:
+                    return False
+            elif not ok:
                 return False
         if tag_list:
             node_idents = set(idents.get(node["id"], []))
-            if hit_mode:
-                if node_idents & set(tag_list):
-                    return False
-            elif not all(t in node_idents for t in tag_list):
+            # Tags are always a positive AND filter: every selected tag must be present.
+            if not all(t in node_idents for t in tag_list):
                 return False
         if passed == "qualified" and not node["passed_idents_count"]:
             return False
