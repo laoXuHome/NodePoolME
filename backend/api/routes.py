@@ -115,7 +115,10 @@ async def dashboard():
            GROUP BY n.airport_id, n.status"""
     ):
         status_by_airport.setdefault(row["airport_id"], {})[row["status"]] = row["c"]
-    # 标签合格：每个节点在任一启用标签的最新一次检测中通过，即视为“能打标签”
+    now = datetime.now().astimezone()
+    score_days = 7
+    score_start = (now - timedelta(days=score_days)).strftime("%Y-%m-%d %H:%M:%S")
+    # 标签合格：每个节点在任一启用标签、最近 7 天内的最新一次检测中通过
     tag_by_airport: dict[int, int] = {
         row["airport_id"]: row["c"]
         for row in db.rows(
@@ -127,11 +130,25 @@ async def dashboard():
                JOIN test_groups g ON g.id=r.group_id AND g.enabled=1
                JOIN nodes n ON n.id=r.node_id
                JOIN airports a ON a.id=n.airport_id AND a.enabled=1
-               WHERE r.ok=1
-               GROUP BY n.airport_id"""
+               WHERE r.ok=1 AND r.ts >= ?
+               GROUP BY n.airport_id""",
+            (score_start,),
         )
     }
-    now = datetime.now().astimezone()
+    builder.ensure_share_history(score_days)
+    history = builder.share_history(score_days)
+    score_samples: dict[int, list[dict]] = {}
+    for point in history:
+        point_total = point.get("total_nodes") or 0
+        for airport_id, counts in (point.get("airports") or {}).items():
+            pool = counts.get("pool_count") or 0
+            if not pool:
+                continue
+            score_samples.setdefault(int(airport_id), []).append({
+                "available": (counts.get("available_count") or 0) / pool,
+                "published": (counts.get("published_count") or 0) / pool,
+                "share": pool / point_total if point_total else 0,
+            })
     fetch_next: list[str] = []
     manual_only = 0
     airport_list: list[dict] = []
@@ -157,17 +174,30 @@ async def dashboard():
         tag_count = min(pool_count, tag_by_airport.get(airport["id"], 0))
         payload["tag_ok_count"] = tag_count
         payload["tag_rate"] = round(tag_count / pool_count * 100, 1) if pool_count else 0.0
+        samples = score_samples.get(airport["id"], [])
+        payload["score_samples"] = len(samples)
         if airport["enabled"] and pool_count:
-            # 综合评分：可用率 40% + 下发率 40% + 池占比 10% + 标签合格率 10%
-            share = pool_count / nodes_total if nodes_total else 0
-            health = avail_count / pool_count
-            publish_rate = payload["published_count"] / pool_count
+            # 综合评分：近 7 天可用率 40% + 下发率 40% + 池占比 10% + 标签合格率 10%
+            if samples:
+                health = sum(item["available"] for item in samples) / len(samples)
+                publish_rate = sum(item["published"] for item in samples) / len(samples)
+                share = sum(item["share"] for item in samples) / len(samples)
+            else:
+                health = avail_count / pool_count
+                publish_rate = payload["published_count"] / pool_count
+                share = pool_count / nodes_total if nodes_total else 0
             tag_rate = tag_count / pool_count
+            payload["available_rate"] = round(health * 100, 1)
+            payload["publish_rate"] = round(publish_rate * 100, 1)
+            payload["share_rate"] = round(share * 100, 1)
             score = round(100 * (0.40 * health + 0.40 * publish_rate + 0.10 * share + 0.10 * tag_rate))
             payload["score"] = max(0, min(100, score))
             payload["score_grade"] = ("优" if score >= 80 else "良" if score >= 65
                                       else "中" if score >= 50 else "低")
         else:
+            payload["available_rate"] = None
+            payload["publish_rate"] = None
+            payload["share_rate"] = None
             payload["score"] = None
             payload["score_grade"] = "停用" if not airport["enabled"] else "空"
         airport_list.append(payload)
@@ -199,8 +229,6 @@ async def dashboard():
         "cells": len(group_rows) and nodes_total * group_total or 0,
         "passed": sum(g["passed"] for g in group_rows if g["enabled"]),
     }
-    builder.ensure_share_history()
-    history = builder.share_history(20)
     history.append({
         "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
         "live": True,
@@ -216,7 +244,6 @@ async def dashboard():
             for row in airport_list
         },
     })
-    history = history[-20:]
     publish_block = {
         "last_batch_at": last_publish["finished_at"] if last_publish else (last_batch["finished_at"] if last_batch else None),
         "last_auto": db.get("sub_last_auto_publish"),
@@ -233,6 +260,7 @@ async def dashboard():
         "nodes_unknown": max(0, nodes_total - available - unavailable),
         "nodes_qualified": len(selected),
         "share_history": history,
+        "score_window_days": score_days,
         "groups": _group_stats(),
         "airport_list": airport_list,
         "batch": last_batch,

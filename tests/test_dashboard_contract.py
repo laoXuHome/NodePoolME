@@ -35,15 +35,49 @@ def test_dashboard_has_latency_probe():
         assert {"total", "ok", "error", "manual_only", "next_at"} <= set(data["fetch"].keys())
         assert {"count", "hits", "passed"} <= set(data["group_summary"].keys())
         assert {"last_auto", "nodes"} <= set(data["publish"].keys())
+        assert data.get("score_window_days") == 7
         assert isinstance(data.get("share_history"), list)
         for point in data.get("share_history", []):
             assert "total_available" in point
             for airport_row in point.get("airports", {}).values():
                 assert "available_count" in airport_row
         for airport in data.get("airport_list", []):
-            assert {"available_count", "unavailable_count", "tag_ok_count", "tag_rate", "score", "score_grade"} <= set(airport)
+            assert {"available_count", "unavailable_count", "tag_ok_count", "tag_rate",
+                    "available_rate", "publish_rate", "share_rate", "score_samples",
+                    "score", "score_grade"} <= set(airport)
 
 
 if __name__ == "__main__":
     test_dashboard_has_latency_probe()
     print("PASS test_dashboard_has_latency_probe")
+
+
+def test_share_history_uses_seven_day_window_and_sorted_time():
+    from datetime import datetime, timedelta
+
+    from backend.database import db
+    from backend.subscriptions import builder
+
+    now = datetime.now().astimezone().replace(microsecond=0)
+    old = (now - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S")
+    recent = (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+    middle = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+    for stamp in (recent, old, middle):
+        db.execute(
+            """INSERT OR REPLACE INTO share_history
+               (ts, batch_id, reason, airport_id, pool_count, published_count, available_count,
+                total_nodes, total_published, total_available)
+               VALUES (?, 1, 'test', 999, 10, 2, 5, 10, 2, 5)""",
+            (stamp,),
+        )
+    points = builder.share_history(7)
+    stamps = [point["ts"] for point in points]
+    assert old not in stamps
+    assert recent in stamps and middle in stamps
+    assert stamps == sorted(stamps)
+
+
+if __name__ == "__main__":
+    test_dashboard_has_latency_probe()
+    test_share_history_uses_seven_day_window_and_sorted_time()
+    print("PASS dashboard contract")

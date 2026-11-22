@@ -158,12 +158,21 @@ function scoreHint(row) {
   const pool = row.pool_count || 0
   if (!row.enabled) return '机场未启用，不参与评分'
   if (!pool) return '缓存池为空，暂不评分'
-  const health = Math.round((row.available_count || 0) / pool * 100)
-  const publish = Math.round((row.published_count || 0) / pool * 100)
-  const share = Math.round(pool / (data.value?.nodes_total || 1) * 100)
-  const tag = Math.round((row.tag_ok_count || 0) / pool * 100)
-  const unknown = row.unknown_count || 0
-  return `可用率 ${health}% · 下发率 ${publish}% · 池占比 ${share}% · 标签合格率 ${tag}%${unknown ? ` · 未检测 ${unknown}` : ''} → 综合 ${row.score} 分`
+  const health = row.available_rate ?? Math.round((row.available_count || 0) / pool * 100)
+  const publish = row.publish_rate ?? Math.round((row.published_count || 0) / pool * 100)
+  const share = row.share_rate ?? Math.round(pool / (data.value?.nodes_total || 1) * 100)
+  const tag = row.tag_rate ?? Math.round((row.tag_ok_count || 0) / pool * 100)
+  const basis = row.score_samples ? `近 7 天 ${row.score_samples} 个快照` : '无历史快照，按当前值'
+  return `${basis} · 可用率 ${health}%（×40%）· 下发率 ${publish}%（×40%）· 池占比 ${share}%（×10%）· 标签合格率 ${tag}%（×10%）→ 综合 ${row.score} 分`
+}
+function scoreSampleText(row) {
+  if (!row.enabled) return '未启用'
+  if (!row.pool_count) return '空池'
+  return row.score_samples ? `${row.score_samples} 个快照` : '按当前值'
+}
+function rateText(row, key) {
+  if (!row.enabled || row[key] === null || row[key] === undefined) return '—'
+  return `${Number(row[key]).toFixed(1)}%`
 }
 const rankedAirports = computed(() => {
   return [...(data.value?.airport_list || [])].sort((a, b) => {
@@ -175,7 +184,32 @@ const rankedAirports = computed(() => {
   })
 })
 
-const historyPoints = computed(() => Array.isArray(data.value?.share_history) ? data.value.share_history : [])
+const trendRange = ref('1d')
+const allHistoryPoints = computed(() => Array.isArray(data.value?.share_history) ? data.value.share_history : [])
+function trendPointTime(point) {
+  if (point?.live) return Date.now()
+  const time = new Date(String(point?.ts || '').replace(' ', 'T')).getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+const historyPoints = computed(() => {
+  const all = allHistoryPoints.value
+  if (!all.length) return []
+  const days = trendRange.value === '7d' ? 7 : 1
+  const cutoff = Date.now() - days * 86400000
+  let rows = all.filter((point) => point.live || trendPointTime(point) >= cutoff)
+  if (!rows.length) rows = all.slice(-1)
+  const max = trendRange.value === '7d' ? 64 : 48
+  if (rows.length > max) {
+    const picked = []
+    for (let i = 0; i < max; i += 1) {
+      const index = Math.round(i * (rows.length - 1) / (max - 1))
+      if (!picked.includes(rows[index])) picked.push(rows[index])
+    }
+    rows = picked
+  }
+  return rows
+})
+const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
 const TREND = { w: 336, h: 148, left: 30, right: 72, top: 12, bottom: 18 }
 function trendCount(point, row, key) {
   return point.airports?.[String(row.id)]?.[key] || 0
@@ -278,7 +312,9 @@ function trendPointLabel(point) {
   if (point.live) return '当前'
   const d = new Date(String(point.ts).replace(' ', 'T'))
   if (Number.isNaN(d.getTime())) return ''
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  if (trendRange.value === '7d') return `${d.getMonth() + 1}/${d.getDate()}`
+  return hm
 }
 function trendTicks(max) {
   const plotH = TREND.h - TREND.top - TREND.bottom
@@ -467,6 +503,13 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           </div>
 
           <div v-if="data.airport_list?.length" class="np-pool-charts">
+            <div class="np-trend-toolbar">
+              <span>占比趋势 <em>{{ trendRangeText }} · {{ historyPoints.length }} 个采样</em></span>
+              <div class="np-trend-range" role="group" aria-label="趋势区间">
+                <button type="button" :class="{ 'is-active': trendRange === '1d' }" @click="trendRange = '1d'">近 1 天</button>
+                <button type="button" :class="{ 'is-active': trendRange === '7d' }" @click="trendRange = '7d'">近 7 天</button>
+              </div>
+            </div>
             <div class="np-pool-chart">
               <div class="np-pool-chart-head">
                 <b>可用占比趋势</b>
@@ -540,32 +583,75 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           </div>
         </div>
 
-        <div class="np-pool-subhead">
-          <span title="综合评分 = 可用率 40% + 下发率 40% + 池占比 10% + 标签合格率 10%">机场明细</span>
-          <span>最近 {{ historyPoints.length }} 个批次 · 按综合评分降序</span>
+        <div class="np-score-head">
+          <div>
+            <b>机场评分系统</b>
+            <span>近 {{ data.score_window_days || 7 }} 天数据</span>
+          </div>
+          <span>评分降序</span>
         </div>
 
-        <div v-if="data.airport_list?.length" class="np-pool-airports">
-          <div v-for="(row, idx) in rankedAirports" :key="row.id" class="np-pool-airport-row">
-            <div class="np-pool-airport-name">
-              <div class="np-pool-airport-title">
-                <span class="np-pool-rank" :class="{ 'is-off': !row.enabled }">{{ idx + 1 }}</span>
-                <span class="np-airport-dot" :class="!row.enabled ? 'is-off' : `is-${row.last_status || 'none'}`" :title="airportStateText(row)" />
-                <b>{{ row.name }}</b>
-                <span v-if="row.enabled">{{ row.pool_count }} 节点</span>
-                <span v-else>{{ row.node_count }} 缓存</span>
-                <span v-if="!row.enabled" class="np-pool-off">未启用</span>
-              </div>
-              <div class="np-pool-airport-meta">
-                <span>可用 <b>{{ row.enabled ? `${row.available_count || 0}/${row.pool_count}` : '—' }}</b></span>
-                <span>下发 <b>{{ row.enabled ? `${row.published_count || 0}/${row.pool_count}` : '—' }}</b></span>
-                <span>标签 <b>{{ row.enabled ? `${row.tag_ok_count || 0}/${row.pool_count}` : '—' }}</b></span>
-              </div>
-            </div>
-            <div class="np-pool-score" :class="scoreTone(row)" :title="scoreHint(row)">
-              <span>综合评分</span><b>{{ row.enabled && row.score !== null ? row.score : '—' }}</b><em>{{ row.score_grade }}</em>
-            </div>
-          </div>
+        <div v-if="data.airport_list?.length" class="np-score-table-wrap">
+          <table class="np-score-table">
+            <colgroup>
+              <col class="np-score-col-rank" />
+              <col class="np-score-col-name" />
+              <col class="np-score-col-rate" />
+              <col class="np-score-col-rate" />
+              <col class="np-score-col-rate" />
+              <col class="np-score-col-rate" />
+              <col class="np-score-col-score" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th class="is-left">机场</th>
+                <th>可用率 <i>40%</i></th>
+                <th>下发率 <i>40%</i></th>
+                <th>池占比 <i>10%</i></th>
+                <th>标签合格率 <i>10%</i></th>
+                <th class="is-score">评分</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, idx) in rankedAirports" :key="row.id" :class="{ 'is-off': !row.enabled }">
+                <td class="np-score-rank" :class="{ 'is-off': !row.enabled }">{{ idx + 1 }}</td>
+                <td class="np-score-airport">
+                  <div class="np-score-airport-name">
+                    <span class="np-airport-dot" :class="!row.enabled ? 'is-off' : `is-${row.last_status || 'none'}`" :title="airportStateText(row)" />
+                    <b>{{ row.name }}</b>
+                    <span v-if="!row.enabled" class="np-pool-off">未启用</span>
+                  </div>
+                  <small>{{ row.enabled ? `${row.pool_count} 节点` : `${row.node_count} 缓存` }} · {{ scoreSampleText(row) }}</small>
+                </td>
+                <td class="np-score-cell">
+                  <b>{{ rateText(row, 'available_rate') }}</b>
+                  <small>{{ row.enabled ? '均值' : '—' }}</small>
+                </td>
+                <td class="np-score-cell">
+                  <b>{{ rateText(row, 'publish_rate') }}</b>
+                  <small>{{ row.enabled ? '均值' : '—' }}</small>
+                </td>
+                <td class="np-score-cell">
+                  <b>{{ rateText(row, 'share_rate') }}</b>
+                  <small>{{ row.enabled ? '均值' : '—' }}</small>
+                </td>
+                <td class="np-score-cell">
+                  <b>{{ rateText(row, 'tag_rate') }}</b>
+                  <small>{{ row.enabled ? `${row.tag_ok_count || 0}/${row.pool_count}` : '—' }}</small>
+                </td>
+                <td class="np-score-cell is-score" :title="scoreHint(row)">
+                  <div class="np-pool-score" :class="scoreTone(row)">
+                    <strong>{{ row.enabled && row.score !== null ? row.score : '—' }}</strong><em>{{ row.score_grade }}</em>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="data.airport_list?.length" class="np-score-foot">
+          <span>评分 = 可用率 40% + 下发率 40% + 池占比 10% + 标签合格率 10%</span>
+          <span>前 3 项取近 {{ data.score_window_days || 7 }} 天快照均值；标签合格率 = 近 7 天任一启用标签通过 / 缓存节点</span>
         </div>
         <div v-else class="np-empty">节点池为空，先到「机场管理」添加并拉取订阅。</div>
 

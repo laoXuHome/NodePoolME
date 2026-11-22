@@ -3,7 +3,7 @@ import base64
 import json
 import os
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import yaml
 
@@ -256,16 +256,18 @@ def record_share_snapshot(nodes: list[dict], batch_id: int | None = None, reason
         )
 
 
-def ensure_share_history(limit: int = 20) -> None:
-    """One-time backfill from recent published batches so the line charts start with history."""
+def ensure_share_history(days: int = 7) -> None:
+    """One-time backfill from published batches in the scoring window."""
     if db.get("share_history_seeded") == "1":
         return
     try:
         if not db.row("SELECT COUNT(*) AS c FROM share_history")["c"]:
+            cutoff = (datetime.now().astimezone() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
             batches = db.rows(
                 """SELECT id, started_at, finished_at FROM batches
-                   WHERE published=1 ORDER BY id DESC LIMIT ?""",
-                (limit,),
+                   WHERE published=1 AND COALESCE(finished_at, started_at) >= ?
+                   ORDER BY id DESC LIMIT 200""",
+                (cutoff,),
             )
             for batch in reversed(batches):
                 selected, _ = collect_nodes(batch["id"])
@@ -292,15 +294,17 @@ def ensure_share_history(limit: int = 20) -> None:
         db.set_setting("share_history_seeded", "1")
 
 
-def share_history(limit: int = 20) -> list[dict]:
+def share_history(days: int = 7) -> list[dict]:
+    """Return all per-publish snapshots in the rolling window, oldest first."""
+    cutoff = (datetime.now().astimezone() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     rows = db.rows(
         """SELECT ts, batch_id, total_nodes, total_published, total_available,
                   airport_id, pool_count, published_count, available_count
-           FROM share_history ORDER BY id DESC LIMIT ?""",
-        (max(1, limit) * 16,),
+           FROM share_history WHERE ts >= ? ORDER BY ts, id""",
+        (cutoff,),
     )
     points: dict[str, dict] = {}
-    for row in reversed(rows):
+    for row in rows:
         point = points.setdefault(row["ts"], {
             "ts": row["ts"], "batch_id": row["batch_id"], "total_nodes": row["total_nodes"],
             "total_published": row["total_published"], "total_available": row["total_available"],
@@ -310,7 +314,7 @@ def share_history(limit: int = 20) -> list[dict]:
             "pool_count": row["pool_count"], "published_count": row["published_count"],
             "available_count": row["available_count"],
         }
-    return list(points.values())[-limit:]
+    return list(points.values())
 
 
 def build_clash(nodes: list[dict], sub_name: str) -> str:
