@@ -115,6 +115,11 @@ const qualifyPct = computed(() => {
   if (!d || !d.nodes_total) return 0
   return Math.round((d.nodes_qualified || 0) / d.nodes_total * 100)
 })
+const unavailablePct = computed(() => 100 - poolPct.value)
+const publishTotal = computed(() => chartTotal(data.value?.airport_list || [], 'published_count'))
+const nodeChartRows = computed(() => rankRows(data.value?.airport_list || [], 'pool_count'))
+const publishChartRows = computed(() => rankRows(data.value?.airport_list || [], 'published_count'))
+const rankedAirports = computed(() => rankRows(data.value?.airport_list || [], 'pool_count'))
 const fetchState = computed(() => {
   const f = data.value?.fetch
   if (!f) return { text: '—', type: 'info' }
@@ -194,6 +199,14 @@ function chartShare(rows, row, key) {
   const total = chartTotal(rows, key)
   if (!total) return 0
   return Math.round(chartAmount(row, key) / total * 100)
+}
+function rankRows(rows, key) {
+  return [...(rows || [])].sort((a, b) => {
+    if (!!a.enabled !== !!b.enabled) return a.enabled ? -1 : 1
+    const diff = chartAmount(b, key) - chartAmount(a, key)
+    if (diff) return diff
+    return (b.pool_count || 0) - (a.pool_count || 0)
+  })
 }
 function donutStyle(rows, key) {
   const total = chartTotal(rows, key)
@@ -282,60 +295,55 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           </el-tag>
         </div>
 
-        <div class="np-pool-hero">
-          <div class="np-pool-total">
-            <span>节点总数</span>
-            <strong>{{ data.nodes_total }}</strong>
-            <em>个</em>
-          </div>
-          <div class="np-pool-health">
+        <div class="np-pool-overview">
+          <div class="np-pool-status">
+            <div class="np-pool-status-title">节点池状态</div>
+            <div class="np-pool-status-total"><strong>{{ data.nodes_total }}</strong><span>节点</span></div>
             <div class="np-pool-health-bar">
               <i class="is-ok" :style="{ width: `${poolPct}%` }" />
-              <i class="is-bad" :style="{ width: `${100 - poolPct}%` }" />
+              <i class="is-bad" :style="{ width: `${unavailablePct}%` }" />
             </div>
-            <div class="np-pool-legend">
-              <span><i class="is-ok" />可用 <b>{{ data.nodes_available }}</b></span>
-              <span><i class="is-bad" />不可用 <b>{{ data.nodes_unavailable }}</b></span>
+            <div class="np-pool-status-list">
+              <div class="is-qualified"><i /><span>下发达标</span><b>{{ data.nodes_qualified }}</b><em>{{ qualifyPct }}%</em></div>
+              <div class="is-ok"><i /><span>可用</span><b>{{ data.nodes_available }}</b><em>{{ poolPct }}%</em></div>
+              <div class="is-bad"><i /><span>不可用</span><b>{{ data.nodes_unavailable }}</b><em>{{ unavailablePct }}%</em></div>
             </div>
           </div>
-          <div class="np-pool-qualified">
-            <span>下发达标</span>
-            <strong>{{ qualifyPct }}%</strong>
-            <em>{{ data.nodes_qualified }} 个</em>
-          </div>
-        </div>
 
-        <div v-if="data.airport_list?.length" class="np-pool-charts">
-          <div class="np-pool-chart">
-            <div class="np-pool-chart-head"><b>节点占比</b><span>按机场</span></div>
-            <div class="np-pool-chart-body">
-              <div class="np-donut" :style="donutStyle(data.airport_list, 'pool_count')"
-                   :title="`节点池 ${data.nodes_total} 个节点`">
-                <div class="np-donut-center"><strong>{{ data.nodes_total }}</strong><span>节点</span></div>
+          <div v-if="data.airport_list?.length" class="np-pool-charts">
+            <div class="np-pool-chart">
+              <div class="np-pool-chart-head">
+                <b>节点占比</b>
+                <span>{{ data.nodes_total }} 节点 · 高 → 低</span>
               </div>
-              <div class="np-donut-legend">
-                <div v-for="row in data.airport_list" :key="`node-${row.id}`"
-                     class="np-donut-legend-row" :class="{ 'is-off': !row.enabled }">
-                  <i :style="{ background: airportColor(row) }" />
-                  <span>{{ row.name }}</span>
-                  <b>{{ chartShare(data.airport_list, row, 'pool_count') }}%</b>
+              <div class="np-pool-chart-body">
+                <div class="np-pie" :style="donutStyle(nodeChartRows, 'pool_count')"
+                     :title="`节点池 ${data.nodes_total} 个节点`" />
+                <div class="np-donut-legend is-two-col">
+                  <div v-for="row in nodeChartRows" :key="`node-${row.id}`"
+                       class="np-donut-legend-row" :class="{ 'is-off': !row.enabled }">
+                    <i :style="{ background: airportColor(row) }" />
+                    <span>{{ row.name }}</span>
+                    <b>{{ chartShare(nodeChartRows, row, 'pool_count') }}%</b>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          <div class="np-pool-chart">
-            <div class="np-pool-chart-head"><b>下发占比</b><span>占下发总数</span></div>
-            <div class="np-pool-chart-body">
-              <div class="np-donut" :style="donutStyle(data.airport_list, 'published_count')"
-                   :title="`已下发 ${chartTotal(data.airport_list, 'published_count')} 个节点`">
-                <div class="np-donut-center"><strong>{{ chartTotal(data.airport_list, 'published_count') }}</strong><span>已下发</span></div>
+            <div class="np-pool-chart">
+              <div class="np-pool-chart-head">
+                <b>下发占比</b>
+                <span>{{ publishTotal }} 已下发 · 高 → 低</span>
               </div>
-              <div class="np-donut-legend">
-                <div v-for="row in data.airport_list" :key="`pub-${row.id}`"
-                     class="np-donut-legend-row" :class="{ 'is-off': !row.enabled }">
-                  <i :style="{ background: airportColor(row) }" />
-                  <span>{{ row.name }}</span>
-                  <b>{{ row.enabled && row.published_count ? `${chartShare(data.airport_list, row, 'published_count')}%` : '—' }}</b>
+              <div class="np-pool-chart-body">
+                <div class="np-pie" :style="donutStyle(publishChartRows, 'published_count')"
+                     :title="`已下发 ${publishTotal} 个节点`" />
+                <div class="np-donut-legend is-two-col">
+                  <div v-for="row in publishChartRows" :key="`pub-${row.id}`"
+                       class="np-donut-legend-row" :class="{ 'is-off': !row.enabled }">
+                    <i :style="{ background: airportColor(row) }" />
+                    <span>{{ row.name }}</span>
+                    <b>{{ row.enabled && row.published_count ? `${chartShare(publishChartRows, row, 'published_count')}%` : '—' }}</b>
+                  </div>
                 </div>
               </div>
             </div>
@@ -344,13 +352,14 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
 
         <div class="np-pool-subhead">
           <span>机场明细</span>
-          <span>节点占比 · 下发率 · 上次 / 下次拉取</span>
+          <span>按节点占比降序 · 上次 / 下次拉取</span>
         </div>
 
         <div v-if="data.airport_list?.length" class="np-pool-airports">
-          <div v-for="row in data.airport_list" :key="row.id" class="np-pool-airport-row">
+          <div v-for="(row, idx) in rankedAirports" :key="row.id" class="np-pool-airport-row">
             <div class="np-pool-airport-name">
               <div class="np-pool-airport-title">
+                <span class="np-pool-rank" :class="{ 'is-off': !row.enabled }">{{ idx + 1 }}</span>
                 <span class="np-airport-dot" :class="!row.enabled ? 'is-off' : `is-${row.last_status || 'none'}`" :title="airportStateText(row)" />
                 <b>{{ row.name }}</b>
                 <span v-if="row.enabled">{{ row.pool_count }} 节点</span>
