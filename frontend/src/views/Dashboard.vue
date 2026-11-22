@@ -175,6 +175,11 @@ const batchTone = computed(() => {
   if (s === 'running') return 'running'
   return s ? 'failed' : 'idle'
 })
+function statusBarHeight(value) {
+  const total = data.value?.nodes_total || 0
+  if (!total) return '0%'
+  return `${Math.max(4, Math.round((value || 0) / total * 100))}%`
+}
 function airportNodeShare(row) {
   const total = data.value?.nodes_total || 0
   if (!total) return 0
@@ -311,14 +316,31 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           <div class="np-pool-status">
             <div class="np-pool-status-title">节点池状态</div>
             <div class="np-pool-status-total"><strong>{{ data.nodes_total }}</strong><span>节点</span></div>
-            <div class="np-pool-health-bar">
-              <i class="is-ok" :style="{ width: `${poolPct}%` }" />
-              <i class="is-bad" :style="{ width: `${unavailablePct}%` }" />
-            </div>
-            <div class="np-pool-status-list">
-              <div class="is-qualified"><i /><span>下发达标</span><b>{{ data.nodes_qualified }}</b><em>{{ qualifyPct }}%</em></div>
-              <div class="is-ok"><i /><span>可用</span><b>{{ data.nodes_available }}</b><em>{{ poolPct }}%</em></div>
-              <div class="is-bad"><i /><span>不可用</span><b>{{ data.nodes_unavailable }}</b><em>{{ unavailablePct }}%</em></div>
+            <div class="np-pool-columns">
+              <div class="np-pool-col is-qualified">
+                <div class="np-pool-col-track">
+                  <i class="np-pool-col-bar" :style="{ height: statusBarHeight(data.nodes_qualified) }" />
+                </div>
+                <b>{{ data.nodes_qualified }}</b>
+                <span>下发达标</span>
+                <em>{{ qualifyPct }}%</em>
+              </div>
+              <div class="np-pool-col is-ok">
+                <div class="np-pool-col-track">
+                  <i class="np-pool-col-bar" :style="{ height: statusBarHeight(data.nodes_available) }" />
+                </div>
+                <b>{{ data.nodes_available }}</b>
+                <span>可用</span>
+                <em>{{ poolPct }}%</em>
+              </div>
+              <div class="np-pool-col is-bad">
+                <div class="np-pool-col-track">
+                  <i class="np-pool-col-bar" :style="{ height: statusBarHeight(data.nodes_unavailable) }" />
+                </div>
+                <b>{{ data.nodes_unavailable }}</b>
+                <span>不可用</span>
+                <em>{{ unavailablePct }}%</em>
+              </div>
             </div>
           </div>
 
@@ -385,12 +407,14 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               </div>
             </div>
             <div class="np-pool-metric">
-              <span class="np-pool-metric-label">节点占比</span>
-              <div class="np-pool-metric-value"><b>{{ airportNodeShare(row) }}%</b><em>{{ row.pool_count }} / {{ data.nodes_total }}</em></div>
+              <span class="np-pool-metric-label">节点</span>
+              <b>{{ airportNodeShare(row) }}%</b>
+              <em>{{ row.pool_count }} / {{ data.nodes_total }}</em>
             </div>
             <div class="np-pool-metric">
-              <span class="np-pool-metric-label">下发率</span>
-              <div class="np-pool-metric-value"><b>{{ airportPublishRate(row) }}%</b><em>{{ row.enabled ? `${row.published_count} / ${row.pool_count}` : '未参与' }}</em></div>
+              <span class="np-pool-metric-label">下发</span>
+              <b>{{ airportPublishRate(row) }}%</b>
+              <em>{{ row.enabled ? `${row.published_count} / ${row.pool_count}` : '未参与' }}</em>
             </div>
           </div>
         </div>
