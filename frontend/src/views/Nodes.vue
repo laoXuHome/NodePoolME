@@ -136,7 +136,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 <template>
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">节点池</h2>
-    <div class="np-page-desc">展示去重后的缓存节点、最近一次各检测组结果与动态生成的最终名称。</div>
+    <div class="np-page-desc">展示全部缓存节点、最近一次各检测组结果与动态生成的最终名称。</div>
 
     <div class="np-toolbar np-node-toolbar">
       <el-input v-model="filters.q" class="np-search" placeholder="搜索名称 / 服务器" style="width:220px" clearable

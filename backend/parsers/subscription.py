@@ -92,7 +92,11 @@ def _int(value, default=0) -> int:
 
 
 def fingerprint(protocol: str, server: str, port: int, params: dict) -> str:
-    """Stable identity for a node. Protocol + endpoint + transport key params; names are ignored."""
+    """Content hash for a node (protocol + endpoint + transport params; name ignored).
+
+    This is not a unique row id: the fetcher appends an occurrence suffix when one
+    airport publishes several entries with the same content, so no node is merged.
+    """
     keys = ("uuid", "password", "cipher", "network", "path", "host", "sni", "serviceName",
             "security", "flow", "publicKey", "shortId", "obfs")
     core = {k: params.get(k) for k in keys if params.get(k) not in (None, "", 0, False)}

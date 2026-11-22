@@ -143,6 +143,26 @@ def _upsert_node(conn, airport_id: int, row: dict, stamp: str) -> None:
     )
 
 
+def _unique_fingerprints(nodes: list[dict]) -> list[dict]:
+    """Give every parsed node its own cache key. Never merge nodes by config.
+
+    The parser fingerprint is only a content hash. Airports commonly publish
+    several entries with the same endpoint and transport but different names or
+    client-side options. They are distinct nodes and must all be kept, so the
+    2nd, 3rd... occurrence gets a stable suffix instead of replacing the 1st.
+    """
+    seen: dict[str, int] = {}
+    out: list[dict] = []
+    for node in nodes:
+        base = str(node["fingerprint"])
+        count = seen.get(base, 0) + 1
+        seen[base] = count
+        if count > 1:
+            node = {**node, "fingerprint": f"{base}-{count}"}
+        out.append(node)
+    return out
+
+
 def _upsert(airport_id: int, fetched: list[dict], keywords: list[str] | None = None) -> dict:
     """All-or-nothing update of one airport's nodes. Old cache survives any failure.
 
@@ -150,6 +170,7 @@ def _upsert(airport_id: int, fetched: list[dict], keywords: list[str] | None = N
     in `airport_filtered_nodes` so nothing tests or publishes them. Manually
     admitted fingerprints stay in the pool even while they still match.
     """
+    fetched = _unique_fingerprints(fetched)
     stamp = db.now()
     keywords = normalize_keywords(keywords or [])
     placeholders = []
@@ -398,15 +419,10 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
     try:
         text, traffic = await _download(airport["url"])
         nodes, errors, parse_stats = parser.parse_text_full(text)
-        # de-duplicate inside this airport before touching the database
-        uniq: dict[str, dict] = {}
-        for node in nodes:
-            uniq.setdefault(node["fingerprint"], node)
-        duplicates = len(nodes) - len(uniq)
-        if not uniq:
+        if not nodes:
             raise ValueError(f"未解析到支持的节点（{'; '.join(errors) or '无法识别内容'}）")
         keywords = normalize_keywords(airport.get("filter_keywords"))
-        stats = _upsert(airport_id, list(uniq.values()), keywords)
+        stats = _upsert(airport_id, nodes, keywords)
         duration = int((time.perf_counter() - started) * 1000)
         trig_cn = {"schedule": "定时拉取", "manual": "手动拉取", "startup": "启动拉取"}.get(trigger, trigger)
         db.execute(
@@ -429,7 +445,6 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
              f"{trig_cn}：新增 {stats['inserted']}，更新 {stats['updated']}"
              + (f"，过滤 {stats['filtered']}" if stats.get("filtered") else "") + "；"
              f"解析 {parse_stats['parsed']}/{parse_stats['total']}"
-             + (f"，去重 {duplicates}" if duplicates else "")
              + (f"，跳过 {', '.join(f'{k}×{v}' for k, v in parse_stats['unsupported'].items())}"
                 if parse_stats["unsupported"] else "")
              + f"，UA {config.HTTP_UA}"),
@@ -443,9 +458,9 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
                       + (f"（节点池 {stats['total']}，过滤 {stats['filtered']}）"
                          if stats.get("filtered") else "")
                       + f"（解析 {parse_stats['parsed']}/{parse_stats['total']}"
-                      + (f"，去重 {duplicates}" if duplicates else "") + f"，{trig_cn}，耗时 {duration}ms）")
+                      + f"，{trig_cn}，耗时 {duration}ms）")
         return {"ok": True, **stats, "duration_ms": duration, "warnings": errors[:10],
-                "parse": parse_stats, "duplicates": duplicates}
+                "parse": parse_stats}
     except Exception as exc:
         duration = int((time.perf_counter() - started) * 1000)
         detail = str(exc).strip()
