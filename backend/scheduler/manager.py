@@ -152,7 +152,7 @@ def _semaphore_map_factory():
 
 
 # ---------------------------------------------------------------------------- latency probe
-LATENCY_ROUNDS = 2
+LATENCY_ROUNDS = 3
 
 LATENCY_TARGETS = (
     ("G", "latency_test_url", "sub_max_latency", "latency_test_name",
@@ -235,7 +235,7 @@ async def _latency_task(nodes: list[dict], probes: list[dict], batch_id: int, gl
     """Probe every node in parallel, but keep each node's own rounds strictly serial.
 
     The global semaphore caps total in-flight requests. Within one node the order is
-    always G, W, G, W and never two targets at the same time, so a weak node cannot be
+    always G, W, G, W, G, W and never two targets at the same time, so a weak node cannot be
     flooded. Running only one node at a time here made a 100+ node batch look frozen.
     """
 
@@ -243,7 +243,7 @@ async def _latency_task(nodes: list[dict], probes: list[dict], batch_id: int, gl
         per_probe: dict[str, list] = {}
         try:
             await _control_point()
-            # Strictly alternating G, W, G, W; one request in flight per node.
+            # Strictly alternating G, W, G, W, G, W; one request in flight per node.
             for _round in range(LATENCY_ROUNDS):
                 for probe in probes:
                     # Node lock first, then the global slot: see _test_one for why.

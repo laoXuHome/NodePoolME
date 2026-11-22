@@ -46,7 +46,7 @@ def test_alternating_single_flight():
     asyncio.run(manager._latency_task([node], probes, None, asyncio.Semaphore(10),
                                       {node["id"]: asyncio.Lock()}, counters))
     assert active["max"] == 1, active
-    assert active["order"] == ["G", "W", "G", "W"], active
+    assert active["order"] == ["G", "W", "G", "W", "G", "W"], active
 
 
 def test_parallel_nodes_each_stay_single_flight():

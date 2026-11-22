@@ -1,4 +1,4 @@
-"""Dual-target, best-of-two latency gate: both Google and Wikipedia must pass."""
+"""Dual-target, best-of-three latency gate: both Google and Wikipedia must pass."""
 import os
 import sys
 import tempfile
@@ -15,10 +15,15 @@ from backend.database import db  # noqa: E402
 from backend.subscriptions import builder  # noqa: E402
 
 ROUNDS = {
-    # name: ([(ok, ms), ...] for G, [(ok, ms), ...] for W)
-    "g-slow": ([(False, 1500), (False, 1400)], [(True, 300), (True, 320)]),
-    "w-fallback": ([(True, 1200), (True, 800)], [(False, 1300), (False, 1100)]),
-    "both-ok": ([(True, 900), (False, 1000)], [(True, 950), (True, 700)]),
+    # name: ([(ok, ms), ...] for G, [(ok, ms), ...] for W); three rounds each
+    "g-slow": ([(False, 1500), (False, 1400), (False, 1300)],
+               [(True, 300), (True, 320), (True, 310)]),
+    "w-fallback": ([(True, 1200), (True, 800), (True, 900)],
+                   [(False, 1300), (False, 1100), (False, 1200)]),
+    "both-ok": ([(True, 900), (False, 1000), (False, 950)],
+                [(True, 950), (False, 1100), (True, 700)]),
+    "third-rescue": ([(False, 1100), (False, 1050), (True, 980)],
+                     [(False, 1200), (False, 1150), (True, 950)]),
 }
 
 
@@ -44,7 +49,7 @@ def _seed():
     return ids
 
 
-def test_dual_best_of_two():
+def test_dual_best_of_three():
     ids = _seed()
     latests = builder.latest_latency()
     assert latests[ids["g-slow"]]["ok"] is False
@@ -60,8 +65,13 @@ def test_dual_best_of_two():
     assert latests[ids["both-ok"]]["targets"]["W"]["best"] == 700
     assert latests[ids["both-ok"]]["latency_ms"] == 900  # worst of the two best values
 
+    # Third-round success must count; keeping only the newest two rounds would drop it.
+    assert latests[ids["third-rescue"]]["ok"] is True
+    assert latests[ids["third-rescue"]]["targets"]["G"]["best"] == 980
+    assert latests[ids["third-rescue"]]["targets"]["W"]["best"] == 950
+
     nodes, stats = builder.collect_nodes()
-    assert [n["raw_name"] for n in nodes] == ["both-ok"], nodes
+    assert [n["raw_name"] for n in nodes] == ["both-ok", "third-rescue"], nodes
     assert stats["skipped"]["latency_fail"] == 2, stats
 
 
@@ -75,6 +85,6 @@ def test_ceiling_is_per_target():
 
 
 if __name__ == "__main__":
-    test_dual_best_of_two()
+    test_dual_best_of_three()
     test_ceiling_is_per_target()
     print("PASS dual-target latency gate")

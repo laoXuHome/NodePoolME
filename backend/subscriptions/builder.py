@@ -53,7 +53,7 @@ TAG_SEP = "ᐧ"    # inner separator between tag idents
 def latest_latency(batch_id: int | None = None) -> dict[int, dict]:
     """node_id -> dual-target summary.
 
-    Each target keeps its last two rounds; the best passing round counts. The node only
+    Each target keeps its last three rounds; the best passing round counts. The node only
     passes when every configured target has a passing round within its own ceiling.
     When batch_id is given, only results from that batch participate.
     """
@@ -65,7 +65,7 @@ def latest_latency(batch_id: int | None = None) -> dict[int, dict]:
             SELECT l2.id FROM latency_results l2
             WHERE l2.node_id = l.node_id AND l2.target = l.target
               AND l2.batch_id = {int(batch_id)}
-            ORDER BY l2.id DESC LIMIT 2
+            ORDER BY l2.id DESC LIMIT 3
         )
         ORDER BY l.id
         """
@@ -76,7 +76,7 @@ def latest_latency(batch_id: int | None = None) -> dict[int, dict]:
         WHERE l.id IN (
             SELECT l2.id FROM latency_results l2
             WHERE l2.node_id = l.node_id AND l2.target = l.target
-            ORDER BY l2.id DESC LIMIT 2
+            ORDER BY l2.id DESC LIMIT 3
         )
         ORDER BY l.id
         """
