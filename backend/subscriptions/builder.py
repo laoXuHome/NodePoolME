@@ -15,16 +15,28 @@ def _fmt_ts() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def latest_results() -> dict[int, dict[int, dict]]:
-    """node_id -> {group_id: {ok, latency_ms, error_type, ts}} using the newest row per pair."""
-    sql = """
-    SELECT r.node_id, r.group_id, r.ok, r.latency_ms, r.error_type, r.ts
-    FROM results r
-    JOIN (SELECT node_id, group_id, MAX(id) AS mx FROM results GROUP BY node_id, group_id) m
-      ON m.node_id = r.node_id AND m.group_id = r.group_id AND m.mx = r.id
-    """
+def latest_results(batch_id: int | None = None) -> dict[int, dict[int, dict]]:
+    """node_id -> {group_id: ...} using the newest row per pair, optionally batch-scoped."""
+    if batch_id:
+        sql = """
+        SELECT r.node_id, r.group_id, r.ok, r.latency_ms, r.error_type, r.ts
+        FROM results r
+        JOIN (SELECT node_id, group_id, MAX(id) AS mx FROM results WHERE batch_id=?
+              GROUP BY node_id, group_id) m
+          ON m.node_id = r.node_id AND m.group_id = r.group_id AND m.mx = r.id
+        WHERE r.batch_id=?
+        """
+        rows = db.rows(sql, (batch_id, batch_id))
+    else:
+        sql = """
+        SELECT r.node_id, r.group_id, r.ok, r.latency_ms, r.error_type, r.ts
+        FROM results r
+        JOIN (SELECT node_id, group_id, MAX(id) AS mx FROM results GROUP BY node_id, group_id) m
+          ON m.node_id = r.node_id AND m.group_id = r.group_id AND m.mx = r.id
+        """
+        rows = db.rows(sql)
     out: dict[int, dict[int, dict]] = {}
-    for row in db.rows(sql):
+    for row in rows:
         out.setdefault(row["node_id"], {})[row["group_id"]] = {
             "ok": bool(row["ok"]),
             "latency_ms": row["latency_ms"],
@@ -38,22 +50,36 @@ NAME_SEP = "⁃"   # outer separator: 机场⁃标签⁃节点名
 TAG_SEP = "ᐧ"    # inner separator between tag idents
 
 
-def latest_latency() -> dict[int, dict]:
+def latest_latency(batch_id: int | None = None) -> dict[int, dict]:
     """node_id -> dual-target summary.
 
     Each target keeps its last two rounds; the best passing round counts. The node only
     passes when every configured target has a passing round within its own ceiling.
+    When batch_id is given, only results from that batch participate.
     """
-    sql = """
-    SELECT l.node_id, l.target, l.ok, l.latency_ms, l.error_type, l.ts, l.id
-    FROM latency_results l
-    WHERE l.id IN (
-        SELECT l2.id FROM latency_results l2
-        WHERE l2.node_id = l.node_id AND l2.target = l.target
-        ORDER BY l2.id DESC LIMIT 2
-    )
-    ORDER BY l.id
-    """
+    if batch_id:
+        sql = f"""
+        SELECT l.node_id, l.target, l.ok, l.latency_ms, l.error_type, l.ts, l.id
+        FROM latency_results l
+        WHERE l.batch_id = {int(batch_id)} AND l.id IN (
+            SELECT l2.id FROM latency_results l2
+            WHERE l2.node_id = l.node_id AND l2.target = l.target
+              AND l2.batch_id = {int(batch_id)}
+            ORDER BY l2.id DESC LIMIT 2
+        )
+        ORDER BY l.id
+        """
+    else:
+        sql = """
+        SELECT l.node_id, l.target, l.ok, l.latency_ms, l.error_type, l.ts, l.id
+        FROM latency_results l
+        WHERE l.id IN (
+            SELECT l2.id FROM latency_results l2
+            WHERE l2.node_id = l.node_id AND l2.target = l.target
+            ORDER BY l2.id DESC LIMIT 2
+        )
+        ORDER BY l.id
+        """
     caps = {
         "G": db.get_int("sub_max_latency", 1000),
         "W": db.get_int("sub_max_latency2", 1000),
@@ -94,7 +120,7 @@ def latest_latency() -> dict[int, dict]:
     return out
 
 
-def collect_nodes() -> tuple[list[dict], dict]:
+def collect_nodes(batch_id: int | None = None) -> tuple[list[dict], dict]:
     """Apply eligibility rules and compute display names.
 
     Publish gate = newest latency probe within the configured ceiling. Test groups no longer
@@ -104,7 +130,7 @@ def collect_nodes() -> tuple[list[dict], dict]:
         "SELECT id, name, ident, sort_order, enabled FROM test_groups ORDER BY sort_order, id"
     )
     enabled_groups = [g for g in groups if g["enabled"]]
-    results = latest_results()
+    results = latest_results(batch_id)
     airports = {a["id"]: a for a in db.rows("SELECT id, name FROM airports ORDER BY id")}
     nodes = db.rows(
         """SELECT n.id, n.airport_id, n.raw_name, n.protocol, n.server, n.port, n.params,
@@ -113,7 +139,7 @@ def collect_nodes() -> tuple[list[dict], dict]:
            WHERE a.enabled=1 ORDER BY n.id"""
     )
 
-    latests = latest_latency()
+    latests = latest_latency(batch_id)
     required_tags = [t for t in (db.get("sub_required_tags") or "").split(",") if t]
 
 
@@ -353,8 +379,12 @@ def add_published_node(node_id: int) -> dict:
 
 
 def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
-    """Generate all formats, validate each one, then atomically replace the live files."""
-    nodes, stats = collect_nodes()
+    """Generate all formats, validate each one, then atomically replace the live files.
+
+    A batch-scoped publish only considers results produced by that batch, so stopping a
+    cycle early publishes exactly the progress achieved so far.
+    """
+    nodes, stats = collect_nodes(batch_id)
     sub_name = db.get("sub_name", "NodePool Unified") or "NodePool Unified"
     previous = meta()
     if not nodes and previous.get("nodes"):

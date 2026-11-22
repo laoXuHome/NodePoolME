@@ -34,6 +34,9 @@ class RuntimeState:
         self.block_index = 0
         self.blocks = 0
         self.block_size = 0
+        self.paused = False
+        self.stop_requested = False
+        self.pause_event: asyncio.Event | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -53,11 +56,67 @@ class RuntimeState:
             "block_index": self.block_index,
             "blocks": self.blocks,
             "block_size": self.block_size,
+            "paused": self.paused,
+            "stop_requested": self.stop_requested,
         }
+
+    def request_pause(self) -> dict:
+        if not self.running or self.stop_requested:
+            return {"ok": False, "error": "当前没有可暂停的检测批次"}
+        if self.paused:
+            return {"ok": True, "already": True, **self.as_dict()}
+        if self.pause_event is None:
+            self.pause_event = asyncio.Event()
+        self.pause_event.clear()
+        self.paused = True
+        self.phase = "已暂停"
+        db.append_log("INFO", "检测", f"批次 #{self.batch_id} 已暂停")
+        return {"ok": True, **self.as_dict()}
+
+    def request_resume(self) -> dict:
+        if not self.running or not self.paused:
+            return {"ok": False, "error": "当前没有已暂停的检测批次"}
+        if self.pause_event is None:
+            self.pause_event = asyncio.Event()
+        self.pause_event.set()
+        self.paused = False
+        self.phase = "检测中"
+        db.append_log("INFO", "检测", f"批次 #{self.batch_id} 已继续")
+        return {"ok": True, **self.as_dict()}
+
+    def request_stop(self) -> dict:
+        if not self.running:
+            return {"ok": False, "error": "当前没有正在运行的检测批次"}
+        self.stop_requested = True
+        self.paused = False
+        self.phase = "正在停止"
+        if self.pause_event is None:
+            self.pause_event = asyncio.Event()
+        self.pause_event.set()
+        db.append_log("INFO", "检测", f"批次 #{self.batch_id} 正在停止，将按当前进度下发")
+        return {"ok": True, **self.as_dict()}
 
 
 state = RuntimeState()
 scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
+
+
+class CycleStopped(Exception):
+    """User stopped the current batch; it is not a failure."""
+
+
+async def _control_point() -> None:
+    """Pause the caller at a safe boundary, or abort it when a stop was requested."""
+    if state.pause_event is not None and not state.pause_event.is_set():
+        state.paused = True
+        if state.phase != "正在停止":
+            state.phase = "已暂停"
+        await state.pause_event.wait()
+        state.paused = False
+        if state.running and not state.stop_requested and state.phase == "已暂停":
+            state.phase = "检测中"
+    if state.stop_requested:
+        raise CycleStopped
 
 
 # ---------------------------------------------------------------------------- dispersion
@@ -175,12 +234,14 @@ async def _latency_task(nodes: list[dict], probes: list[dict], batch_id: int, gl
     for node in nodes:
         per_probe: dict[str, list] = {}
         try:
+            await _control_point()
             # Strictly alternating G, W, G, W; one request in flight per node. Never
             # run the two targets concurrently, or a weak node may stop responding.
             for _round in range(LATENCY_ROUNDS):
                 for probe in probes:
                     async with global_sem:
                         async with node_locks[node["id"]]:
+                            await _control_point()
                             await asyncio.sleep(engine_mod.jitter_ms())
                             outcome = await engine_mod.engine_manager.test(node, probe)
                     per_probe.setdefault(probe["ident"], []).append(outcome)
@@ -197,6 +258,8 @@ async def _latency_task(nodes: list[dict], probes: list[dict], batch_id: int, gl
                 state.done = counters["done"]
                 db.execute("UPDATE batches SET processed_count=? WHERE id=?",
                            (counters["done"], batch_id))
+        except CycleStopped:
+            return
         except Exception as exc:  # never let one node abort the probe
             db.append_log("ERROR", "延迟", f"{node['raw_name']}：延迟检测异常：{exc}")
 
@@ -256,6 +319,7 @@ async def _test_one(node: dict, group: dict, batch_id: int | None, global_sem, g
                 if subnet_sem is not None:
                     await subnet_sem.acquire()
                 try:
+                    await _control_point()
                     await asyncio.sleep(engine_mod.jitter_ms())
                     outcome = await engine_mod.engine_manager.test(node, group)
                     _record(node, group, batch_id, outcome, manage_status=manage_status)
@@ -283,9 +347,12 @@ async def _group_task(group: dict, nodes: list[dict], batch_id: int, global_sem,
     failures = 0
     for node in nodes:
         try:
+            await _control_point()
             await _test_one(node, group, batch_id, global_sem, group_sem,
                             node_locks[node["id"]], ip_sems, subnet_sems,
                             counters, manage_status=manage_status)
+        except CycleStopped:
+            return {"group": group["name"], "nodes": 0, "failures": failures, "stopped": True}
         except Exception as exc:  # one node must never abort the group
             failures += 1
             db.append_log("ERROR", "检测", f"{group['name']} / {node['raw_name']}：检测异常：{exc}")
@@ -329,7 +396,11 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
 
     async with state.cycle_lock:
         state.running = True
-        state.phase = "running"
+        state.paused = False
+        state.stop_requested = False
+        state.pause_event = asyncio.Event()
+        state.pause_event.set()
+        state.phase = "检测中"
         state.started_at = db.now()
         state.last_error = None
         units = len(groups) + len(probes)
@@ -371,13 +442,17 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
         subnet_sems: dict = {}
         try:
             for offset in range(0, len(nodes), BLOCK_SIZE):
+                try:
+                    await _control_point()
+                except CycleStopped:
+                    break
                 block = nodes[offset:offset + BLOCK_SIZE]
                 block = disperse(block, mask)
                 state.block_index = offset // BLOCK_SIZE + 1
                 state.block_size = len(block)
-                state.phase = f"binding block {state.block_index}/{state.blocks}"
+                state.phase = f"绑定第 {state.block_index}/{state.blocks} 块"
                 await engine_mod.engine_manager.prepare(block)
-                state.phase = "testing"
+                state.phase = "检测中"
                 tasks = []
                 if probes:
                     tasks.append(_latency_task(block, probes, batch_id, global_sem,
@@ -388,12 +463,13 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                     for g in groups
                 )
                 await asyncio.gather(*tasks)
+            stopped = state.stop_requested
             state.done = counters["done"]
             db.execute(
-                "UPDATE batches SET finished_at=?, status='complete', processed_count=? WHERE id=?",
-                (db.now(), counters["done"], batch_id),
+                "UPDATE batches SET finished_at=?, status=?, processed_count=? WHERE id=?",
+                (db.now(), "stopped" if stopped else "complete", counters["done"], batch_id),
             )
-            state.phase = "publishing"
+            state.phase = "下发中"
             try:
                 meta = builder.publish(reason=f"batch#{batch_id}", batch_id=batch_id)
                 db.execute("UPDATE batches SET published=1 WHERE id=?", (batch_id,))
@@ -403,10 +479,16 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                 db.append_log("ERROR", "下发", state.last_error)
                 db.execute("UPDATE batches SET note=? WHERE id=?",
                            (state.last_error, batch_id))
-            db.append_log("INFO", "检测",
-                          f"批次 #{batch_id} 完成：已处理 {counters['done']}/{state.total}")
+            if stopped:
+                db.append_log("INFO", "检测",
+                              f"批次 #{batch_id} 已停止：按当前进度下发，"
+                              f"已处理 {counters['done']}/{state.total}")
+            else:
+                db.append_log("INFO", "检测",
+                              f"批次 #{batch_id} 完成：已处理 {counters['done']}/{state.total}")
             return {"ok": True, "batch_id": batch_id, "processed": counters["done"],
-                    "total": state.total, "published": state.last_error is None}
+                    "total": state.total, "published": state.last_error is None,
+                    "stopped": stopped, "reason": reason}
         except Exception as exc:
             state.last_error = f"{type(exc).__name__}: {exc}"
             db.execute("UPDATE batches SET finished_at=?, status='failed', note=? WHERE id=?",
@@ -415,7 +497,11 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
             return {"ok": False, "batch_id": batch_id, "error": state.last_error}
         finally:
             state.running = False
-            state.phase = "idle"
+            state.paused = False
+            state.stop_requested = False
+            if state.pause_event is not None:
+                state.pause_event.set()
+            state.phase = "空闲"
             state.batch_id = None
             state.current_groups = []
 
@@ -553,8 +639,10 @@ async def job_publish() -> None:
         label = hhmm
 
     if state.running:
-        db.append_log("WARN", "下发", "定时下发跳过：已有检测批次在运行")
+        if not state.paused and not state.stop_requested:
+            db.append_log("WARN", "下发", "定时下发跳过：已有检测批次在运行")
         return
+    planned_next = _parse_ts(db.get("sub_publish_next_at"))
     db.append_log("INFO", "下发", f"定时下发开始（{label}）")
     result = await run_cycle(force=True, reason="scheduled publish")
 
@@ -570,6 +658,28 @@ async def job_publish() -> None:
         db.set_setting("sub_last_auto_publish", now2.strftime("%Y-%m-%d"))
         db.set_setting("sub_last_auto_publish_at", now2.strftime(ts_fmt))
 
+    if result.get("ok") and result.get("stopped"):
+        if result.get("published"):
+            # A partial publish must not restart the cadence. Advance from the originally
+            # planned slot so the configured interval itself stays unchanged.
+            now2 = datetime.now()
+            if mode == "interval":
+                nxt = next_publish_at("interval", interval=interval, base=planned_next or now2)
+                if nxt and nxt <= now2:
+                    nxt = next_publish_at("interval", interval=interval, base=now2)
+            else:
+                nxt = next_publish_at("time", hhmm=hhmm, base=now2)
+            if nxt:
+                db.set_setting("sub_publish_next_at", nxt.strftime(ts_fmt))
+            db.set_setting("sub_last_auto_publish", now2.strftime("%Y-%m-%d"))
+            db.set_setting("sub_last_auto_publish_at", now2.strftime(ts_fmt))
+            db.append_log("WARN", "下发",
+                          f"检测被停止，已按当前进度下发；下发间隔保持不变，下次 "
+                          f"{nxt.strftime(ts_fmt) if nxt else '未安排'}")
+        else:
+            settle(1)
+            db.append_log("ERROR", "下发", "检测被停止，但当前进度下发失败，下一分钟重试")
+        return
     if result.get("ok") and result.get("published"):
         settle(None)
         db.append_log("INFO", "下发", "定时下发完成")

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, formatTs, logLevelLabel, logSourceLabel } from '../api'
 
 const data = ref(null)
@@ -17,6 +17,41 @@ async function load() {
     ElMessage.error(err.message)
   } finally {
     loading.value = false
+  }
+}
+
+async function pauseCycle() {
+  try {
+    await api.post('/api/run/pause')
+    ElMessage.success('已暂停，当前请求结束后停止发起新请求')
+    await load()
+  } catch (err) {
+    ElMessage.error(err.message)
+  }
+}
+
+async function resumeCycle() {
+  try {
+    await api.post('/api/run/resume')
+    ElMessage.success('已继续检测')
+    await load()
+  } catch (err) {
+    ElMessage.error(err.message)
+  }
+}
+
+async function stopCycle() {
+  try {
+    await ElMessageBox.confirm(
+      '停止当前检测，并立即按已经完成的进度下发？未检测到的节点本次不参与。',
+      '停止检测',
+      { type: 'warning', confirmButtonText: '停止并下发', cancelButtonText: '取消' }
+    )
+    await api.post('/api/run/stop')
+    ElMessage.success('正在停止，当前请求结束后按进度下发')
+    await load()
+  } catch (err) {
+    if (err !== 'cancel') ElMessage.error(err.message || String(err))
   }
 }
 
@@ -56,6 +91,22 @@ const fetchState = computed(() => {
   if (f.error) return { text: `${f.error} 个失败`, type: 'danger' }
   if (!f.total) return { text: '未配置', type: 'info' }
   return { text: '正常', type: 'success' }
+})
+const runStateText = computed(() => {
+  const r = data.value?.runtime
+  if (!r?.running) return '空闲'
+  if (r.stop_requested) return '正在停止'
+  if (r.paused) return '已暂停'
+  return '检测中'
+})
+const runTagType = computed(() => {
+  const r = data.value?.runtime
+  if (!r?.running) return 'success'
+  return r.stop_requested ? 'danger' : r.paused ? 'info' : 'warning'
+})
+const batchStatusLabel = computed(() => {
+  const map = { running: '检测中', complete: '已完成', stopped: '已停止', failed: '失败' }
+  return map[data.value?.batch?.status] || data.value?.batch?.status || '—'
 })
 const cyclePct = computed(() => {
   const r = data.value?.runtime
@@ -150,9 +201,7 @@ onUnmounted(() => clearInterval(timer.value))
           <span class="np-dot" :class="data.runtime?.running ? 'is-warning' : 'is-success'" />
           <span class="np-board-title">标签检测</span>
           <div class="np-flex" />
-          <el-tag :type="data.runtime?.running ? 'warning' : 'success'" size="small" effect="plain">
-            {{ data.runtime?.running ? '检测中' : '空闲' }}
-          </el-tag>
+          <el-tag :type="runTagType" size="small" effect="plain">{{ runStateText }}</el-tag>
         </div>
         <div class="np-board-value">{{ data.group_summary?.count || 0 }}<span class="unit">个启用标签</span></div>
         <el-progress :percentage="cyclePct" :stroke-width="8" :show-text="false"
@@ -196,14 +245,24 @@ onUnmounted(() => clearInterval(timer.value))
         <div class="np-card" style="padding:18px 20px">
           <div class="np-section-title">
             检测任务
-            <el-tag v-if="data?.runtime.running" type="warning" size="small">运行中</el-tag>
+            <el-tag v-if="data?.runtime.running" :type="runTagType" size="small">{{ runStateText }}</el-tag>
             <el-tag v-else type="success" size="small">空闲</el-tag>
             <div class="np-flex" />
-            <el-button size="small" type="primary" :disabled="data?.runtime.running" @click="runNow">立即检测并下发</el-button>
+            <div class="np-flex" style="gap:8px;flex-wrap:wrap">
+              <el-button v-if="!data?.runtime.running" size="small" type="primary" @click="runNow">立即检测并下发</el-button>
+              <el-button v-if="data?.runtime.running && !data.runtime.paused"
+                         size="small" :disabled="data.runtime.stop_requested" @click="pauseCycle">暂停</el-button>
+              <el-button v-if="data?.runtime.running && data.runtime.paused"
+                         size="small" type="success" :disabled="data.runtime.stop_requested" @click="resumeCycle">继续</el-button>
+              <el-button v-if="data?.runtime.running" size="small" type="danger" plain
+                         :disabled="data.runtime.stop_requested" @click="stopCycle">
+                {{ data.runtime.stop_requested ? '正在停止' : '停止并下发' }}
+              </el-button>
+            </div>
           </div>
           <div v-if="data">
             <el-progress v-if="data.runtime.running" :percentage="data.runtime.progress"
-                         :stroke-width="12" striped striped-flow />
+                         :stroke-width="12" :striped="!data.runtime.paused" :striped-flow="!data.runtime.paused" />
             <div class="np-muted" style="margin:10px 0 14px">
               引擎 {{ data.runtime.engine }} · 批次 #{{ data.runtime.batch_id || '—' }} ·
               进度 {{ data.runtime.done }}/{{ data.runtime.total }} ·
@@ -279,7 +338,7 @@ onUnmounted(() => clearInterval(timer.value))
           <div v-if="data?.batch">
             <el-descriptions :column="1" size="small" border>
               <el-descriptions-item label="批次号">#{{ data.batch.id }}</el-descriptions-item>
-              <el-descriptions-item label="状态">{{ data.batch.status }}</el-descriptions-item>
+              <el-descriptions-item label="状态">{{ batchStatusLabel }}</el-descriptions-item>
               <el-descriptions-item label="开始">{{ formatTs(data.batch.started_at) }}</el-descriptions-item>
               <el-descriptions-item label="结束">{{ formatTs(data.batch.finished_at) }}</el-descriptions-item>
               <el-descriptions-item label="处理">

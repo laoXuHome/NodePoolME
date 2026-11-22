@@ -573,6 +573,30 @@ async def run_cycle(payload: RunIn | None = None):
     return {"ok": True, "started": True}
 
 
+@api.post("/run/pause", dependencies=protected)
+async def pause_cycle():
+    res = manager.state.request_pause()
+    if not res.get("ok"):
+        raise HTTPException(status_code=409, detail=res.get("error"))
+    return res
+
+
+@api.post("/run/resume", dependencies=protected)
+async def resume_cycle():
+    res = manager.state.request_resume()
+    if not res.get("ok"):
+        raise HTTPException(status_code=409, detail=res.get("error"))
+    return res
+
+
+@api.post("/run/stop", dependencies=protected)
+async def stop_cycle():
+    res = manager.state.request_stop()
+    if not res.get("ok"):
+        raise HTTPException(status_code=409, detail=res.get("error"))
+    return res
+
+
 @api.get("/batches", dependencies=protected)
 async def batches(limit: int = 20):
     rows = db.rows("SELECT * FROM batches ORDER BY id DESC LIMIT ?", (min(limit, 100),))
