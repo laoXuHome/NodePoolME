@@ -22,7 +22,7 @@ const title = computed(() => route.meta.title || 'NodePoolME')
 const menus = [
   { path: '/dashboard', label: '仪表盘', short: '概览', icon: 'Odometer' },
   { path: '/airports', label: '机场管理', short: '机场', icon: 'OfficeBuilding' },
-  { path: '/nodes', label: '节点池', short: '节点', icon: 'Connection' },
+  { path: '/nodes', label: '缓存池', short: '缓存', icon: 'Connection' },
   { path: '/groups', label: '节点标签', short: '标签', icon: 'Aim' },
   { path: '/subscription', label: '订阅输出', short: '订阅', icon: 'Link' },
   { path: '/settings', label: '系统设置', short: '设置', icon: 'Setting' }

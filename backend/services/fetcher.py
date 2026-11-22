@@ -349,7 +349,7 @@ def reclassify_airport(airport_id: int, keywords: list[str] | None = None,
     if moved_out or moved_in:
         db.append_log(
             "INFO", "过滤",
-            f"{airport['name']}：按关键词重新归类，{moved_out} 个移入过滤、{moved_in} 个恢复节点池",
+            f"{airport['name']}：按关键词重新归类，{moved_out} 个移入过滤、{moved_in} 个恢复缓存池",
         )
     if publish and (moved_out or moved_in):
         from backend.subscriptions import builder
@@ -385,12 +385,12 @@ def admit_filtered_node(airport_id: int, fingerprint: str) -> dict | None:
         conn.execute("UPDATE airports SET node_count=?, updated_at=? WHERE id=?",
                      (count, stamp, airport_id))
     if airport:
-        db.append_log("INFO", "过滤", f"{airport['name']}：手动加入节点池 {item['raw_name'][:80]}")
+        db.append_log("INFO", "过滤", f"{airport['name']}：手动加入缓存池 {item['raw_name'][:80]}")
     from backend.subscriptions import builder
     try:
         builder.publish(reason="filtered node admitted")
     except Exception as exc:
-        db.append_log("WARN", "下发", f"过滤节点加入节点池后重建订阅失败：{exc}")
+        db.append_log("WARN", "下发", f"过滤节点加入缓存池后重建订阅失败：{exc}")
     return {"ok": True, "node_count": total_count, "pool_count": count,
             "filtered": filtered_count(airport_id), "total_count": total_count}
 
@@ -455,7 +455,7 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
                       + "、".join(f"{k}×{v}" for k, v in unsupported.items())] + list(errors)
         db.append_log("INFO", "拉取",
                       f"{airport['name']}：共 {stats['total_count']} 个节点 "
-                      + (f"（节点池 {stats['total']}，过滤 {stats['filtered']}）"
+                      + (f"（缓存池 {stats['total']}，过滤 {stats['filtered']}）"
                          if stats.get("filtered") else "")
                       + f"（解析 {parse_stats['parsed']}/{parse_stats['total']}"
                       + f"，{trig_cn}，耗时 {duration}ms）")

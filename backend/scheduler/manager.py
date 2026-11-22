@@ -408,7 +408,7 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
            WHERE a.enabled=1 ORDER BY n.id"""
     )
     if not nodes:
-        return {"ok": False, "error": "节点池为空，请先添加机场并拉取订阅"}
+        return {"ok": False, "error": "缓存池为空，请先添加机场并拉取订阅"}
 
     async with state.cycle_lock:
         state.running = True

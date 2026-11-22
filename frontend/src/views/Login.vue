@@ -30,7 +30,7 @@ async function submit() {
         <div class="logo">NP</div>
         <div>
           <div class="name">NodePoolME</div>
-          <div class="sub">多机场节点池 · 统一订阅</div>
+          <div class="sub">多机场缓存池 · 统一订阅</div>
         </div>
       </div>
       <el-form @submit.prevent="submit">

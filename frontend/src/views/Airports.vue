@@ -187,7 +187,7 @@ async function admitNode(node) {
   if (!filterAirport.value) return
   try {
     const res = await api.post(`/api/airports/${filterAirport.value.id}/filter/admit`, { fingerprint: node.fingerprint })
-    ElMessage.success(`已加入节点池，当前 ${res.total_count ?? res.node_count} 个节点`)
+    ElMessage.success(`已加入缓存池，当前 ${res.total_count ?? res.node_count} 个节点`)
     await load()
     await reloadFilter()
   } catch (e) { ElMessage.error(e.message) }
@@ -283,7 +283,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <el-table-column prop="name" label="机场名称" min-width="120" />
         <el-table-column label="节点" width="72">
           <template #default="{ row }">
-            <el-tooltip :content="`总数 = 节点池 ${row.pool_count} + 已过滤 ${row.filtered_count}`" placement="top">
+            <el-tooltip :content="`总数 = 缓存池 ${row.pool_count} + 已过滤 ${row.filtered_count}`" placement="top">
               <span>{{ row.node_count }}</span>
             </el-tooltip>
           </template>
@@ -334,8 +334,8 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
           <template #default="{ row }">
             <div class="np-flex" style="align-items:center;gap:8px">
               <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
-              <el-tooltip v-if="!row.enabled" content="已停用：该机场的缓存节点不进入节点池、不参与检测与下发；重新启用会直接恢复缓存，不会重新拉取">
-                <el-tag type="info" size="small">节点不入池</el-tag>
+              <el-tooltip v-if="!row.enabled" content="已停用：该机场的缓存节点不进入缓存池、不参与检测与下发；重新启用会直接恢复缓存，不会重新拉取">
+                <el-tag type="info" size="small">不入缓存池</el-tag>
               </el-tooltip>
             </div>
           </template>
@@ -386,8 +386,8 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
                width="760px" :fullscreen="isMobile">
       <div v-loading="filterLoading">
         <div class="np-filter-tip">
-          原始节点名包含任一关键词时，整条不导入节点池，<b>从不检测、从不下发</b>；清空关键词则不过滤。
-          手动加入节点池的节点会记住准入，之后同名节点即使仍命中关键词也会保留。
+          原始节点名包含任一关键词时，整条不导入缓存池，<b>从不检测、从不下发</b>；清空关键词则不过滤。
+          手动加入缓存池的节点会记住准入，之后同名节点即使仍命中关键词也会保留。
         </div>
 
         <div class="np-filter-head">
@@ -426,7 +426,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
               <span class="np-mono">{{ node.server }}:{{ node.port }}</span>
             </div>
             <div class="np-filter-item-actions">
-              <el-button size="small" type="primary" plain @click="admitNode(node)">加入节点池</el-button>
+              <el-button size="small" type="primary" plain @click="admitNode(node)">加入缓存池</el-button>
             </div>
           </div>
           <div v-if="!filterNodes.length" class="np-empty">没有被过滤的节点</div>
@@ -445,7 +445,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
           </el-table-column>
           <el-table-column label="操作" width="96">
             <template #default="{ row }">
-              <el-button link type="primary" @click="admitNode(row)">加入节点池</el-button>
+              <el-button link type="primary" @click="admitNode(row)">加入缓存池</el-button>
             </template>
           </el-table-column>
         </el-table>

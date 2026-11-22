@@ -149,7 +149,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 
 <template>
   <div class="np-page" v-loading="loading">
-    <h2 class="np-page-title">节点池</h2>
+    <h2 class="np-page-title">缓存池</h2>
     <div class="np-page-desc">展示全部缓存节点、最近一次各节点标签结果与动态生成的最终名称。</div>
 
     <div class="np-toolbar np-node-toolbar">
@@ -291,7 +291,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         </el-table-column>
       </el-table>
       <div v-if="!items.length" class="np-empty">
-        {{ total ? '没有符合筛选条件的节点' : (hasActiveFilters ? '当前筛选条件下没有节点' : '节点池为空，请先拉取机场订阅') }}
+        {{ total ? '没有符合筛选条件的节点' : (hasActiveFilters ? '当前筛选条件下没有节点' : '缓存池为空，请先拉取机场订阅') }}
       </div>
       <div style="display:flex;justify-content:flex-end;padding:12px">
         <el-pagination v-model:current-page="page" :page-size="filters.limit" :total="total"

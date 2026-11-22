@@ -26,6 +26,7 @@ from backend.testers import engine as engine_mod
 
 api = APIRouter(prefix="/api")
 protected = [Depends(auth.require_auth)]
+SCORE_WEIGHTS = {"available": 45, "publish": 45, "share": 5, "tag": 5}
 
 
 # ---------------------------------------------------------------------------- auth
@@ -177,7 +178,7 @@ async def dashboard():
         samples = score_samples.get(airport["id"], [])
         payload["score_samples"] = len(samples)
         if airport["enabled"] and pool_count:
-            # 综合评分：近 7 天可用率 40% + 下发率 40% + 池占比 10% + 标签合格率 10%
+            # 综合评分：近 7 天可用率 45% + 下发率 45% + 池占比 5% + 标签合格率 5%
             if samples:
                 health = sum(item["available"] for item in samples) / len(samples)
                 publish_rate = sum(item["published"] for item in samples) / len(samples)
@@ -190,7 +191,12 @@ async def dashboard():
             payload["available_rate"] = round(health * 100, 1)
             payload["publish_rate"] = round(publish_rate * 100, 1)
             payload["share_rate"] = round(share * 100, 1)
-            score = round(100 * (0.40 * health + 0.40 * publish_rate + 0.10 * share + 0.10 * tag_rate))
+            score = round(100 * (
+                SCORE_WEIGHTS["available"] / 100 * health
+                + SCORE_WEIGHTS["publish"] / 100 * publish_rate
+                + SCORE_WEIGHTS["share"] / 100 * share
+                + SCORE_WEIGHTS["tag"] / 100 * tag_rate
+            ))
             payload["score"] = max(0, min(100, score))
             payload["score_grade"] = ("优" if score >= 80 else "良" if score >= 65
                                       else "中" if score >= 50 else "低")
@@ -261,6 +267,7 @@ async def dashboard():
         "nodes_qualified": len(selected),
         "share_history": history,
         "score_window_days": score_days,
+        "score_weights": SCORE_WEIGHTS,
         "groups": _group_stats(),
         "airport_list": airport_list,
         "batch": last_batch,
@@ -382,7 +389,7 @@ async def update_airport(airport_id: int, payload: AirportPatch):
                           f"{airport['name']}：已启用，直接恢复缓存节点，无需重新拉取")
         else:
             db.append_log("INFO", "拉取",
-                          f"{airport['name']}：已停用，节点已退出节点池，重新启用后恢复")
+                          f"{airport['name']}：已停用，节点已退出缓存池，重新启用后恢复")
         try:
             builder.publish(reason="airport toggle")
         except Exception as exc:
@@ -432,7 +439,7 @@ async def airport_filter_admit(airport_id: int, body: dict):
         raise HTTPException(status_code=400, detail="缺少节点指纹")
     result = fetcher.admit_filtered_node(airport_id, fingerprint)
     if not result:
-        raise HTTPException(status_code=404, detail="被过滤节点不存在，可能已加入节点池")
+        raise HTTPException(status_code=404, detail="被过滤节点不存在，可能已加入缓存池")
     return result
 
 
@@ -739,7 +746,7 @@ async def run_cycle(payload: RunIn | None = None):
         raise HTTPException(status_code=409, detail="已有检测批次正在运行")
     if not db.row("SELECT COUNT(*) AS c FROM nodes n JOIN airports a ON a.id=n.airport_id"
                   " WHERE a.enabled=1")["c"]:
-        raise HTTPException(status_code=409, detail="节点池为空")
+        raise HTTPException(status_code=409, detail="缓存池为空")
     task = asyncio.create_task(manager.run_cycle(force=True, reason="manual"))
     manager.state.background_task = task
     return {"ok": True, "started": True}

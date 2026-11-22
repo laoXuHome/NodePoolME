@@ -139,6 +139,15 @@ const statusSegments = computed(() => {
   }))
 })
 const statusTopColor = computed(() => statusSegments.value[0]?.color || '#c7c7cc')
+const scoreWeights = computed(() => {
+  const weights = data.value?.score_weights || {}
+  return {
+    available: weights.available ?? 45,
+    publish: weights.publish ?? 45,
+    share: weights.share ?? 5,
+    tag: weights.tag ?? 5,
+  }
+})
 const statusCounts = computed(() => ({
   qualified: data.value?.nodes_qualified || 0,
   available: data.value?.nodes_available || 0,
@@ -163,7 +172,7 @@ function scoreHint(row) {
   const share = row.share_rate ?? Math.round(pool / (data.value?.nodes_total || 1) * 100)
   const tag = row.tag_rate ?? Math.round((row.tag_ok_count || 0) / pool * 100)
   const basis = row.score_samples ? `近 7 天 ${row.score_samples} 个快照` : '无历史快照，按当前值'
-  return `${basis} · 可用率 ${health}%（×40%）· 下发率 ${publish}%（×40%）· 池占比 ${share}%（×10%）· 标签合格率 ${tag}%（×10%）→ 综合 ${row.score} 分`
+  return `${basis} · 可用率 ${health}%（×${scoreWeights.value.available}%）· 下发率 ${publish}%（×${scoreWeights.value.publish}%）· 池占比 ${share}%（×${scoreWeights.value.share}%）· 标签合格率 ${tag}%（×${scoreWeights.value.tag}%）→ 综合 ${row.score} 分`
 }
 function scoreSampleText(row) {
   if (!row.enabled) return '未启用'
@@ -324,6 +333,24 @@ function trendTicks(max) {
   if (values[values.length - 1] !== max) values.push(max)
   return values.map((v) => ({ v, y: TREND.top + (1 - v / max) * plotH }))
 }
+const trendCharts = computed(() => [
+  {
+    key: 'publish',
+    title: '下发占比趋势',
+    totalText: `${publishTotal.value} 已下发`,
+    field: 'published_count',
+    rows: publishChartRows.value,
+    max: publishTrendMax.value,
+  },
+  {
+    key: 'available',
+    title: '可用占比趋势',
+    totalText: `${data.value?.nodes_available || 0} 可用`,
+    field: 'available_count',
+    rows: nodeChartRows.value,
+    max: availableTrendMax.value,
+  },
+])
 const fetchState = computed(() => {
   const f = data.value?.fetch
   if (!f) return { text: '—', type: 'info' }
@@ -469,11 +496,11 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
     <div class="np-page-desc">机场拉取、节点缓存与检测批次总览。检测只读取本地缓存，不会触发机场重新拉取。</div>
 
     <div class="np-dash-layout" v-if="data">
-      <!-- 节点池 + 机场拉取：合并成主统计卡 -->
+      <!-- 缓存池 + 机场拉取：合并成主统计卡 -->
       <div class="np-card np-dash-pool">
         <div class="np-section-title">
           <span class="np-dot" :class="(data.fetch?.error || data.fetch?.fetching) ? 'is-warning' : 'is-success'" />
-          节点缓存池
+          缓存池
           <el-tag :type="fetchState.type" size="small" effect="plain">
             {{ data.fetch?.fetching ? fetchState.text : data.fetch?.error ? `${data.fetch.error} 个机场失败` : `${data.fetch?.ok || 0}/${data.fetch?.total || 0} 机场正常` }}
           </el-tag>
@@ -481,7 +508,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
 
         <div class="np-pool-overview">
           <div class="np-pool-status">
-            <div class="np-pool-status-title">节点池状态</div>
+            <div class="np-pool-status-title">缓存池状态</div>
             <div class="np-pool-status-total"><strong>{{ data.nodes_total }}</strong><span>节点</span></div>
             <div class="np-pool-stack-wrap" :style="{ '--stack-top': statusTopColor }">
               <div class="np-pool-stack"
@@ -506,71 +533,36 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 <button type="button" :class="{ 'is-active': trendRange === '7d' }" @click="trendRange = '7d'">近 7 天</button>
               </div>
             </div>
-            <div class="np-pool-chart">
+            <div v-for="chart in trendCharts" :key="chart.key" class="np-pool-chart">
               <div class="np-pool-chart-head">
-                <b>可用占比趋势</b>
-                <span>{{ data.nodes_available }} 可用</span>
+                <b>{{ chart.title }}</b>
+                <span>{{ chart.totalText }}</span>
               </div>
               <div class="np-pool-chart-body">
                 <div class="np-trend">
                   <svg :viewBox="`0 0 ${TREND.w} ${TREND.h}`" class="np-trend-svg">
-                    <line v-for="tick in trendTicks(availableTrendMax)" :key="`node-grid-${tick.v}`"
+                    <line v-for="tick in trendTicks(chart.max)" :key="`${chart.key}-grid-${tick.v}`"
                           class="np-trend-grid" :x1="TREND.left" :x2="TREND.w - TREND.right"
                           :y1="tick.y" :y2="tick.y" />
-                    <text v-for="tick in trendTicks(availableTrendMax)" :key="`node-tick-${tick.v}`"
+                    <text v-for="tick in trendTicks(chart.max)" :key="`${chart.key}-tick-${tick.v}`"
                           class="np-trend-tick" :x="TREND.left - 5" :y="tick.y + 3" text-anchor="end">{{ tick.v }}</text>
-                    <template v-for="row in nodeChartRows" :key="`node-line-${row.id}`">
-                      <g v-if="row.enabled && trendHasValue('available_count', row)">
-                        <path :d="trendArea('available_count', row, availableTrendMax)"
+                    <template v-for="row in chart.rows" :key="`${chart.key}-line-${row.id}`">
+                      <g v-if="row.enabled && trendHasValue(chart.field, row)">
+                        <path :d="trendArea(chart.field, row, chart.max)"
                               :fill="airportColor(row)" class="np-trend-area" />
-                        <path :d="trendPath('available_count', row, availableTrendMax)"
+                        <path :d="trendPath(chart.field, row, chart.max)"
                               :stroke="airportColor(row)" class="np-trend-line" />
-                        <circle v-for="(point, index) in historyPoints" :key="`node-dot-${row.id}-${index}`"
-                                :cx="trendXY('available_count', row, index, availableTrendMax).x"
-                                :cy="trendXY('available_count', row, index, availableTrendMax).y"
+                        <circle v-for="(point, index) in historyPoints" :key="`${chart.key}-dot-${row.id}-${index}`"
+                                :cx="trendXY(chart.field, row, index, chart.max).x"
+                                :cy="trendXY(chart.field, row, index, chart.max).y"
                                 r="2.4" :fill="airportColor(row)" class="np-trend-dot" />
                       </g>
                     </template>
-                    <g v-for="label in trendEndLabels('available_count', availableTrendMax)" :key="`node-label-${label.id}`">
+                    <g v-for="label in trendEndLabels(chart.field, chart.max)" :key="`${chart.key}-label-${label.id}`">
                       <rect :x="TREND.w - TREND.right + 4" :y="label.y - 6.25" :width="label.width" height="12.5" rx="3" :fill="label.color" />
                       <text class="np-trend-label" :x="TREND.w - TREND.right + 8" :y="label.y + 3.4">{{ label.name }} {{ label.pct }}%</text>
                     </g>
-                    <text v-for="label in trendXLabels()" :key="`node-x-${label.x}`"
-                          class="np-trend-axis" :x="label.x" :y="TREND.h - 3" :text-anchor="label.anchor">{{ label.text }}</text>
-                  </svg>
-                </div>
-              </div>
-            </div>
-            <div class="np-pool-chart">
-              <div class="np-pool-chart-head">
-                <b>下发占比趋势</b>
-                <span>{{ publishTotal }} 已下发</span>
-              </div>
-              <div class="np-pool-chart-body">
-                <div class="np-trend">
-                  <svg :viewBox="`0 0 ${TREND.w} ${TREND.h}`" class="np-trend-svg">
-                    <line v-for="tick in trendTicks(publishTrendMax)" :key="`pub-grid-${tick.v}`"
-                          class="np-trend-grid" :x1="TREND.left" :x2="TREND.w - TREND.right"
-                          :y1="tick.y" :y2="tick.y" />
-                    <text v-for="tick in trendTicks(publishTrendMax)" :key="`pub-tick-${tick.v}`"
-                          class="np-trend-tick" :x="TREND.left - 5" :y="tick.y + 3" text-anchor="end">{{ tick.v }}</text>
-                    <template v-for="row in publishChartRows" :key="`pub-line-${row.id}`">
-                      <g v-if="row.enabled && trendHasValue('published_count', row)">
-                        <path :d="trendArea('published_count', row, publishTrendMax)"
-                              :fill="airportColor(row)" class="np-trend-area" />
-                        <path :d="trendPath('published_count', row, publishTrendMax)"
-                              :stroke="airportColor(row)" class="np-trend-line" />
-                        <circle v-for="(point, index) in historyPoints" :key="`pub-dot-${row.id}-${index}`"
-                                :cx="trendXY('published_count', row, index, publishTrendMax).x"
-                                :cy="trendXY('published_count', row, index, publishTrendMax).y"
-                                r="2.4" :fill="airportColor(row)" class="np-trend-dot" />
-                      </g>
-                    </template>
-                    <g v-for="label in trendEndLabels('published_count', publishTrendMax)" :key="`pub-label-${label.id}`">
-                      <rect :x="TREND.w - TREND.right + 4" :y="label.y - 6.25" :width="label.width" height="12.5" rx="3" :fill="label.color" />
-                      <text class="np-trend-label" :x="TREND.w - TREND.right + 8" :y="label.y + 3.4">{{ label.name }} {{ label.pct }}%</text>
-                    </g>
-                    <text v-for="label in trendXLabels()" :key="`pub-x-${label.x}`"
+                    <text v-for="label in trendXLabels()" :key="`${chart.key}-x-${label.x}`"
                           class="np-trend-axis" :x="label.x" :y="TREND.h - 3" :text-anchor="label.anchor">{{ label.text }}</text>
                   </svg>
                 </div>
@@ -581,7 +573,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
 
         <div class="np-score-head">
           <div>
-            <b>机场评分系统</b>
+            <b>机场评价</b>
             <span>近 {{ data.score_window_days || 7 }} 天数据</span>
           </div>
           <span>评分降序</span>
@@ -602,10 +594,10 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               <tr>
                 <th>#</th>
                 <th class="is-left">机场</th>
-                <th>可用率 <i>40%</i></th>
-                <th>下发率 <i>40%</i></th>
-                <th>池占比 <i>10%</i></th>
-                <th>标签合格率 <i>10%</i></th>
+                <th>可用率 <i>{{ scoreWeights.available }}%</i></th>
+                <th>下发率 <i>{{ scoreWeights.publish }}%</i></th>
+                <th>池占比 <i>{{ scoreWeights.share }}%</i></th>
+                <th>标签合格率 <i>{{ scoreWeights.tag }}%</i></th>
                 <th class="is-score">评分</th>
               </tr>
             </thead>
@@ -646,10 +638,10 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           </table>
         </div>
         <div v-if="data.airport_list?.length" class="np-score-foot">
-          <span>评分 = 可用率 40% + 下发率 40% + 池占比 10% + 标签合格率 10%</span>
+          <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 池占比 {{ scoreWeights.share }}% + 标签合格率 {{ scoreWeights.tag }}%</span>
           <span>前 3 项取近 {{ data.score_window_days || 7 }} 天快照均值；标签合格率 = 近 7 天任一启用标签通过 / 缓存节点</span>
         </div>
-        <div v-else class="np-empty">节点池为空，先到「机场管理」添加并拉取订阅。</div>
+        <div v-else class="np-empty">缓存池为空，先到「机场管理」添加并拉取订阅。</div>
 
       </div>
 
