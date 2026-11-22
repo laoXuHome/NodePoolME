@@ -527,9 +527,13 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None,
     """mode: all | latency | tags. Lets the detail dialog test either half alone."""
     if state.running:
         return {"ok": False, "error": "已有检测批次在运行，请完成后重试"}
-    node = db.row("SELECT * FROM nodes WHERE id=?", (node_id,))
+    node = db.row(
+        """SELECT n.*, a.enabled AS airport_enabled FROM nodes n
+           JOIN airports a ON a.id=n.airport_id WHERE n.id=?""", (node_id,))
     if not node:
         return {"ok": False, "error": "节点不存在"}
+    if not node["airport_enabled"]:
+        return {"ok": False, "error": "节点所属机场已停用：请先启用该机场后再检测"}
     node["params"] = db.loads(node.get("params"), {})
     groups = []
     if mode != "latency":

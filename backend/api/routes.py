@@ -190,6 +190,11 @@ async def dashboard():
 # ---------------------------------------------------------------------------- airports
 def _airport_payload(row: dict) -> dict:
     filtered = fetcher.filtered_count(row["id"])
+    upload = int(row.get("traffic_upload") or 0)
+    download = int(row.get("traffic_download") or 0)
+    used = upload + download
+    total = int(row.get("traffic_total") or 0)
+    percent = min(100, round(used * 100 / total)) if total else 0
     return {
         "id": row["id"], "name": row["name"], "url": row["url"], "enabled": bool(row["enabled"]),
         "interval_minutes": row["interval_minutes"], "daily_time": row["daily_time"],
@@ -199,6 +204,14 @@ def _airport_payload(row: dict) -> dict:
         "pool_count": row["node_count"],
         "filter_keywords": fetcher.normalize_keywords(row.get("filter_keywords")),
         "filtered_count": filtered,
+        "traffic_available": bool(row.get("traffic_updated_at")),
+        "traffic_upload": upload,
+        "traffic_download": download,
+        "traffic_used": used,
+        "traffic_total": total,
+        "traffic_percent": percent,
+        "traffic_expire": int(row.get("traffic_expire") or 0),
+        "traffic_updated_at": row.get("traffic_updated_at"),
         "url_masked": (row["url"][:32] + "...") if len(row["url"]) > 40 else row["url"],
     }
 

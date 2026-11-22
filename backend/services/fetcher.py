@@ -12,7 +12,33 @@ from backend.parsers import subscription as parser
 MAX_BYTES = 20 * 1024 * 1024
 
 
-async def _download(url: str) -> str:
+def parse_subscription_userinfo(raw: str | None) -> dict[str, int] | None:
+    """Parse the standard `subscription-userinfo` header.
+
+    Format: upload=bytes; download=bytes; total=bytes; expire=unix_seconds.
+    Some panels only send a subset; return only the fields actually present.
+    """
+    if not raw:
+        return None
+    values: dict[str, int] = {}
+    for part in raw.split(";"):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key = key.strip().lower()
+        if key not in ("upload", "download", "total", "expire"):
+            continue
+        try:
+            number = int(float(value.strip()))
+        except (TypeError, ValueError):
+            continue
+        if key == "expire" and number > 10_000_000_000:
+            number //= 1000  # tolerate millisecond timestamps
+        values[key] = max(number, 0)
+    return values or None
+
+
+async def _download(url: str) -> tuple[str, dict[str, int] | None]:
     """One fixed UA per request: switching identities repeatedly triggers risk control."""
     headers = {"User-Agent": config.HTTP_UA, "Accept": "*/*"}
     last_error = ""
@@ -27,7 +53,9 @@ async def _download(url: str) -> str:
                     text = response.text
                     if len(text.encode()) > MAX_BYTES:
                         raise ValueError("订阅文件超过 20MB")
-                    return text
+                    traffic = parse_subscription_userinfo(
+                        response.headers.get("subscription-userinfo"))
+                    return text, traffic
         except ValueError as exc:
             last_error = str(exc)
         except Exception as exc:
@@ -368,7 +396,7 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
     started_at = db.now()
     db.execute("UPDATE airports SET last_attempt_at=? WHERE id=?", (started_at, airport_id))
     try:
-        text = await _download(airport["url"])
+        text, traffic = await _download(airport["url"])
         nodes, errors, parse_stats = parser.parse_text_full(text)
         # de-duplicate inside this airport before touching the database
         uniq: dict[str, dict] = {}
@@ -385,6 +413,16 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
             "UPDATE airports SET last_success_at=?, last_status='ok', last_error=NULL, updated_at=? WHERE id=?",
             (db.now(), db.now(), airport_id),
         )
+        if traffic:
+            sets, params = [], []
+            for key, column in (("upload", "traffic_upload"), ("download", "traffic_download"),
+                                ("total", "traffic_total"), ("expire", "traffic_expire")):
+                if key in traffic:
+                    sets.append(f"{column}=?")
+                    params.append(traffic[key])
+            sets.append("traffic_updated_at=?")
+            params.extend([db.now(), airport_id])
+            db.execute(f"UPDATE airports SET {', '.join(sets)} WHERE id=?", tuple(params))
         db.execute(
             "INSERT INTO fetch_logs (airport_id, ts, ok, node_count, duration_ms, message) VALUES (?,?,?,?,?,?)",
             (airport_id, db.now(), 1, stats["total_count"], duration,

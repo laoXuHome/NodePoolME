@@ -1,13 +1,13 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { api, formatTs } from '../api'
+import { api, formatTs, prettyBytes } from '../api'
 
 const items = ref([])
 const loading = ref(false)
 const dialog = ref(false)
 const editing = ref(null)
-const form = ref({ name: '', url: '', interval_minutes: 60, daily_time: '', enabled: true })
+const form = ref({ name: '', url: '', interval_minutes: 60, daily_time: '' })
 const fetchUa = ref('')
 async function loadSystem() {
   try { fetchUa.value = (await api.get('/api/settings')).system?.fetch_ua || '' } catch (e) { /* ignore */ }
@@ -35,14 +35,14 @@ async function load() {
 
 function openCreate() {
   editing.value = null
-  form.value = { name: '', url: '', interval_minutes: 60, daily_time: '', enabled: true }
+  form.value = { name: '', url: '', interval_minutes: 60, daily_time: '' }
   dialog.value = true
 }
 
 function openEdit(row) {
   editing.value = row
   form.value = { name: row.name, url: row.url, interval_minutes: row.interval_minutes,
-                 daily_time: row.daily_time || '', enabled: row.enabled }
+                 daily_time: row.daily_time || '' }
   dialog.value = true
 }
 
@@ -69,7 +69,18 @@ async function toggle(row, enabled) {
   } catch (e) { ElMessage.error(e.message) }
 }
 
-async function fetchNow(row) {
+async function fetchNow(row, confirmed = false) {
+  if (!confirmed) {
+    try {
+      await ElMessageBox.confirm(
+        `部分机场只允许首次订阅，频繁拉取可能触发风控，甚至导致该机场全部节点失效。确定要立即拉取「${row.name}」吗？`,
+        '立即拉取有风险',
+        { type: 'warning', confirmButtonText: '继续拉取', cancelButtonText: '取消' }
+      )
+    } catch {
+      return
+    }
+  }
   try {
     const res = await api.post(`/api/airports/${row.id}/fetch`)
     const parse = res.parse || {}
@@ -80,6 +91,44 @@ async function fetchNow(row) {
     ElMessage.success(`拉取成功：${res.total_count ?? res.total} 个节点（新增 ${res.inserted}${detail}${skipped}）`)
     await load()
   } catch (e) { ElMessage.error(e.message) }
+}
+
+function trafficColor(row) {
+  const p = Number(row.traffic_percent || 0)
+  if (p >= 90) return '#ff3b30'
+  if (p >= 70) return '#ff9500'
+  return '#0071e3'
+}
+
+function expireDate(row) {
+  return row.traffic_expire ? new Date(row.traffic_expire * 1000) : null
+}
+
+function pad2(n) { return String(n).padStart(2, '0') }
+
+function expireText(row) {
+  if (!row.traffic_available) return '未提供'
+  const d = expireDate(row)
+  if (!d) return '不限'
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+function expireHint(row) {
+  const d = expireDate(row)
+  if (!d) return ''
+  const days = Math.ceil((d.getTime() - Date.now()) / 86400000)
+  if (days < 0) return '已到期'
+  if (days === 0) return '今天到期'
+  return `剩 ${days} 天`
+}
+
+function expireClass(row) {
+  const d = expireDate(row)
+  if (!d) return ''
+  const days = Math.ceil((d.getTime() - Date.now()) / 86400000)
+  if (days <= 7) return 'np-expire-danger'
+  if (days <= 30) return 'np-expire-warn'
+  return ''
 }
 
 async function reloadFilter() {
@@ -189,10 +238,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
     <div v-if="isMobile" class="np-mobile-list">
       <div v-for="row in items" :key="row.id" class="np-mobile-card">
         <div class="np-mobile-card-head">
-          <div class="np-mobile-title">
-            {{ row.name }}
-            <div class="np-mobile-sub np-mono">{{ row.url_masked }}</div>
-          </div>
+          <div class="np-mobile-title">{{ row.name }}</div>
           <el-tag v-if="row.last_status === 'error'" type="danger" size="small" style="margin-top:2px">拉取失败</el-tag>
           <el-tag v-else-if="row.last_status === 'ok'" type="success" size="small" style="margin-top:2px">正常</el-tag>
           <el-tag v-else type="info" size="small" style="margin-top:2px">未拉取</el-tag>
@@ -208,6 +254,18 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
           <span v-else>仅手动</span>
           <span>{{ formatTs(row.last_success_at) }}</span>
         </div>
+        <div v-if="row.traffic_available" class="np-mobile-traffic">
+          <div class="np-mobile-traffic-head">
+            <span>已用 {{ prettyBytes(row.traffic_used) }} / {{ row.traffic_total ? prettyBytes(row.traffic_total) : '不限' }}</span>
+            <span v-if="row.traffic_total">{{ row.traffic_percent }}%</span>
+          </div>
+          <el-progress :percentage="row.traffic_percent" :stroke-width="5" :show-text="false" :color="trafficColor(row)" />
+          <div class="np-mobile-traffic-foot">
+            <span>到期 {{ expireText(row) }}</span>
+            <span v-if="expireHint(row)" :class="expireClass(row)">{{ expireHint(row) }}</span>
+          </div>
+        </div>
+        <div v-else class="np-mobile-traffic-empty">流量与到期：机场未返回订阅信息</div>
         <div class="np-mobile-actions">
           <div class="np-flex" />
           <el-button link type="primary" size="small" @click="fetchNow(row)">拉取</el-button>
@@ -223,29 +281,47 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
     <div v-if="!isMobile" class="np-card">
       <el-table :data="items" size="default">
         <el-table-column prop="name" label="机场名称" min-width="120" />
-        <el-table-column label="订阅地址" min-width="190">
-          <template #default="{ row }"><span class="np-mono">{{ row.url_masked }}</span></template>
-        </el-table-column>
-        <el-table-column label="节点" width="82">
+        <el-table-column label="节点" width="72">
           <template #default="{ row }">
             <el-tooltip :content="`总数 = 节点池 ${row.pool_count} + 已过滤 ${row.filtered_count}`" placement="top">
               <span>{{ row.node_count }}</span>
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="拉取周期" width="120">
+        <el-table-column label="流量" min-width="200">
           <template #default="{ row }">
-            <span v-if="row.daily_time">每天 {{ row.daily_time }}</span>
-            <span v-else-if="row.interval_minutes > 0">每 {{ row.interval_minutes }} 分钟</span>
-            <el-tooltip v-else content="定时与间隔都为 0：不会自动拉取，只能点「立即拉取」">
-              <el-tag type="info" size="small">仅手动</el-tag>
+            <div v-if="row.traffic_available" class="np-traffic-cell">
+              <div class="np-traffic-text">
+                <span><b>{{ prettyBytes(row.traffic_used) }}</b><span class="np-muted"> / {{ row.traffic_total ? prettyBytes(row.traffic_total) : '不限' }}</span></span>
+                <span v-if="row.traffic_total" class="np-traffic-pct">{{ row.traffic_percent }}%</span>
+              </div>
+              <el-progress :percentage="row.traffic_percent" :stroke-width="6" :show-text="false" :color="trafficColor(row)" />
+            </div>
+            <el-tooltip v-else content="机场订阅响应未返回 Subscription-Userinfo 头；下一次成功拉取后会自动读取">
+              <span class="np-muted">未提供</span>
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="最近成功" width="144">
-          <template #default="{ row }">{{ formatTs(row.last_success_at) }}</template>
+        <el-table-column label="到期" width="120">
+          <template #default="{ row }">
+            <template v-if="row.traffic_available">
+              <div :class="expireClass(row)">{{ expireText(row) }}</div>
+              <div v-if="expireHint(row)" class="np-muted" style="font-size:11px;line-height:1.4">{{ expireHint(row) }}</div>
+            </template>
+            <span v-else class="np-muted">未提供</span>
+          </template>
         </el-table-column>
-        <el-table-column label="状态" width="86">
+        <el-table-column label="拉取" width="150">
+          <template #default="{ row }">
+            <div>{{ formatTs(row.last_success_at) }}</div>
+            <div class="np-muted" style="font-size:11px;line-height:1.4">
+              <span v-if="row.daily_time">每天 {{ row.daily_time }}</span>
+              <span v-else-if="row.interval_minutes > 0">每 {{ row.interval_minutes }} 分钟</span>
+              <span v-else>仅手动</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="76">
           <template #default="{ row }">
             <el-tooltip v-if="row.last_status === 'error'" :content="row.last_error || ''">
               <el-tag type="danger" size="small">拉取失败</el-tag>
@@ -254,7 +330,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             <el-tag v-else type="info" size="small">未拉取</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="启用" width="112">
+        <el-table-column label="启用" width="76">
           <template #default="{ row }">
             <div class="np-flex" style="align-items:center;gap:8px">
               <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
@@ -266,7 +342,9 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         </el-table-column>
         <el-table-column label="操作" width="286">
           <template #default="{ row }">
-            <el-button link type="primary" @click="fetchNow(row)">立即拉取</el-button>
+            <el-tooltip content="部分机场只允许首次订阅；点击后会先弹出风险确认" placement="top">
+              <el-button link type="primary" @click="fetchNow(row)">立即拉取</el-button>
+            </el-tooltip>
             <el-button link type="primary" @click="openFilter(row)">过滤{{ row.filtered_count ? ' ' + row.filtered_count : '' }}</el-button>
             <el-button link @click="showLogs(row)">历史</el-button>
             <el-button link @click="openEdit(row)">编辑</el-button>
@@ -296,9 +374,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <div class="np-muted" style="margin:-6px 0 14px 96px">
           两者可以同时生效（谁先到谁先拉）；<b>间隔填 0 且定时留空</b> 时该机场完全不会自动拉取，只在你点「立即拉取」（或首次配置后手动触发）时才拉。检测批次不会触发机场拉取，只读本地缓存。
         </div>
-        <el-form-item label="启用">
-          <el-switch v-model="form.enabled" />
-        </el-form-item>
+        <div class="np-muted" style="margin:-6px 0 0 96px">启用/停用请在列表中的开关操作。</div>
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>

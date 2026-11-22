@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS airports (
     last_status TEXT,
     last_error TEXT,
     node_count INTEGER NOT NULL DEFAULT 0,
+    traffic_upload INTEGER NOT NULL DEFAULT 0,
+    traffic_download INTEGER NOT NULL DEFAULT 0,
+    traffic_total INTEGER NOT NULL DEFAULT 0,
+    traffic_expire INTEGER NOT NULL DEFAULT 0,
+    traffic_updated_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -207,6 +212,17 @@ def init_db() -> None:
     if "filter_keywords" not in airport_cols:
         conn.execute("ALTER TABLE airports ADD COLUMN filter_keywords TEXT NOT NULL DEFAULT '[]'")
         conn.commit()
+    # Migration: subscription traffic/expiry metadata (standard Subscription-Userinfo header)
+    for column, ddl in (
+        ("traffic_upload", "INTEGER NOT NULL DEFAULT 0"),
+        ("traffic_download", "INTEGER NOT NULL DEFAULT 0"),
+        ("traffic_total", "INTEGER NOT NULL DEFAULT 0"),
+        ("traffic_expire", "INTEGER NOT NULL DEFAULT 0"),
+        ("traffic_updated_at", "TEXT"),
+    ):
+        if column not in airport_cols:
+            conn.execute(f"ALTER TABLE airports ADD COLUMN {column} {ddl}")
+            conn.commit()
     # Migration: first upgrade to the latency-probe model gets a 500 ms publish ceiling
     if get("latency_test_url") is None:
         set_setting("sub_max_latency", config.DEFAULT_SETTINGS["sub_max_latency"])

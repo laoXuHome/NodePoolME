@@ -53,6 +53,9 @@ def test_disable_removes_from_pool_and_enable_restores():
         assert dash["nodes_total"] == 0 and dash["nodes_available"] == 0
         assert builder.collect_nodes()[0] == []
         assert db.row("SELECT COUNT(*) AS c FROM nodes WHERE airport_id=?", (aid,))["c"] == 1  # cache kept
+        node_id = db.row("SELECT id FROM nodes WHERE airport_id=? ORDER BY id LIMIT 1", (aid,))["id"]
+        test = client.post(f"/api/nodes/{node_id}/test")
+        assert test.status_code == 400 and "停用" in test.json()["detail"]
 
         # re-enable -> cached nodes come back, no fetch scheduled
         assert client.patch(f"/api/airports/{aid}", json={"enabled": True}).status_code == 200
