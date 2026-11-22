@@ -142,7 +142,7 @@ onMounted(load)
                 </el-form-item>
               </el-col>
               <el-col :span="12" :xs="24">
-                <el-form-item label="检测超时(s)">
+                <el-form-item label="检测超时 (秒)">
                   <el-input-number v-model="form.latency_test_timeout" :min="1" :max="60" style="width:100%" />
                 </el-form-item>
               </el-col>
@@ -170,7 +170,7 @@ onMounted(load)
                 <el-radio value="interval">固定间隔</el-radio>
               </el-radio-group>
             </el-form-item>
-            <el-form-item v-if="form.sub_publish_mode === 'interval'" label="下发间隔(分钟)">
+            <el-form-item v-if="form.sub_publish_mode === 'interval'" label="下发间隔 (分钟)">
               <el-input-number v-model="form.sub_publish_interval_minutes" :min="5" :max="1440"
                                :step="30" style="width:200px" />
             </el-form-item>
@@ -192,7 +192,7 @@ onMounted(load)
             <div class="np-flex" />
             <el-button type="primary" size="small" :loading="saving" @click="save">保存设置</el-button>
           </div>
-          <el-form label-width="120px" size="default">
+          <el-form label-width="150px" size="default">
             <el-row :gutter="12">
               <el-col :span="12">
                 <el-form-item label="全局并发"><el-input-number v-model="form.global_concurrency" :min="1" :max="300" style="width:100%" /></el-form-item>
@@ -211,15 +211,15 @@ onMounted(load)
             </el-row>
             <el-row :gutter="12">
               <el-col :span="12">
-                <el-form-item label="随机间隔最小(ms)"><el-input-number v-model="form.request_interval_min_ms" :min="0" :max="10000" style="width:100%" /></el-form-item>
+                <el-form-item label="随机间隔最小 (ms)"><el-input-number v-model="form.request_interval_min_ms" :min="0" :max="10000" style="width:100%" /></el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="随机间隔最大(ms)"><el-input-number v-model="form.request_interval_max_ms" :min="0" :max="10000" style="width:100%" /></el-form-item>
+                <el-form-item label="随机间隔最大 (ms)"><el-input-number v-model="form.request_interval_max_ms" :min="0" :max="10000" style="width:100%" /></el-form-item>
               </el-col>
             </el-row>
             <el-row :gutter="12">
               <el-col :span="12">
-                <el-form-item label="检测批次间隔(分)"><el-input-number v-model="form.test_interval_minutes" :min="1" :max="1440" style="width:100%" /></el-form-item>
+                <el-form-item label="检测批次间隔 (分钟)"><el-input-number v-model="form.test_interval_minutes" :min="1" :max="1440" style="width:100%" /></el-form-item>
               </el-col>
             </el-row>
             <el-form-item label="重启后立即检测">
@@ -233,7 +233,7 @@ onMounted(load)
                 <el-form-item label="连续失败阈值"><el-input-number v-model="form.fail_threshold" :min="1" :max="20" style="width:100%" /></el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="历史保留(天)"><el-input-number v-model="form.history_days" :min="7" :max="365" style="width:100%" /></el-form-item>
+                <el-form-item label="历史保留 (天)"><el-input-number v-model="form.history_days" :min="7" :max="365" style="width:100%" /></el-form-item>
               </el-col>
             </el-row>
             <el-form-item label="相似节点分散粒度">

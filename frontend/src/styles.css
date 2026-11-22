@@ -575,3 +575,7 @@ a { color: var(--np-accent); }
   .np-metric { padding: 7px 6px; }
   .el-descriptions__label { width: 86px !important; }
 }
+
+@media (min-width: 769px) {
+  .el-form-item__label { white-space: nowrap; }
+}
