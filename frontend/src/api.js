@@ -42,6 +42,11 @@ export const api = {
 export async function login(password) {
   await api.post('/api/auth/login', { password })
   state.loggedIn = true
+  // App.vue skips checkAuth() on the login route, so load the real version here too.
+  try {
+    const me = await api.get('/api/auth/me')
+    if (me && me.version) state.version = me.version
+  } catch { /* version stays at fallback until next reload */ }
 }
 
 export async function logout() {

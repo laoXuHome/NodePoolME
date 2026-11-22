@@ -20,6 +20,7 @@ with sync_playwright() as p:
     page.click("button:has-text('进入控制台')")
     page.wait_for_url("**/#/dashboard", timeout=10000)
     page.wait_for_timeout(1500)
+    assert "v1.0.0" not in page.inner_text("body"), "sidebar version still shows the login-route fallback"
     page.screenshot(path=f"{SHOTS}/02-dashboard.png", full_page=True)
 
     routes = ["airports", "nodes", "groups", "subscription", "settings"]
