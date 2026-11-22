@@ -100,7 +100,6 @@ class SettingsIn(BaseModel):
 
 class RunIn(BaseModel):
     force: bool = False
-    group_ids: Optional[list[int]] = None
 
 
 class NodeTestIn(BaseModel):

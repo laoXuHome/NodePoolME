@@ -150,7 +150,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 <template>
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">节点池</h2>
-    <div class="np-page-desc">展示全部缓存节点、最近一次各检测组结果与动态生成的最终名称。</div>
+    <div class="np-page-desc">展示全部缓存节点、最近一次各节点标签结果与动态生成的最终名称。</div>
 
     <div class="np-toolbar np-node-toolbar">
       <el-input v-model="filters.q" class="np-search" placeholder="搜索名称 / 服务器" style="width:220px" clearable
@@ -172,7 +172,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <el-option label="可用" value="available" />
         <el-option label="不可用" value="unavailable" />
       </el-select>
-      <el-select v-model="filters.group_id" placeholder="检测组" clearable style="width:140px" @change="search">
+      <el-select v-model="filters.group_id" placeholder="节点标签" clearable style="width:140px" @change="search">
         <el-option v-for="g in enabledGroups" :key="g.id" :label="`${g.ident} · ${g.name}`" :value="g.ident" />
       </el-select>
       <el-select v-model="filters.tags" placeholder="标签（须同时命中）" multiple collapse-tags clearable style="width:190px" @change="search">
@@ -355,7 +355,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <el-table-column label="时间" :width="isMobile ? 104 : 160">
           <template #default="{ row }">{{ isMobile ? shortTs(row.ts) : formatTs(row.ts) }}</template>
         </el-table-column>
-        <el-table-column label="检测组" :width="isMobile ? 78 : 120">
+        <el-table-column label="节点标签" :width="isMobile ? 78 : 120">
           <template #default="{ row }">
             <span :title="`${row.group_name} (${row.ident})`">{{ isMobile ? row.ident : `${row.group_name} (${row.ident})` }}</span>
           </template>

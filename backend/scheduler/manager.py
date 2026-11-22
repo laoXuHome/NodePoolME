@@ -373,7 +373,7 @@ async def _group_task(group: dict, nodes: list[dict], batch_id: int, global_sem,
 
     await asyncio.gather(*(one(node) for node in nodes))
     db.execute("UPDATE test_groups SET last_run_at=? WHERE id=?", (db.now(), group["id"]))
-    db.append_log("INFO", "检测", f"检测组 {group['name']} 完成本批（{len(nodes)} 个节点）")
+    db.append_log("INFO", "检测", f"节点标签 {group['name']} 完成本批（{len(nodes)} 个节点）")
     return {"group": group["name"], "nodes": len(nodes), "failures": failures}
 
 
@@ -400,7 +400,7 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
     groups = due_groups(force=force, ids=group_ids)
     probes = latency_probes()
     if not groups and not probes:
-        return {"ok": False, "error": "没有到期的启用检测组"}
+        return {"ok": False, "error": "没有到期的启用节点标签"}
     nodes = db.rows(
         """SELECT n.id, n.airport_id, n.raw_name, n.protocol, n.server, n.port, n.params,
                   n.fingerprint
@@ -441,7 +441,7 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
         state.batch_id = batch_id
         db.append_log("INFO", "检测",
                       f"批次 #{batch_id} 开始：{len(nodes)} 个节点 × {units} 项"
-                      f"（{len(groups)} 个检测组 + {len(probes)} 个延迟目标）")
+                      f"（{len(groups)} 个节点标签 + {len(probes)} 个延迟目标）")
         counters = {"done": 0, "ok": 0, "groups": {}}
         state.group_progress = [
             {"name": item["name"], "ident": item["ident"], "done": 0, "total": len(nodes)}
@@ -541,7 +541,7 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None,
         if group_ids:
             groups = [g for g in groups if g["id"] in group_ids]
         if not groups:
-            return {"ok": False, "error": "没有启用的检测组"}
+            return {"ok": False, "error": "没有启用的节点标签"}
     await engine_mod.engine_manager.prepare([node])
     probes = latency_probes() if mode != "tags" else []
     latency = None

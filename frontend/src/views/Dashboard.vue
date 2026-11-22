@@ -205,7 +205,7 @@ onUnmounted(() => clearInterval(timer.value))
               定时下发 {{ publishText }}
             </div>
             <el-table :data="data.groups" size="small">
-              <el-table-column prop="name" label="检测组" />
+              <el-table-column prop="name" label="节点标签" />
               <el-table-column prop="ident" label="标识" width="80" />
               <el-table-column prop="url" label="目标" show-overflow-tooltip />
               <el-table-column label="本轮进度" width="190">

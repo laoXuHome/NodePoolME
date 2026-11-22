@@ -157,7 +157,7 @@ onMounted(load)
               不勾选标签 = 只按延迟下发；勾选多个 = 必须同时命中全部勾选标签（AND）才下发。<br />
               两个链接各测 3 轮（交替执行，不并发），每个链接只要有一轮 ≤ 自己的上限即算达标；两个链接都达标才下发。
             </div>
-            <div class="np-muted">每次检测都会对全部节点执行一次（无开关）；延迟不超过上限的节点才进入 <span class="np-mono">/sub/all</span>。检测组（GPT/TG/YT 及自定义）只决定节点名里的代号，不决定是否下发。上限填 0 表示不限制。<br />检测超时为全局值：延迟探测与所有标签检测共用这一个超时。</div>
+            <div class="np-muted">每次检测都会对全部节点执行一次（无开关）；延迟不超过上限的节点才进入 <span class="np-mono">/sub/all</span>。节点标签（GPT/TG/YT 及自定义）只决定节点名里的代号，不决定是否下发。上限填 0 表示不限制。<br />检测超时为全局值：延迟探测与所有标签检测共用这一个超时。</div>
             <el-divider />
             <el-form-item label="定时下发">
               <el-switch v-model="form.sub_publish_enabled" active-value="1" inactive-value="0" />
@@ -177,7 +177,7 @@ onMounted(load)
                               placeholder="04:30" style="width:200px" />
             </el-form-item>
             <div class="np-muted">
-              定时/间隔下发与仪表盘「立即检测并下发」走同一条流程：对全部节点跑延迟检测 + 全部检测组标签，检测期间暂停机场拉取，完成后才原子替换订阅。
+              定时/间隔下发与仪表盘「立即检测并下发」走同一条流程：对全部节点跑延迟检测 + 全部节点标签标签，检测期间暂停机场拉取，完成后才原子替换订阅。
               <template v-if="form.sub_publish_mode === 'time'">固定时刻模式下 15 分钟内未成功会在下一分钟重试。</template>
               <template v-else>间隔模式从保存设置（或上一次下发完成）开始计时，失败会在下一分钟重试，成功后才重新计时。</template>
             </div>
@@ -196,7 +196,7 @@ onMounted(load)
                 <el-form-item label="全局并发"><el-input-number v-model="form.global_concurrency" :min="1" :max="300" style="width:100%" /></el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="单检测组并发"><el-input-number v-model="form.group_concurrency" :min="1" :max="100" style="width:100%" /></el-form-item>
+                <el-form-item label="单节点标签并发"><el-input-number v-model="form.group_concurrency" :min="1" :max="100" style="width:100%" /></el-form-item>
               </el-col>
             </el-row>
             <el-row :gutter="12">

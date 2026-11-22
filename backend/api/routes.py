@@ -357,7 +357,7 @@ async def list_groups():
 @api.post("/groups", dependencies=protected)
 async def create_group(payload: GroupIn):
     if db.row("SELECT id FROM test_groups WHERE ident=?", (payload.ident,)):
-        raise HTTPException(status_code=400, detail="标识已被其他检测组使用")
+        raise HTTPException(status_code=400, detail="标识已被其他节点标签使用")
     group_id = db.execute(
         """INSERT INTO test_groups (name, ident, url, method, timeout, expect_status, expect_body,
            max_latency, interval_minutes, enabled, sort_order, is_default, created_at)
@@ -367,7 +367,7 @@ async def create_group(payload: GroupIn):
          payload.expect_status, payload.expect_body, payload.max_latency, 30,
          int(payload.enabled), payload.sort_order, 0, db.now()),
     )
-    db.append_log("INFO", "检测组", f"新增检测组：{payload.name}/{payload.ident}")
+    db.append_log("INFO", "节点标签", f"新增节点标签：{payload.name}/{payload.ident}")
     return _group_payload(db.row("SELECT * FROM test_groups WHERE id=?", (group_id,)))
 
 
@@ -375,14 +375,14 @@ async def create_group(payload: GroupIn):
 async def update_group(group_id: int, payload: GroupPatch):
     group = db.row("SELECT * FROM test_groups WHERE id=?", (group_id,))
     if not group:
-        raise HTTPException(status_code=404, detail="检测组不存在")
+        raise HTTPException(status_code=404, detail="节点标签不存在")
     data = payload.dict(exclude_unset=True)
     # timeout and cadence are global now: ignore whatever the client still sends
     data.pop("timeout", None)
     data.pop("interval_minutes", None)
     if "ident" in data and data["ident"]:
         if db.row("SELECT id FROM test_groups WHERE ident=? AND id<>?", (data["ident"], group_id)):
-            raise HTTPException(status_code=400, detail="标识已被其他检测组使用")
+            raise HTTPException(status_code=400, detail="标识已被其他节点标签使用")
     for key, value in data.items():
         if value is None:
             continue
@@ -406,13 +406,13 @@ async def update_group(group_id: int, payload: GroupPatch):
 async def delete_group(group_id: int):
     group = db.row("SELECT * FROM test_groups WHERE id=?", (group_id,))
     if not group:
-        raise HTTPException(status_code=404, detail="检测组不存在")
+        raise HTTPException(status_code=404, detail="节点标签不存在")
     if group["is_default"]:
         raise HTTPException(status_code=400,
-                            detail="默认检测组不能删除，请改为停用")
+                            detail="默认节点标签不能删除，请改为停用")
     db.execute("DELETE FROM test_groups WHERE id=?", (group_id,))
     db.execute("DELETE FROM results WHERE group_id=?", (group_id,))
-    db.append_log("WARN", "检测组", f"删除检测组：{group['name']}")
+    db.append_log("WARN", "节点标签", f"删除节点标签：{group['name']}")
     return {"ok": True}
 
 
@@ -634,8 +634,7 @@ async def run_cycle(payload: RunIn | None = None):
     if not db.row("SELECT COUNT(*) AS c FROM nodes n JOIN airports a ON a.id=n.airport_id"
                   " WHERE a.enabled=1")["c"]:
         raise HTTPException(status_code=409, detail="节点池为空")
-    task = asyncio.create_task(manager.run_cycle(force=True, group_ids=payload.group_ids,
-                                                 reason="manual"))
+    task = asyncio.create_task(manager.run_cycle(force=True, reason="manual"))
     manager.state.background_task = task
     return {"ok": True, "started": True}
 

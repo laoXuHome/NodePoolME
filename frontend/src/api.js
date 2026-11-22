@@ -125,7 +125,7 @@ export function logLevelLabel(level) {
 
 export function logSourceLabel(source) {
   const map = {
-    auth: '认证', airport: '机场', fetch: '拉取', publish: '下发', group: '检测组',
+    auth: '认证', airport: '机场', fetch: '拉取', publish: '下发', group: '节点标签',
     subscription: '订阅', settings: '设置', backup: '备份', restore: '恢复',
     system: '系统', api: '接口', latency: '延迟', test: '检测',
     maintenance: '维护', scheduler: '调度', tester: '测试内核'

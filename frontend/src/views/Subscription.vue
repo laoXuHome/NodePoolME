@@ -157,7 +157,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
               <el-button link type="warning" style="margin-left:8px" @click="regen">重新生成</el-button>
             </el-form-item>
           </el-form>
-          <div class="np-muted">下发依据是「系统设置 → 延迟检测」里的双目标上限（Google / Wikipedia，可分别自定义链接与阈值）；检测组只用于生成节点名代号，节点数不设上限。</div>
+          <div class="np-muted">下发依据是「系统设置 → 延迟检测」里的双目标上限（Google / Wikipedia，可分别自定义链接与阈值）；节点标签只用于生成节点名代号，节点数不设上限。</div>
         </div>
       </el-col>
 

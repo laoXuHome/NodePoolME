@@ -35,10 +35,10 @@ async function submit() {
   try {
     if (editing.value) {
       await api.patch(`/api/groups/${editing.value.id}`, payload)
-      ElMessage.success('已更新检测组')
+      ElMessage.success('已更新节点标签')
     } else {
       await api.post('/api/groups', payload)
-      ElMessage.success('已新增检测组')
+      ElMessage.success('已新增节点标签')
     }
     dialog.value = false
     await load()
@@ -51,18 +51,10 @@ async function toggle(row, enabled) {
 }
 
 async function remove(row) {
-  await ElMessageBox.confirm(`删除检测组「${row.name}」会同时删除其检测结果，节点名的中间段将不再包含 ${row.name}。`,
+  await ElMessageBox.confirm(`删除节点标签「${row.name}」会同时删除其检测结果，节点名的中间段将不再包含 ${row.name}。`,
                              '确认删除', { type: 'warning' })
   try { await api.del(`/api/groups/${row.id}`); ElMessage.success('已删除'); await load() }
   catch (e) { ElMessage.error(e.message) }
-}
-
-async function runGroup(row) {
-  try {
-    await api.post('/api/run', { force: true, group_ids: [row.id] })
-    ElMessage.success('已启动该检测组的批次，进度见仪表盘')
-    await load()
-  } catch (e) { ElMessage.error(e.message) }
 }
 
 onMounted(() => {
@@ -82,7 +74,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
     </div>
 
     <div class="np-toolbar">
-      <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新增检测组</el-button>
+      <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新增节点标签</el-button>
       <el-button @click="load"><el-icon><Refresh /></el-icon>刷新</el-button>
       <div class="np-flex" />
       <span class="np-muted">顺序决定节点名中间段的排列：{{ items.filter(i => i.enabled).map(i => i.ident).join('ᐧ') || '（无启用标签）' }}</span>
@@ -109,12 +101,11 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <div class="np-mobile-actions">
           <span class="np-muted">通过 {{ row.passed }} · {{ formatTs(row.last_run_at) }}</span>
           <div class="np-flex" />
-          <el-button link type="primary" size="small" @click="runGroup(row)">运行</el-button>
           <el-button link size="small" @click="openEdit(row)">编辑</el-button>
           <el-button link type="danger" size="small" :disabled="row.is_default" @click="remove(row)">删除</el-button>
         </div>
       </div>
-      <div v-if="!items.length" class="np-empty">暂无检测组</div>
+      <div v-if="!items.length" class="np-empty">暂无节点标签</div>
     </div>
 
     <div v-if="!isMobile" class="np-card">
@@ -141,9 +132,8 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150">
+        <el-table-column label="操作" width="120">
           <template #default="{ row }">
-            <el-button link type="primary" @click="runGroup(row)">运行</el-button>
             <el-button link @click="openEdit(row)">编辑</el-button>
             <el-button link type="danger" :disabled="row.is_default" @click="remove(row)">删除</el-button>
           </template>
@@ -151,7 +141,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
       </el-table>
     </div>
 
-    <el-dialog v-model="dialog" :title="editing ? '编辑检测组' : '新增检测组'" width="620px">
+    <el-dialog v-model="dialog" :title="editing ? '编辑节点标签' : '新增节点标签'" width="620px">
       <el-form label-width="96px">
         <el-row :gutter="12">
           <el-col :span="14">
@@ -206,7 +196,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
           <el-switch v-model="form.enabled" />
         </el-form-item>
       </el-form>
-      <div class="np-muted">延迟 0 表示不限制。检测组只决定节点名里的代号，不决定是否下发；是否下发由「系统设置 → 延迟检测」的延迟上限决定。</div>
+      <div class="np-muted">延迟 0 表示不限制。节点标签只决定节点名里的代号，不决定是否下发；是否下发由「系统设置 → 延迟检测」的延迟上限决定。</div>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
         <el-button type="primary" @click="submit">保存</el-button>

@@ -31,7 +31,7 @@ def test_error_messages_are_chinese():
         assert duplicate.json()["detail"] == "机场名称已被使用"
         assert client.get("/api/nodes/99999").json()["detail"] == "节点不存在"
         assert client.get("/api/airports/99999/filter").json()["detail"] == "机场不存在"
-        assert client.delete("/api/groups/99999").json()["detail"] == "检测组不存在"
+        assert client.delete("/api/groups/99999").json()["detail"] == "节点标签不存在"
 
     nodes, errors, _ = parse_text_full("proxies:\n  a: b")
     assert nodes == [] and errors == ["YAML 中没有 proxies 列表"]
