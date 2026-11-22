@@ -195,13 +195,15 @@ def _upsert(airport_id: int, fetched: list[dict], keywords: list[str] | None = N
         filtered_count = conn.execute(
             "SELECT COUNT(*) AS c FROM airport_filtered_nodes WHERE airport_id=? AND admitted=0",
             (airport_id,)).fetchone()["c"]
+        total_count = count + filtered_count
         conn.execute(
             """UPDATE airports SET node_count=?, last_status='ok', last_error=NULL
                WHERE id=?""",
             (count, airport_id),
         )
     return {"inserted": inserted, "updated": updated, "total": count,
-            "filtered": filtered_count, "filtered_added": filtered_added}
+            "filtered": filtered_count, "filtered_added": filtered_added,
+            "total_count": total_count}
 
 
 def filtered_nodes(airport_id: int) -> list[dict]:
@@ -286,10 +288,15 @@ def reclassify_airport(airport_id: int, keywords: list[str] | None = None,
                 conn.execute("DELETE FROM airport_filtered_nodes WHERE id=?", (item["id"],))
         count = conn.execute("SELECT COUNT(*) AS c FROM nodes WHERE airport_id=?",
                              (airport_id,)).fetchone()["c"]
+        filtered = conn.execute(
+            "SELECT COUNT(*) AS c FROM airport_filtered_nodes WHERE airport_id=? AND admitted=0",
+            (airport_id,)).fetchone()["c"]
+        total_count = count + filtered
         conn.execute("UPDATE airports SET node_count=?, updated_at=? WHERE id=?",
                      (count, stamp, airport_id))
-    result = {"ok": True, "moved_out": moved_out, "moved_in": moved_in, "node_count": count,
-              "filtered": filtered_count(airport_id)}
+    result = {"ok": True, "moved_out": moved_out, "moved_in": moved_in, "node_count": total_count,
+              "pool_count": count, "filtered": filtered_count(airport_id),
+              "total_count": total_count}
     if moved_out or moved_in:
         db.append_log(
             "INFO", "过滤",
@@ -322,6 +329,10 @@ def admit_filtered_node(airport_id: int, fingerprint: str) -> dict | None:
         )
         count = conn.execute("SELECT COUNT(*) AS c FROM nodes WHERE airport_id=?",
                              (airport_id,)).fetchone()["c"]
+        filtered = conn.execute(
+            "SELECT COUNT(*) AS c FROM airport_filtered_nodes WHERE airport_id=? AND admitted=0",
+            (airport_id,)).fetchone()["c"]
+        total_count = count + filtered
         conn.execute("UPDATE airports SET node_count=?, updated_at=? WHERE id=?",
                      (count, stamp, airport_id))
     if airport:
@@ -331,7 +342,8 @@ def admit_filtered_node(airport_id: int, fingerprint: str) -> dict | None:
         builder.publish(reason="filtered node admitted")
     except Exception as exc:
         db.append_log("WARN", "下发", f"过滤节点加入节点池后重建订阅失败：{exc}")
-    return {"ok": True, "node_count": count, "filtered": filtered_count(airport_id)}
+    return {"ok": True, "node_count": total_count, "pool_count": count,
+            "filtered": filtered_count(airport_id), "total_count": total_count}
 
 
 def migrate_filter_defaults() -> int:
@@ -375,7 +387,7 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
         )
         db.execute(
             "INSERT INTO fetch_logs (airport_id, ts, ok, node_count, duration_ms, message) VALUES (?,?,?,?,?,?)",
-            (airport_id, db.now(), 1, stats["total"], duration,
+            (airport_id, db.now(), 1, stats["total_count"], duration,
              f"{trig_cn}：新增 {stats['inserted']}，更新 {stats['updated']}"
              + (f"，过滤 {stats['filtered']}" if stats.get("filtered") else "") + "；"
              f"解析 {parse_stats['parsed']}/{parse_stats['total']}"
@@ -389,8 +401,9 @@ async def fetch_airport(airport: dict, trigger: str = "schedule") -> dict:
             errors = [f"跳过 {sum(unsupported.values())} 个不支持的节点："
                       + "、".join(f"{k}×{v}" for k, v in unsupported.items())] + list(errors)
         db.append_log("INFO", "拉取",
-                      f"{airport['name']}：共 {stats['total']} 个节点 "
-                      + (f"，过滤 {stats['filtered']} 个" if stats.get("filtered") else "")
+                      f"{airport['name']}：共 {stats['total_count']} 个节点 "
+                      + (f"（节点池 {stats['total']}，过滤 {stats['filtered']}）"
+                         if stats.get("filtered") else "")
                       + f"（解析 {parse_stats['parsed']}/{parse_stats['total']}"
                       + (f"，去重 {duplicates}" if duplicates else "") + f"，{trig_cn}，耗时 {duration}ms）")
         return {"ok": True, **stats, "duration_ms": duration, "warnings": errors[:10],

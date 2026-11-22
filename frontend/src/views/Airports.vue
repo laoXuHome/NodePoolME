@@ -77,7 +77,7 @@ async function fetchNow(row) {
     const skipped = parse.unsupported && Object.keys(parse.unsupported).length
       ? `；跳过 ${Object.entries(parse.unsupported).map(([k, v]) => `${k}×${v}`).join('、')}`
       : ''
-    ElMessage.success(`拉取成功：${res.total} 个节点（新增 ${res.inserted}${detail}${skipped}）`)
+    ElMessage.success(`拉取成功：${res.total_count ?? res.total} 个节点（新增 ${res.inserted}${detail}${skipped}）`)
     await load()
   } catch (e) { ElMessage.error(e.message) }
 }
@@ -138,7 +138,7 @@ async function admitNode(node) {
   if (!filterAirport.value) return
   try {
     const res = await api.post(`/api/airports/${filterAirport.value.id}/filter/admit`, { fingerprint: node.fingerprint })
-    ElMessage.success(`已加入节点池，当前 ${res.node_count} 个节点`)
+    ElMessage.success(`已加入节点池，当前 ${res.total_count ?? res.node_count} 个节点`)
     await load()
     await reloadFilter()
   } catch (e) { ElMessage.error(e.message) }
@@ -199,7 +199,10 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
           <el-switch :model-value="row.enabled" size="small" @change="(v) => toggle(row, v)" />
         </div>
         <div class="np-mobile-meta">
-          <span>{{ row.node_count }} 个节点</span>
+          <span>
+            {{ row.node_count }} 个节点
+            <span v-if="row.filtered_count" class="np-muted">（含过滤 {{ row.filtered_count }}）</span>
+          </span>
           <span v-if="row.daily_time">每天 {{ row.daily_time }}</span>
           <span v-else-if="row.interval_minutes > 0">每 {{ row.interval_minutes }} 分钟</span>
           <span v-else>仅手动</span>
@@ -223,7 +226,13 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <el-table-column label="订阅地址" min-width="190">
           <template #default="{ row }"><span class="np-mono">{{ row.url_masked }}</span></template>
         </el-table-column>
-        <el-table-column prop="node_count" label="节点" width="64" />
+        <el-table-column label="节点" width="82">
+          <template #default="{ row }">
+            <el-tooltip :content="`总数 = 节点池 ${row.pool_count} + 已过滤 ${row.filtered_count}`" placement="top">
+              <span>{{ row.node_count }}</span>
+            </el-tooltip>
+          </template>
+        </el-table-column>
         <el-table-column label="拉取周期" width="120">
           <template #default="{ row }">
             <span v-if="row.daily_time">每天 {{ row.daily_time }}</span>

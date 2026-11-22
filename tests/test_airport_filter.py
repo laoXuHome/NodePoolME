@@ -54,6 +54,13 @@ def test_airport_filter_api_flow():
 
         stats = _upsert_three(aid, config.DEFAULT_FILTER_KEYWORDS)
         assert stats["total"] == 1 and stats["filtered"] == 2
+        assert stats["total_count"] == 3
+        airport = next(a for a in client.get("/api/airports").json() if a["id"] == aid)
+        assert airport["node_count"] == 3
+        assert airport["pool_count"] == 1 and airport["filtered_count"] == 2
+        dash = client.get("/api/dashboard").json()
+        dash_airport = next(a for a in dash["airport_list"] if a["id"] == aid)
+        assert dash_airport["node_count"] == 3
         _seed_latency(aid)
         assert [r["raw_name"] for r in fetcher.filtered_nodes(aid)] == [
             "官网公告 请勿购买", "剩余流量 10G"]
@@ -78,7 +85,10 @@ def test_airport_filter_api_flow():
         admitted = client.post(f"/api/airports/{aid}/filter/admit", json={"fingerprint": fp})
         assert admitted.status_code == 200, admitted.text
         assert admitted.json()["node_count"] == 3
+        assert admitted.json()["total_count"] == 3 and admitted.json()["pool_count"] == 3
         assert fetcher.filtered_nodes(aid) == []
+        airport = next(a for a in client.get("/api/airports").json() if a["id"] == aid)
+        assert airport["node_count"] == 3 and airport["filtered_count"] == 0
         assert client.get("/api/nodes").json()["total"] == 3
         _seed_latency(aid)
 

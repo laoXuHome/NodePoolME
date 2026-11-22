@@ -105,6 +105,7 @@ async def dashboard():
     now = datetime.now().astimezone()
     fetch_next: list[str] = []
     manual_only = 0
+    airport_list: list[dict] = []
     for airport in airports:
         nxt = fetcher.next_run_at(airport, now)
         airport["next_run_at"] = nxt.isoformat(sep=" ", timespec="seconds") if nxt else None
@@ -113,6 +114,10 @@ async def dashboard():
             manual_only += 1
         elif airport["enabled"]:
             fetch_next.append(airport["next_run_at"])
+        payload = _airport_payload(airport)
+        payload["next_run_at"] = airport["next_run_at"]
+        payload["manual_only"] = airport["manual_only"]
+        airport_list.append(payload)
     fetch_ok = sum(1 for a in airports if a["last_status"] == "ok")
     fetch_err = sum(1 for a in airports if a["last_status"] == "error")
     last_fetch = max((a["last_success_at"] or "" for a in airports), default="") or None
@@ -151,7 +156,7 @@ async def dashboard():
         "nodes_unavailable": unavailable,
         "nodes_qualified": len(selected),
         "groups": _group_stats(),
-        "airport_list": airports,
+        "airport_list": airport_list,
         "batch": last_batch,
         "runtime": manager.state.as_dict(),
         "subscription": builder.meta(),
@@ -184,14 +189,16 @@ async def dashboard():
 
 # ---------------------------------------------------------------------------- airports
 def _airport_payload(row: dict) -> dict:
+    filtered = fetcher.filtered_count(row["id"])
     return {
         "id": row["id"], "name": row["name"], "url": row["url"], "enabled": bool(row["enabled"]),
         "interval_minutes": row["interval_minutes"], "daily_time": row["daily_time"],
         "last_attempt_at": row["last_attempt_at"], "last_success_at": row["last_success_at"],
         "last_status": row["last_status"], "last_error": row["last_error"],
-        "node_count": row["node_count"],
+        "node_count": row["node_count"] + filtered,
+        "pool_count": row["node_count"],
         "filter_keywords": fetcher.normalize_keywords(row.get("filter_keywords")),
-        "filtered_count": fetcher.filtered_count(row["id"]),
+        "filtered_count": filtered,
         "url_masked": (row["url"][:32] + "...") if len(row["url"]) > 40 else row["url"],
     }
 
@@ -270,6 +277,8 @@ async def delete_airport(airport_id: int):
     if not airport:
         raise HTTPException(status_code=404, detail="机场不存在")
     affected = db.row("SELECT COUNT(*) AS c FROM nodes WHERE airport_id=?", (airport_id,))["c"]
+    affected += db.row("SELECT COUNT(*) AS c FROM airport_filtered_nodes WHERE airport_id=?",
+                       (airport_id,))["c"]
     db.execute("DELETE FROM nodes WHERE airport_id=?", (airport_id,))
     db.execute("DELETE FROM airport_filtered_nodes WHERE airport_id=?", (airport_id,))
     db.execute("DELETE FROM fetch_logs WHERE airport_id=?", (airport_id,))
