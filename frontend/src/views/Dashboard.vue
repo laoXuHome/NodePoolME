@@ -10,6 +10,8 @@ const logs = ref([])
 const logLevel = ref('ALL')
 const logsLoading = ref(false)
 const timer = ref(null)
+const liveTimer = ref(null)
+let liveBusy = false
 
 async function loadLogs() {
   logsLoading.value = true
@@ -23,6 +25,18 @@ async function loadLogs() {
   }
 }
 
+async function refreshDashboard() {
+  if (liveBusy) return
+  liveBusy = true
+  try {
+    const next = await api.get('/api/dashboard')
+    data.value = next
+    running.value = next.runtime.running
+    syncLiveTimer()
+  } catch { /* 自动刷新失败时保留上一帧，不弹错打断阅读 */ }
+  finally { liveBusy = false }
+}
+
 async function load() {
   loading.value = true
   try {
@@ -33,7 +47,16 @@ async function load() {
   } finally {
     loading.value = false
   }
+  syncLiveTimer()
   await loadLogs()
+}
+
+function syncLiveTimer() {
+  clearInterval(liveTimer.value)
+  liveTimer.value = null
+  if (data.value?.batch?.status === 'running') {
+    liveTimer.value = setInterval(() => { if (!document.hidden) refreshDashboard() }, 3000)
+  }
 }
 
 async function pauseCycle() {
@@ -121,13 +144,35 @@ const runTagType = computed(() => {
   return r.stop_requested ? 'danger' : r.paused ? 'info' : 'warning'
 })
 const batchStatusLabel = computed(() => {
-  const map = { running: '检测中', complete: '已完成', stopped: '已停止', failed: '失败' }
+  const map = { running: '检测中', complete: '已完成', stopped: '已停止', failed: '失败', aborted: '已中止' }
   return map[data.value?.batch?.status] || data.value?.batch?.status || '—'
 })
 const cyclePct = computed(() => {
   const r = data.value?.runtime
   if (!r || !r.total) return 0
   return Math.round((r.done || 0) / r.total * 100)
+})
+const batchPct = computed(() => {
+  const b = data.value?.batch
+  if (!b?.target_count) return 0
+  return Math.max(0, Math.min(100, Math.round((b.processed_count || 0) / b.target_count * 100)))
+})
+const batchStartClock = computed(() => {
+  const ts = data.value?.batch?.started_at
+  if (!ts) return '—'
+  const full = formatTs(ts)
+  return full.length >= 16 ? full.slice(11, 16) : full
+})
+const batchRemaining = computed(() => {
+  const b = data.value?.batch
+  if (!b) return 0
+  return Math.max(0, (b.target_count || 0) - (b.processed_count || 0))
+})
+const batchTone = computed(() => {
+  const s = data.value?.batch?.status
+  if (s === 'complete') return 'done'
+  if (s === 'running') return 'running'
+  return s ? 'failed' : 'idle'
 })
 const subText = computed(() => {
   const ps = data.value?.publish_schedule
@@ -139,7 +184,7 @@ const subText = computed(() => {
 })
 function shortTs(ts) {
   if (!ts) return '—'
-  return String(ts).replace(/^\d{4}-/, '').slice(0, 11)
+  return String(ts).replace(/^\d{4}-/, '').replace('T', ' ').slice(0, 11)
 }
 const nextAutoText = computed(() => {
   const ps = data.value?.publish_schedule
@@ -162,7 +207,7 @@ onMounted(() => {
   load()
   timer.value = setInterval(() => { if (!document.hidden) load() }, 15000)
 })
-onUnmounted(() => clearInterval(timer.value))
+onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) })
 </script>
 
 <template>
@@ -336,21 +381,72 @@ onUnmounted(() => clearInterval(timer.value))
         </div>
 
         <div class="np-card np-dash-batch" style="padding:18px 20px">
-          <div class="np-section-title">最近批次</div>
-          <div v-if="data?.batch">
-            <el-descriptions :column="1" size="small" border>
-              <el-descriptions-item label="批次号">#{{ data.batch.id }}</el-descriptions-item>
-              <el-descriptions-item label="状态">{{ batchStatusLabel }}</el-descriptions-item>
-              <el-descriptions-item label="开始">{{ formatTs(data.batch.started_at) }}</el-descriptions-item>
-              <el-descriptions-item label="结束">{{ formatTs(data.batch.finished_at) }}</el-descriptions-item>
-              <el-descriptions-item label="处理">
-                {{ data.batch.processed_count }}/{{ data.batch.target_count }}
-              </el-descriptions-item>
-              <el-descriptions-item label="已发布">
-                {{ data.batch.published ? '是' : '否' }}
-              </el-descriptions-item>
-            </el-descriptions>
+          <div class="np-section-title">
+            最近批次
+            <el-tag v-if="data?.batch" size="small" effect="plain">#{{ data.batch.id }}</el-tag>
+            <div class="np-flex" />
+            <span v-if="data?.batch?.status === 'running'" class="np-batch-live">
+              <i />实时更新
+            </span>
           </div>
+
+          <div v-if="data?.batch" class="np-batch-monitor" :class="`is-${batchTone}`">
+            <div class="np-batch-main">
+              <div class="np-batch-gauge" :class="`is-${batchTone}`">
+                <svg viewBox="0 0 160 160" aria-hidden="true">
+                  <circle class="np-batch-gauge-track" cx="80" cy="80" r="65" pathLength="100" />
+                  <circle class="np-batch-gauge-value" cx="80" cy="80" r="65" pathLength="100"
+                          :style="{ strokeDasharray: `${batchPct} 100` }" />
+                </svg>
+                <div class="np-batch-gauge-label">
+                  <strong>{{ batchPct }}</strong><span>%</span>
+                  <em>整体进度</em>
+                </div>
+              </div>
+
+              <div class="np-batch-side">
+                <div class="np-batch-state">
+                  <i class="np-batch-state-dot" />
+                  <b>{{ batchStatusLabel }}</b>
+                  <span>{{ data.batch.published ? '已发布' : '未发布' }}</span>
+                </div>
+                <div class="np-batch-count">
+                  <strong>{{ data.batch.processed_count }}</strong>
+                  <span>/ {{ data.batch.target_count }}</span>
+                </div>
+                <div class="np-batch-count-label">已处理检测项</div>
+                <div class="np-batch-kpis">
+                  <div><span>剩余</span><b>{{ batchRemaining }}</b></div>
+                  <div><span>开始</span><b>{{ batchStartClock }}</b></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="np-batch-steps">
+              <div class="np-batch-step is-done">
+                <i>1</i>
+                <b>开始</b>
+                <em>{{ shortTs(data.batch.started_at) }}</em>
+              </div>
+              <div class="np-batch-step" :class="{ 'is-active': data.batch.status === 'running', 'is-done': batchTone === 'done', 'is-failed': batchTone === 'failed' }">
+                <i>2</i>
+                <b>检测</b>
+                <em>{{ batchPct }}%</em>
+              </div>
+              <div class="np-batch-step" :class="{ 'is-active': data.batch.status === 'running' && batchPct >= 100, 'is-done': data.batch.published, 'is-failed': batchTone === 'failed' && !data.batch.published }">
+                <i>3</i>
+                <b>发布</b>
+                <em>{{ data.batch.published ? '已发布' : '未发布' }}</em>
+              </div>
+            </div>
+
+            <div class="np-batch-foot">
+              <span>结束 {{ formatTs(data.batch.finished_at) }}</span>
+              <span v-if="data.batch.status === 'running'">进度每 3 秒刷新 · 结束后自动替换订阅</span>
+              <span v-else>本批次已结束</span>
+            </div>
+          </div>
+
           <div v-else class="np-empty">尚未运行过检测批次</div>
         </div>
     </div>
