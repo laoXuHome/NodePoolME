@@ -809,13 +809,13 @@ a { color: var(--np-accent); }
   gap: 12px; margin-top: 6px; align-items: stretch;
 }
 .np-pool-status {
-  min-width: 0; display: flex; flex-direction: column;
+  min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center;
   gap: 5px; padding: 10px 8px 12px;
   border: 1px solid var(--np-separator-soft); border-radius: 14px;
   background: linear-gradient(180deg, #fbfcfe, #f6f7fa);
 }
-.np-pool-status-title { font-size: 9.5px; color: var(--np-tertiary); letter-spacing: .03em; white-space: nowrap; }
-.np-pool-status-total { display: flex; align-items: baseline; gap: 3px; margin-top: 1px; }
+.np-pool-status-title { font-size: 9.5px; color: var(--np-tertiary); letter-spacing: .03em; white-space: nowrap; text-align: center; }
+.np-pool-status-total { display: flex; align-items: baseline; justify-content: center; gap: 3px; margin-top: 1px; }
 .np-pool-status-total strong { font-size: 29px; line-height: 1; font-weight: 700; letter-spacing: -.05em; color: var(--np-text); font-variant-numeric: tabular-nums; }
 .np-pool-status-total span { font-size: 9px; color: var(--np-tertiary); }
 .np-pool-status-sub { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 3px; margin-top: -2px; font-size: 8.5px; line-height: 1.25; color: var(--np-secondary); font-variant-numeric: tabular-nums; }

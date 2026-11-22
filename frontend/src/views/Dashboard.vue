@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, formatTs, logLevelLabel, logSourceLabel } from '../api'
 
 const data = ref(null)
-const AIRPORT_COLORS = ['#3f8cff', '#2fbf71', '#f5a524', '#9b6cf2', '#26b6c9', '#ef5b5b', '#71b33a', '#e07aa8']
+const AIRPORT_COLORS = ['#2563eb', '#ea580c', '#16a34a', '#db2777', '#7c3aed', '#0891b2', '#ca8a04', '#be185d']
 const loading = ref(false)
 const running = ref(false)
 const logs = ref([])
@@ -119,7 +119,7 @@ const statusSegments = computed(() => {
   const availableOnly = Math.max(0, available - qualified)
   const raw = [
     { key: 'qualified', label: '下发', short: '下发', count: qualified, color: '#34c759', side: '#1f8f45', light: '#7bdf95', ink: '#ffffff' },
-    { key: 'available', label: '可用', short: '可用', count: availableOnly, color: '#3f8cff', side: '#2563c9', light: '#7db4ff', ink: '#ffffff' },
+    { key: 'available', label: '未达标', short: '未达标', count: availableOnly, color: '#3f8cff', side: '#2563c9', light: '#7db4ff', ink: '#ffffff' },
     { key: 'unknown', label: '未检测', short: '未检', count: unknown, color: '#c7c7cc', side: '#97979d', light: '#e2e2e6', ink: '#59595f' },
     { key: 'unavailable', label: '不可用', short: '不可用', count: unavailable, color: '#ee7b76', side: '#c94b46', light: '#f6a6a2', ink: '#ffffff' },
   ].filter((item) => item.count > 0)
@@ -483,13 +483,9 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           <div class="np-pool-status">
             <div class="np-pool-status-title">节点池状态</div>
             <div class="np-pool-status-total"><strong>{{ data.nodes_total }}</strong><span>节点</span></div>
-            <div class="np-pool-status-sub" title="可用包含下发达标节点">
-              <span>可用 {{ statusCounts.available }}</span><i>·</i><span>不可用 {{ statusCounts.unavailable }}</span>
-              <template v-if="statusCounts.unknown"><i>·</i><span>未检测 {{ statusCounts.unknown }}</span></template>
-            </div>
             <div class="np-pool-stack-wrap" :style="{ '--stack-top': statusTopColor }">
               <div class="np-pool-stack"
-                   :title="`下发 ${statusCounts.qualified} · 可用（未达标）${statusCounts.qualified ? statusCounts.available - statusCounts.qualified : statusCounts.available} · 不可用 ${statusCounts.unavailable}`">
+                   :title="`下发 ${statusCounts.qualified} · 未达标 ${statusCounts.qualified ? statusCounts.available - statusCounts.qualified : statusCounts.available} · 不可用 ${statusCounts.unavailable}`">
                 <div v-for="segment in statusSegments" :key="segment.key"
                      class="np-pool-stack-seg" :class="{ 'is-thin': segment.height < 9 }"
                      :style="{ height: `${segment.height}%`, background: `linear-gradient(90deg, ${segment.side}, ${segment.color} 38%, ${segment.light} 70%, ${segment.color})` }">
