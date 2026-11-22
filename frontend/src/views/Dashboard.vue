@@ -174,6 +174,8 @@ const batchTone = computed(() => {
   if (s === 'running') return 'running'
   return s ? 'failed' : 'idle'
 })
+const airportMax = computed(() => Math.max(1, ...(data.value?.airport_list || []).map(a => a.node_count || 0)))
+function airportShare(row) { return Math.max(4, Math.round((row.node_count || 0) / airportMax.value * 100)) }
 const subText = computed(() => {
   const ps = data.value?.publish_schedule
   const p = data.value?.publish
@@ -234,42 +236,46 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               </el-button>
             </div>
           </div>
-          <div v-if="data">
-            <el-progress v-if="data.runtime.running" :percentage="data.runtime.progress"
-                         :stroke-width="12" :striped="!data.runtime.paused" :striped-flow="!data.runtime.paused" />
-            <div class="np-muted" style="margin:10px 0 14px">
-              引擎 {{ data.runtime.engine }} · 批次 #{{ data.runtime.batch_id || '—' }} ·
-              进度 {{ data.runtime.done }}/{{ data.runtime.total }} ·
-              块 {{ data.runtime.block_index || 0 }}/{{ data.runtime.blocks || 0 }}（{{ data.runtime.block_size || 0 }} 节点）·
-              {{ data.runtime.phase }} · 上次启动 {{ formatTs(data.runtime.last_cycle_at) }}
+          <div class="np-detect-meta">
+            <span class="np-detect-engine">引擎 <b>{{ data.runtime.engine }}</b></span>
+            <span v-if="data.runtime.running" class="np-detect-phase">
+              块 {{ data.runtime.block_index || 0 }}/{{ data.runtime.blocks || 0 }}
+              · {{ data.runtime.block_size || 0 }} 节点 · {{ data.runtime.phase }}
+            </span>
+            <span v-else class="np-detect-phase">等待下一次检测 · 所有标签随批次一起执行</span>
+            <div class="np-flex" />
+            <span class="np-detect-time">上次启动 {{ shortTs(data.runtime.last_cycle_at) }}</span>
+          </div>
+
+          <div class="np-detect-list">
+            <div v-for="row in data.groups" :key="row.id" class="np-detect-label-row" :class="{ 'is-off': !row.enabled }">
+              <span class="np-detect-ident">{{ row.ident }}</span>
+              <div class="np-detect-label-main">
+                <div class="np-detect-label-name">{{ row.name }}</div>
+                <div class="np-detect-label-url" :title="row.url">{{ row.url }}</div>
+              </div>
+              <div v-if="data.runtime.running" class="np-detect-progress">
+                <div class="np-detect-track"><i :style="{ width: `${roundPercent(row.name)}%` }" /></div>
+                <div class="np-detect-progress-meta"><span>{{ roundDone(row.name) }}</span><b>{{ roundPercent(row.name) }}%</b></div>
+              </div>
+              <div v-else class="np-detect-passed">
+                <b>{{ row.passed }}</b><span>累计通过</span>
+              </div>
+              <el-tag :type="row.enabled ? 'success' : 'info'" size="small" effect="plain">
+                {{ row.enabled ? '启用' : '停用' }}
+              </el-tag>
             </div>
-            <div class="np-muted" style="margin:0 0 10px">
-              延迟检测（每轮必跑，各 3 轮）<span class="np-mono">{{ data.latency_probe?.url }} / {{ data.latency_probe?.url2 }}</span> ·
-              期望 {{ data.latency_probe?.status }} · 上限 {{ data.latency_probe?.names?.G?.short || 'G' }} {{ data.latency_probe?.ceiling || '不限' }}ms · {{ data.latency_probe?.names?.W?.short || 'W' }} {{ data.latency_probe?.ceiling2 || '不限' }}ms ·
-              通过 {{ data.latency_probe?.passed }} 个节点 ·
-              定时下发 {{ publishText }}
+          </div>
+
+          <div class="np-detect-footer">
+            <div class="np-detect-probe">
+              <span>延迟门槛</span>
+              <el-tooltip :content="`${data.latency_probe?.url || '—'} / ${data.latency_probe?.url2 || '—'}`" placement="top">
+                <b>{{ data.latency_probe?.names?.G?.short || 'G' }} ≤ {{ data.latency_probe?.ceiling || '不限' }}ms · {{ data.latency_probe?.names?.W?.short || 'W' }} ≤ {{ data.latency_probe?.ceiling2 || '不限' }}ms</b>
+              </el-tooltip>
+              <span>通过 <b>{{ data.latency_probe?.passed ?? 0 }}</b> 节点</span>
             </div>
-            <el-table :data="data.groups" size="small">
-              <el-table-column prop="name" label="节点标签" />
-              <el-table-column prop="ident" label="标识" width="80" />
-              <el-table-column prop="url" label="目标" show-overflow-tooltip />
-              <el-table-column label="本轮进度" width="190">
-                <template #default="{ row }">
-                  <div class="np-flex" style="gap:8px">
-                    <el-progress :percentage="roundPercent(row.name)" :stroke-width="8" style="flex:1" />
-                    <span class="np-muted">{{ roundDone(row.name) }}</span>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column prop="passed" label="累计通过" width="100" />
-              <el-table-column label="状态" width="90">
-                <template #default="{ row }">
-                  <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
-                    {{ row.enabled ? '启用' : '停用' }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-            </el-table>
+            <div class="np-detect-publish"><span>定时下发</span><b>{{ publishText }}</b></div>
           </div>
         </div>
 
@@ -362,22 +368,26 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
 
 
         <div class="np-card np-dash-airport" style="padding:18px 20px">
-          <div class="np-section-title">机场状态</div>
-          <el-table :data="data?.airport_list || []" size="small">
-            <el-table-column prop="name" label="机场" />
-            <el-table-column prop="node_count" label="节点" width="80" />
-            <el-table-column label="最近成功" width="170">
-              <template #default="{ row }">{{ formatTs(row.last_success_at) }}</template>
-            </el-table-column>
-            <el-table-column label="状态" width="90">
-              <template #default="{ row }">
-                <el-tag v-if="row.last_status === 'ok'" type="success" size="small">正常</el-tag>
-                <el-tag v-else-if="row.last_status === 'error'" type="danger" size="small">失败</el-tag>
-                <el-tag v-else type="info" size="small">未拉取</el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
-          <div v-if="!data?.airport_list?.length" class="np-empty">还没有机场，先到「机场管理」添加订阅。</div>
+          <div class="np-section-title">
+            机场状态
+            <div class="np-flex" />
+            <span class="np-airport-caption">节点缓存分布</span>
+          </div>
+          <div v-if="data?.airport_list?.length" class="np-airport-list">
+            <div v-for="row in data.airport_list" :key="row.id" class="np-airport-row">
+              <div class="np-airport-name">
+                <span class="np-airport-dot" :class="`is-${row.last_status || 'none'}`" />
+                <b>{{ row.name }}</b>
+                <span>{{ row.node_count }} 节点</span>
+              </div>
+              <div class="np-airport-bar"><i :style="{ width: `${airportShare(row)}%` }" /></div>
+              <div class="np-airport-time">{{ shortTs(row.last_success_at) }}</div>
+              <el-tag v-if="row.last_status === 'ok'" type="success" size="small" effect="plain">正常</el-tag>
+              <el-tag v-else-if="row.last_status === 'error'" type="danger" size="small" effect="plain">失败</el-tag>
+              <el-tag v-else type="info" size="small" effect="plain">未拉取</el-tag>
+            </div>
+          </div>
+          <div v-else class="np-empty">还没有机场，先到「机场管理」添加订阅。</div>
         </div>
 
         <div class="np-card np-dash-batch" style="padding:18px 20px">

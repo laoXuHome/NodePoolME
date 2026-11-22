@@ -787,3 +787,83 @@ a { color: var(--np-accent); }
   .np-batch-main { gap: 14px; }
   .np-batch-count strong { font-size: 26px; }
 }
+
+/* ---------------------------------------------------------------- detection console */
+.np-dash-detect { display: flex; flex-direction: column; }
+.np-detect-meta {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin: -2px 0 12px; padding-bottom: 11px; border-bottom: 1px solid var(--np-separator-soft);
+  font-size: 11px; color: var(--np-tertiary);
+}
+.np-detect-engine { color: var(--np-secondary); }
+.np-detect-engine b { color: var(--np-text); font-weight: 600; }
+.np-detect-phase { color: var(--np-tertiary); }
+.np-detect-time { font-variant-numeric: tabular-nums; }
+.np-detect-list { flex: 1; display: flex; flex-direction: column; }
+.np-detect-label-row {
+  flex: 1; min-height: 64px; display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) minmax(150px, 190px) 58px;
+  align-items: center; gap: 12px;
+  border-top: 1px solid var(--np-separator-soft);
+}
+.np-detect-label-row:first-child { border-top: 0; }
+.np-detect-label-row.is-off { opacity: .55; }
+.np-detect-ident {
+  display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px;
+  background: color-mix(in srgb, var(--np-accent) 9%, #fff);
+  color: var(--np-accent); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.np-detect-label-main { min-width: 0; }
+.np-detect-label-name { font-size: 13px; font-weight: 600; color: var(--np-text); letter-spacing: -.01em; }
+.np-detect-label-url { margin-top: 3px; font-size: 10px; color: var(--np-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-detect-progress { min-width: 0; }
+.np-detect-track { height: 7px; border-radius: 99px; background: #edf0f4; overflow: hidden; }
+.np-detect-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #0a84ff, #5ac8fa); transition: width .9s cubic-bezier(.22,.61,.36,1); }
+.np-detect-progress-meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 5px; font-size: 10px; color: var(--np-tertiary); font-variant-numeric: tabular-nums; }
+.np-detect-progress-meta b { color: var(--np-accent); font-weight: 600; }
+.np-detect-passed { display: flex; flex-direction: column; align-items: flex-end; }
+.np-detect-passed b { font-size: 18px; line-height: 1; font-weight: 700; letter-spacing: -.03em; color: var(--np-text); font-variant-numeric: tabular-nums; }
+.np-detect-passed span { margin-top: 3px; font-size: 9px; color: var(--np-tertiary); }
+.np-detect-footer {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--np-separator-soft);
+}
+.np-detect-probe { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 10px; color: var(--np-tertiary); }
+.np-detect-probe b { font-weight: 600; color: var(--np-secondary); font-variant-numeric: tabular-nums; border-bottom: 1px dashed color-mix(in srgb, var(--np-tertiary) 35%, transparent); cursor: help; }
+.np-detect-publish { text-align: right; font-size: 10px; color: var(--np-tertiary); }
+.np-detect-publish b { display: block; margin-top: 2px; font-size: 11px; font-weight: 600; color: var(--np-secondary); }
+
+/* ---------------------------------------------------------------- airport distribution */
+.np-dash-airport { display: flex; flex-direction: column; }
+.np-airport-caption { font-size: 10px; font-weight: 500; color: var(--np-tertiary); }
+.np-airport-list { flex: 1; display: flex; flex-direction: column; }
+.np-airport-row {
+  flex: 1; min-height: 50px; display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(70px, 1fr) 104px 56px;
+  align-items: center; gap: 12px;
+  border-top: 1px solid var(--np-separator-soft);
+}
+.np-airport-row:first-child { border-top: 0; }
+.np-airport-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.np-airport-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #aeaeb2; box-shadow: 0 0 0 3px rgba(174, 174, 178, .12); }
+.np-airport-dot.is-ok { background: #34c759; box-shadow: 0 0 0 3px rgba(52, 199, 89, .13); }
+.np-airport-dot.is-error { background: #ff3b30; box-shadow: 0 0 0 3px rgba(255, 59, 48, .12); }
+.np-airport-name b { font-size: 12px; font-weight: 600; color: var(--np-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-airport-name span { font-size: 10px; color: var(--np-tertiary); white-space: nowrap; }
+.np-airport-bar { height: 5px; border-radius: 99px; background: #edf0f4; overflow: hidden; }
+.np-airport-bar i { display: block; height: 100%; border-radius: inherit; background: color-mix(in srgb, var(--np-accent) 62%, #fff); transition: width .6s ease; }
+.np-airport-time { font-size: 10px; color: var(--np-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+@media (max-width: 1100px) {
+  .np-detect-label-row { grid-template-columns: 34px minmax(0, 1fr) 96px 44px; gap: 8px; min-height: 58px; }
+  .np-detect-label-url { display: none; }
+  .np-detect-label-name { font-size: 12px; }
+  .np-detect-engine, .np-detect-time { font-size: 10px; }
+  .np-detect-phase { display: none; }
+  .np-detect-progress-meta { font-size: 9px; }
+  .np-detect-passed b { font-size: 16px; }
+  .np-detect-footer { gap: 8px; }
+  .np-airport-row { grid-template-columns: minmax(0, 1fr) 52px 74px 44px; gap: 8px; min-height: 46px; }
+  .np-airport-name span { display: none; }
+  .np-airport-time { font-size: 9px; }
+}
