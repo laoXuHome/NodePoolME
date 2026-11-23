@@ -200,6 +200,50 @@ function trendPointTime(point) {
   const time = new Date(String(point?.ts || '').replace(' ', 'T')).getTime()
   return Number.isNaN(time) ? 0 : time
 }
+function averageHistoryBucket(bucket) {
+  const airportIds = new Set()
+  for (const point of bucket) {
+    for (const id of Object.keys(point.airports || {})) airportIds.add(id)
+  }
+  const airports = {}
+  for (const id of airportIds) {
+    const totals = { pool_count: 0, published_count: 0, available_count: 0 }
+    for (const point of bucket) {
+      const counts = point.airports?.[id] || {}
+      for (const key of Object.keys(totals)) totals[key] += counts[key] || 0
+    }
+    airports[id] = {
+      pool_count: totals.pool_count / bucket.length,
+      published_count: totals.published_count / bucket.length,
+      available_count: totals.available_count / bucket.length,
+    }
+  }
+  const total = (key) => bucket.reduce((sum, point) => sum + (point[key] || 0), 0) / bucket.length
+  const last = bucket[bucket.length - 1]
+  return {
+    ts: last.ts,
+    live: bucket.some((point) => point.live),
+    airports,
+    total_nodes: total('total_nodes'),
+    total_published: total('total_published'),
+    total_available: total('total_available'),
+  }
+}
+function compactHistory(rows, max) {
+  if (rows.length <= max) return rows
+  const current = rows[rows.length - 1]
+  const earlier = rows.slice(0, -1)
+  const slots = Math.max(1, max - 1)
+  const first = trendPointTime(rows[0])
+  const end = trendPointTime(current)
+  const buckets = Array.from({ length: slots }, () => [])
+  for (const point of earlier) {
+    const ratio = end > first ? (trendPointTime(point) - first) / (end - first) : 0
+    const index = Math.min(slots - 1, Math.max(0, Math.floor(ratio * slots)))
+    buckets[index].push(point)
+  }
+  return [...buckets.filter((bucket) => bucket.length).map(averageHistoryBucket), current]
+}
 const historyPoints = computed(() => {
   const all = allHistoryPoints.value
   if (!all.length) return []
@@ -207,19 +251,10 @@ const historyPoints = computed(() => {
   const cutoff = Date.now() - days * 86400000
   let rows = all.filter((point) => point.live || trendPointTime(point) >= cutoff)
   if (!rows.length) rows = all.slice(-1)
-  const max = trendRange.value === '7d' ? 64 : 48
-  if (rows.length > max) {
-    const picked = []
-    for (let i = 0; i < max; i += 1) {
-      const index = Math.round(i * (rows.length - 1) / (max - 1))
-      if (!picked.includes(rows[index])) picked.push(rows[index])
-    }
-    rows = picked
-  }
-  return rows
+  return compactHistory(rows, trendRange.value === '7d' ? 20 : 16)
 })
 const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
-const TREND = { w: 336, h: 148, left: 30, right: 108, top: 12, bottom: 18 }
+const TREND = { w: 336, h: 148, left: 30, right: 90, top: 12, bottom: 18 }
 function trendCount(point, row, key) {
   return point.airports?.[String(row.id)]?.[key] || 0
 }
@@ -280,8 +315,8 @@ function trendDot(key, row, max) {
 function trendLabelWidth(row, value, count) {
   const nameWidth = [...row.name].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 127 ? 9 : 5), 0)
   const valueWidth = String(Math.round(value)).length * 4.8 + 7
-  const countWidth = String(count).length * 4.8 + 23
-  return Math.max(64, Math.min(98, Math.round(nameWidth + valueWidth + countWidth + 14)))
+  const countWidth = String(count).length * 4.8 + 6
+  return Math.max(54, Math.min(74, Math.round(nameWidth + valueWidth + countWidth + 12)))
 }
 function trendEndLabels(key, max) {
   const labels = (data.value?.airport_list || [])
@@ -559,15 +594,15 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                               :fill="airportColor(row)" class="np-trend-area" />
                         <path :d="trendPath(chart.field, row, chart.max)"
                               :stroke="airportColor(row)" class="np-trend-line" />
-                        <circle v-for="(point, index) in historyPoints" :key="`${chart.key}-dot-${row.id}-${index}`"
-                                :cx="trendXY(chart.field, row, index, chart.max).x"
-                                :cy="trendXY(chart.field, row, index, chart.max).y"
-                                r="2.4" :fill="airportColor(row)" class="np-trend-dot" />
+                        <circle v-if="historyPoints.length"
+                                :cx="trendXY(chart.field, row, historyPoints.length - 1, chart.max).x"
+                                :cy="trendXY(chart.field, row, historyPoints.length - 1, chart.max).y"
+                                r="2.8" :fill="airportColor(row)" class="np-trend-dot" />
                       </g>
                     </template>
                     <g v-for="label in trendEndLabels(chart.field, chart.max)" :key="`${chart.key}-label-${label.id}`">
                       <rect :x="TREND.w - TREND.right + 4" :y="label.y - 6.25" :width="label.width" height="12.5" rx="3" :fill="label.color" />
-                      <text class="np-trend-label" :x="TREND.w - TREND.right + 8" :y="label.y + 3.4">{{ label.name }} {{ label.pct }}% <tspan class="np-trend-label-count">· {{ label.count }} 节点</tspan></text>
+                      <text class="np-trend-label" :x="TREND.w - TREND.right + 8" :y="label.y + 3.4">{{ label.name }} {{ label.pct }}% {{ label.count }}</text>
                     </g>
                     <text v-for="label in trendXLabels()" :key="`${chart.key}-x-${label.x}`"
                           class="np-trend-axis" :x="label.x" :y="TREND.h - 3" :text-anchor="label.anchor">{{ label.text }}</text>

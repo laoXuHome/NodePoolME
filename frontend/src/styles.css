@@ -882,7 +882,6 @@ a { color: var(--np-accent); }
 .np-trend-line { fill: none; stroke-width: 1.55; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .np-trend-dot { stroke: #fff; stroke-width: .8; vector-effect: non-scaling-stroke; }
 .np-trend-label { fill: #fff; font-size: 8px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.np-trend-label-count { fill: rgba(255, 255, 255, .84); font-size: 7.4px; font-weight: 500; }
 .np-score-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   margin: 12px 0 4px; padding-top: 10px; border-top: 1px solid var(--np-separator-soft);
