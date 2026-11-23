@@ -78,7 +78,41 @@ def test_share_history_uses_seven_day_window_and_sorted_time():
     assert stamps == sorted(stamps)
 
 
+def test_score_history_uses_only_complete_batches():
+    from datetime import datetime, timedelta
+
+    from backend.database import db
+    from backend.subscriptions import builder
+
+    db.execute("DELETE FROM share_history")
+    db.execute("DELETE FROM batches")
+    now = datetime.now().astimezone().replace(microsecond=0)
+    batches = []
+    for status, processed, target in (("complete", 10, 10), ("stopped", 6, 10), ("complete", 5, 10)):
+        batch_id = db.execute(
+            """INSERT INTO batches (started_at, finished_at, status, target_count,
+               processed_count, groups) VALUES (?, ?, ?, ?, ?, '[]')""",
+            (now.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S"),
+             status, target, processed),
+        )
+        batches.append(batch_id)
+    for index, batch_id in enumerate([*batches, None], start=1):
+        stamp = (now - timedelta(hours=4 - index)).strftime("%Y-%m-%d %H:%M:%S")
+        db.execute(
+            """INSERT INTO share_history
+               (ts, batch_id, reason, airport_id, pool_count, published_count,
+                available_count, total_nodes, total_published, total_available)
+               VALUES (?, ?, 'test', 7, 10, 2, 5, 10, 2, 5)""",
+            (stamp, batch_id),
+        )
+
+    complete = builder.share_history(7, complete_only=True)
+    assert [point["batch_id"] for point in complete] == [batches[0]]
+    assert len(builder.share_history(7)) == 4
+
+
 if __name__ == "__main__":
     test_dashboard_has_latency_probe()
     test_share_history_uses_seven_day_window_and_sorted_time()
+    test_score_history_uses_only_complete_batches()
     print("PASS dashboard contract")

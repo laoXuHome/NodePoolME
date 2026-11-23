@@ -171,13 +171,13 @@ function scoreHint(row) {
   const publish = row.publish_rate ?? Math.round((row.published_count || 0) / pool * 100)
   const share = row.share_rate ?? Math.round(pool / (data.value?.nodes_total || 1) * 100)
   const tag = row.tag_rate ?? Math.round((row.tag_ok_count || 0) / pool * 100)
-  const basis = row.score_samples ? `近 7 天 ${row.score_samples} 个快照` : '无历史快照，按当前值'
+  const basis = row.score_samples ? `近 7 天 ${row.score_samples} 个完整检测快照` : '无完整检测快照，按当前值'
   return `${basis} · 可用率 ${health}%（×${scoreWeights.value.available}%）· 下发率 ${publish}%（×${scoreWeights.value.publish}%）· 池占比 ${share}%（×${scoreWeights.value.share}%）· 标签合格率 ${tag}%（×${scoreWeights.value.tag}%）→ 综合 ${row.score} 分`
 }
 function scoreSampleText(row) {
   if (!row.enabled) return '未启用'
   if (!row.pool_count) return '空池'
-  return row.score_samples ? `${row.score_samples} 个快照` : '按当前值'
+  return row.score_samples ? `${row.score_samples} 个完整快照` : '按当前值'
 }
 function rateText(row, key) {
   if (!row.enabled || row[key] === null || row[key] === undefined) return '—'
@@ -288,10 +288,13 @@ function trendEndLabels(key, max) {
     .filter((row) => row.enabled && trendHasValue(key, row))
     .map((row) => {
       const dot = trendDot(key, row, max)
+      const current = historyPoints.value[historyPoints.value.length - 1]
+      const count = trendCount(current, row, key)
+      const value = trendShare(current, row, key)
       return { id: row.id, name: row.name, color: airportColor(row), y: dot.y,
-               count: row.pool_count || 0,
-               pct: Math.round(trendShare(historyPoints.value[historyPoints.value.length - 1], row, key)),
-               width: trendLabelWidth(row, trendShare(historyPoints.value[historyPoints.value.length - 1], row, key), row.pool_count || 0) }
+               count,
+               pct: Math.round(value),
+               width: trendLabelWidth(row, value, count) }
     })
     .sort((a, b) => a.y - b.y)
   let cursor = TREND.top + 6
@@ -642,8 +645,8 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           </table>
         </div>
         <div v-if="data.airport_list?.length" class="np-score-foot">
-          <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 池占比 {{ scoreWeights.share }}% + 标签合格率 {{ scoreWeights.tag }}%</span>
-          <span>前 3 项取近 {{ data.score_window_days || 7 }} 天快照均值；标签合格率 = 近 7 天任一启用标签通过 / 缓存节点</span>
+          <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 池占比 {{ scoreWeights.share }}% + 标签合格率 {{ scoreWeights.tag }}%；前 3 项取近 {{ data.score_window_days || 7 }} 天完整检测快照均值</span>
+          <span>标签合格率 = 近 7 天任一启用标签通过 / 缓存节点；暂停、中断和单节点测试不计入</span>
         </div>
         <div v-else class="np-empty">缓存池为空，先到「机场管理」添加并拉取订阅。</div>
 

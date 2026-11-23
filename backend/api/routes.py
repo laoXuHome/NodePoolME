@@ -138,8 +138,9 @@ async def dashboard():
     }
     builder.ensure_share_history(score_days)
     history = builder.share_history(score_days)
+    score_history = builder.share_history(score_days, complete_only=True)
     score_samples: dict[int, list[dict]] = {}
-    for point in history:
+    for point in score_history:
         point_total = point.get("total_nodes") or 0
         for airport_id, counts in (point.get("airports") or {}).items():
             pool = counts.get("pool_count") or 0

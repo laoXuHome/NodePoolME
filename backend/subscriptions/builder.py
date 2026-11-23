@@ -294,15 +294,26 @@ def ensure_share_history(days: int = 7) -> None:
         db.set_setting("share_history_seeded", "1")
 
 
-def share_history(days: int = 7) -> list[dict]:
-    """Return all per-publish snapshots in the rolling window, oldest first."""
+def share_history(days: int = 7, complete_only: bool = False) -> list[dict]:
+    """Return per-publish snapshots in the rolling window, oldest first.
+
+    complete_only keeps only snapshots produced by a fully completed detection batch;
+    stopped, interrupted and single-node/manual publishes are excluded from scoring.
+    """
     cutoff = (datetime.now().astimezone() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-    rows = db.rows(
-        """SELECT ts, batch_id, total_nodes, total_published, total_available,
-                  airport_id, pool_count, published_count, available_count
-           FROM share_history WHERE ts >= ? ORDER BY ts, id""",
-        (cutoff,),
-    )
+    if complete_only:
+        sql = """SELECT h.ts, h.batch_id, h.total_nodes, h.total_published, h.total_available,
+                        h.airport_id, h.pool_count, h.published_count, h.available_count
+                 FROM share_history h
+                 JOIN batches b ON b.id = h.batch_id
+                 WHERE h.ts >= ? AND b.status = 'complete'
+                   AND b.target_count > 0 AND b.processed_count >= b.target_count
+                 ORDER BY h.ts, h.id"""
+    else:
+        sql = """SELECT ts, batch_id, total_nodes, total_published, total_available,
+                        airport_id, pool_count, published_count, available_count
+                 FROM share_history WHERE ts >= ? ORDER BY ts, id"""
+    rows = db.rows(sql, (cutoff,))
     points: dict[str, dict] = {}
     for row in rows:
         point = points.setdefault(row["ts"], {
