@@ -874,30 +874,16 @@ a { color: var(--np-accent); }
 }
 .np-trend-range button:hover { color: var(--np-text); }
 .np-trend-range button.is-active { background: #fff; color: var(--np-text); font-weight: 650; box-shadow: 0 1px 3px rgba(20, 30, 50, .12); }
-.np-pool-chart { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; justify-content: center; padding: 6px 6px 4px; border: 1px solid var(--np-separator-soft); border-radius: 12px; background: #fbfbfd; }
-.np-pool-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
-.np-pool-chart-head b { font-size: 12.5px; font-weight: 650; color: var(--np-text); white-space: nowrap; }
-.np-pool-chart-head span { font-size: 9.5px; color: var(--np-tertiary); white-space: nowrap; }
-.np-pool-chart-head .np-pool-chart-total {
-  display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 8px 2px 9px;
-  border: 1px solid rgba(20, 30, 50, .06); border-radius: 7px;
-  background: #f1f4f9; color: #6b7280; font-size: 10.5px; font-weight: 600;
+.np-pool-chart {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  padding: 8px 10px 6px;
+  border: 1px solid var(--np-separator-soft);
+  border-radius: 12px;
+  background: #fbfbfd;
 }
-.np-pool-chart-total b { font-size: 16px; line-height: 1; font-weight: 750; color: var(--np-text); font-variant-numeric: tabular-nums; }
-.np-pool-chart-body { flex: 1; display: flex; min-width: 0; min-height: 0; }
-.np-trend { flex: 1; min-width: 0; display: flex; }
-.np-trend-svg { flex: 1; width: 100%; min-height: 0; overflow: hidden; }
-.np-trend-grid { stroke: #e7ebf1; stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
-.np-trend-axisline { stroke: #dfe4ec; stroke-width: 1; vector-effect: non-scaling-stroke; }
-.np-trend-tick { fill: #9da3ad; font-size: 8px; font-variant-numeric: tabular-nums; }
-.np-trend-axis { fill: #8d939d; font-size: 8px; font-variant-numeric: tabular-nums; }
-.np-trend-area { opacity: .022; pointer-events: none; }
-.np-trend-line { fill: none; stroke-width: 1.55; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.np-trend-dot { stroke: #fff; stroke-width: .8; vector-effect: non-scaling-stroke; }
-.np-trend-leader { stroke-width: .65; opacity: .72; vector-effect: non-scaling-stroke; }
-.np-trend-pill { display: inline-flex; align-items: center; height: 8.3px; padding: 0 2.5px; border-radius: 2.1px; color: #fff; font-size: 5.9px; font-weight: 600; gap: 1px; line-height: 1; letter-spacing: -.07px; white-space: nowrap; vertical-align: top; font-variant-numeric: tabular-nums; overflow: visible; }
-.np-trend-rank { flex: none; min-width: 6.8px; text-align: center; font-size: 5.9px; line-height: 1; }
-.np-trend-pct { font-size: 4.7px; letter-spacing: -.14px; }
 .np-score-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   margin: 8px 0 4px; padding-top: 0; border-top: 0;
@@ -1023,7 +1009,7 @@ tr.is-off .np-score-cell b { color: #b0b5bf; }
   .np-pool-stack-label b { font-size: 12px; }
   .np-pool-stack-label i { font-size: 7.5px; }
   .np-pool-charts { flex: none; }
-  .np-pool-chart { flex: none; min-height: 210px; }
+  .np-pool-chart { flex: none; min-height: 264px; }
   .np-trend-toolbar > span { font-size: 11px; }
   .np-score-head { margin-top: 10px; }
   .np-score-table { min-width: 0; }

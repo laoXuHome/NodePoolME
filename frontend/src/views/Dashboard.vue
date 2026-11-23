@@ -2,9 +2,10 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, formatTs, logLevelLabel, logSourceLabel } from '../api'
+import TrendChart from '../components/TrendChart.vue'
 
 const data = ref(null)
-const AIRPORT_COLORS = ['#2563eb', '#ea580c', '#16a34a', '#db2777', '#7c3aed', '#0891b2', '#ca8a04', '#be185d']
+const AIRPORT_COLORS = ['#2563eb', '#ea580c', '#16a34a', '#db2777', '#7c3aed', '#0891b2', '#ca8a04', '#be185d', '#0d9488', '#b45309', '#4f46e5', '#475569']
 const loading = ref(false)
 const running = ref(false)
 const logs = ref([])
@@ -218,191 +219,13 @@ const trendSampleText = computed(() => {
   return live ? `${measured} 次检测 + 当前` : `${measured} 次检测`
 })
 const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
-const TREND = { w: 560, h: 148, left: 26, right: 52, top: 12, bottom: 18 }
-function trendDomain(points = trendWindowPoints.value) {
-  const days = trendRange.value === '7d' ? 7 : 1
-  const end = Date.now()
-  let start = end - days * 86400000
-  if (days === 7) {
-    const first = points[0]
-    const firstTime = first ? trendPointTime(first) : 0
-    if (firstTime && firstTime > start) start = firstTime
-  }
-  return { start, end }
-}
 function trendChartPoints(points, key, rows) {
   if (trendRange.value !== '7d' || !points.length) return points
   const first = points.findIndex((point) => rows?.some((row) => row.enabled && trendCount(point, row, key) > 0))
   return first > 0 ? points.slice(first) : points
 }
-function trendPointX(point, domain) {
-  const plotW = TREND.w - TREND.left - TREND.right
-  if (point?.live) return TREND.left + plotW
-  const t = trendPointTime(point)
-  const ratio = Math.min(1, Math.max(0, (t - domain.start) / (domain.end - domain.start)))
-  return TREND.left + ratio * plotW
-}
 function trendCount(point, row, key) {
-  return point.airports?.[String(row.id)]?.[key] || 0
-}
-function trendShare(point, row, key) {
-  const total = key === 'available_count' ? point.total_available
-    : key === 'pool_count' ? point.total_nodes : point.total_published
-  return total ? trendCount(point, row, key) / total * 100 : 0
-}
-function trendScaleMax(value) {
-  const n = Math.max(1, Number(value) || 0)
-  const step = n <= 20 ? 5 : n <= 50 ? 10 : 20
-  return Math.ceil(n / step) * step
-}
-function trendMax(key, points = historyPoints.value, current = 0) {
-  const totalKey = key === 'available_count' ? 'total_available' : 'total_published'
-  let max = Number(current) || 0
-  for (const point of points) max = Math.max(max, Number(point?.[totalKey]) || 0)
-  return trendScaleMax(max)
-}
-const availableTrendMax = computed(() => trendMax('available_count', availableTrendPoints.value, data.value?.nodes_available || 0))
-const publishTrendMax = computed(() => trendMax('published_count', historyPoints.value, publishTotal.value))
-function trendXY(key, row, index, max, points = historyPoints.value) {
-  const plotH = TREND.h - TREND.top - TREND.bottom
-  const x = trendPointX(points[index], trendDomain(points))
-  const q = TREND.top + (1 - Math.min(max, trendCount(points[index], row, key)) / Math.max(1, max)) * plotH
-  return { x, y: q }
-}
-function trendPath(key, row, max, source = historyPoints.value) {
-  const points = source.map((_, index) => trendXY(key, row, index, max, source))
-  if (!points.length) return ''
-  if (points.length === 1) return `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`
-  // Monotone cubic Hermite: smooth through every snapshot without overshooting sharp peaks.
-  const spans = []
-  const slopes = []
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const h = points[i + 1].x - points[i].x || 1
-    spans.push(h)
-    slopes.push((points[i + 1].y - points[i].y) / h)
-  }
-  const tangents = points.map((_, i) => {
-    if (i === 0) return slopes[0]
-    if (i === points.length - 1) return slopes[slopes.length - 1]
-    const prev = slopes[i - 1]
-    const next = slopes[i]
-    if (prev * next <= 0) return 0
-    const hPrev = spans[i - 1]
-    const hNext = spans[i]
-    const w1 = 2 * hNext + hPrev
-    const w2 = hNext + 2 * hPrev
-    return (w1 + w2) / (w1 / prev + w2 / next)
-  })
-  let d = `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const h = spans[i]
-    const c1x = points[i].x + h / 3
-    const c1y = points[i].y + tangents[i] * h / 3
-    const c2x = points[i + 1].x - h / 3
-    const c2y = points[i + 1].y - tangents[i + 1] * h / 3
-    d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${points[i + 1].x.toFixed(1)} ${points[i + 1].y.toFixed(1)}`
-  }
-  return d
-}
-function trendArea(key, row, max, source = historyPoints.value) {
-  const points = source.map((_, index) => trendXY(key, row, index, max, source))
-  if (!points.length) return ''
-  const base = TREND.h - TREND.bottom
-  const first = points[0]
-  const last = points[points.length - 1]
-  const middle = points.map((p) => `L${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')
-  return `M${first.x.toFixed(1)} ${base.toFixed(1)} L${first.x.toFixed(1)} ${first.y.toFixed(1)} ${middle} L${last.x.toFixed(1)} ${base.toFixed(1)} Z`
-}
-function trendDot(key, row, max, source = historyPoints.value) {
-  const last = source.length - 1
-  if (last < 0) return { x: 0, y: 0, v: 0 }
-  const p = trendXY(key, row, last, max, source)
-  return { ...p, v: trendCount(source[last], row, key) }
-}
-function trendEndLabels(key, max, source = historyPoints.value) {
-  const labels = (data.value?.airport_list || [])
-    .filter((row) => row.enabled && trendHasValue(key, row, source))
-    .map((row) => {
-      const dot = trendDot(key, row, max, source)
-      const current = source[source.length - 1]
-      const count = trendCount(current, row, key)
-      const value = trendShare(current, row, key)
-      return { id: row.id, name: row.name, color: airportColor(row), y: dot.y,
-               dotY: dot.y, count, value,
-               pct: Math.round(value) }
-    })
-    .sort((a, b) => a.dotY - b.dotY)
-  const ranked = [...labels].sort((a, b) => b.value - a.value || b.count - a.count || a.id - b.id)
-  ranked.forEach((label, index) => { label.rank = index + 1 })
-  const gap = 9.5
-  const top = TREND.top + 4.6
-  const bottom = TREND.h - TREND.bottom - 4
-  const groups = []
-  for (const label of labels) {
-    const group = groups[groups.length - 1]
-    if (group && label.dotY - group[group.length - 1].dotY < gap) group.push(label)
-    else groups.push([label])
-  }
-  for (const group of groups) {
-    if (group.length < 2) continue
-    const span = (group.length - 1) * gap
-    const center = (group[0].dotY + group[group.length - 1].dotY) / 2
-    const start = Math.max(top, Math.min(bottom - span, center - span / 2))
-    group.forEach((label, index) => { label.y = start + index * gap })
-  }
-  // Final collision pass: even unrelated groups must never overlap vertically.
-  let cursor = top
-  for (const label of labels) {
-    label.y = Math.max(label.y, cursor)
-    cursor = label.y + gap
-  }
-  const overflow = labels.length && labels[labels.length - 1].y > bottom
-    ? labels[labels.length - 1].y - bottom : 0
-  if (overflow > 0) {
-    cursor = top
-    for (const label of labels) {
-      label.y = Math.max(top, label.y - overflow)
-      label.y = Math.max(label.y, cursor)
-      cursor = label.y + gap
-    }
-  }
-  for (const label of labels) label.shifted = Math.abs(label.y - label.dotY) > .8
-  return labels
-}
-function trendXLabels(points = historyPoints.value, key = 'published_count') {
-  const domain = trendDomain(points)
-  const count = 4
-  const plotW = TREND.w - TREND.left - TREND.right
-  return Array.from({ length: count }, (_, index) => {
-    const last = index === count - 1
-    const time = domain.start + (domain.end - domain.start) * index / (count - 1)
-    const d = new Date(time)
-    const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-    let text = `${d.getMonth() + 1}/${d.getDate()}`
-    if (!last && trendRange.value !== '7d') text = index === 0 ? `昨天 ${hm}` : hm
-    if (!last && trendRange.value === '7d' && (domain.end - domain.start) < 3 * 86400000) text = `${text} ${hm}`
-    return { x: TREND.left + plotW * index / (count - 1), text: last ? '当前' : text,
-             anchor: last ? 'end' : index === 0 ? 'start' : 'middle' }
-  })
-}
-function trendHasValue(key, row, source = historyPoints.value) {
-  return source.some((point) => trendCount(point, row, key) > 0)
-}
-function trendPointLabel(point) {
-  if (point.live) return '当前'
-  const d = new Date(String(point.ts).replace(' ', 'T'))
-  if (Number.isNaN(d.getTime())) return ''
-  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  if (trendRange.value === '7d') return `${d.getMonth() + 1}/${d.getDate()}`
-  return hm
-}
-function trendTicks(max) {
-  const plotH = TREND.h - TREND.top - TREND.bottom
-  const step = max <= 20 ? 5 : max <= 50 ? 10 : 20
-  const values = []
-  for (let v = 0; v <= max; v += step) values.push(v)
-  if (values[values.length - 1] !== max) values.push(max)
-  return values.map((v) => ({ v, y: TREND.top + (1 - v / Math.max(1, max)) * plotH }))
+  return Number(point?.airports?.[String(row.id)]?.[key]) || 0
 }
 const trendCharts = computed(() => [
   {
@@ -412,7 +235,6 @@ const trendCharts = computed(() => [
     totalCount: publishTotal.value,
     field: 'published_count',
     rows: publishChartRows.value,
-    max: publishTrendMax.value,
     points: trendChartPoints(historyPoints.value, 'published_count', publishChartRows.value),
   },
   {
@@ -422,7 +244,6 @@ const trendCharts = computed(() => [
     totalCount: data.value?.nodes_available || 0,
     field: 'available_count',
     rows: nodeChartRows.value,
-    max: availableTrendMax.value,
     points: trendChartPoints(availableTrendPoints.value, 'available_count', nodeChartRows.value),
   },
 ])
@@ -682,48 +503,19 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               </div>
             </div>
             <div v-for="chart in trendCharts" :key="chart.key" class="np-pool-chart">
-              <div class="np-pool-chart-head">
-                <b>{{ chart.title }}</b>
-                <span class="np-pool-chart-total">当前{{ chart.totalLabel }} <b>{{ chart.totalCount }}</b></span>
-              </div>
-              <div class="np-pool-chart-body">
-                <div class="np-trend">
-                  <svg :viewBox="`0 0 ${TREND.w} ${TREND.h}`" class="np-trend-svg">
-                    <line class="np-trend-axisline" :x1="TREND.left" :x2="TREND.left"
-                          :y1="TREND.top" :y2="TREND.h - TREND.bottom" />
-                    <line class="np-trend-axisline" :x1="TREND.left" :x2="TREND.w - TREND.right"
-                          :y1="TREND.h - TREND.bottom" :y2="TREND.h - TREND.bottom" />
-                    <line v-for="tick in trendTicks(chart.max)" :key="`${chart.key}-grid-${tick.v}`"
-                          class="np-trend-grid" :x1="TREND.left" :x2="TREND.w - TREND.right"
-                          :y1="tick.y" :y2="tick.y" />
-                    <text v-for="tick in trendTicks(chart.max)" :key="`${chart.key}-tick-${tick.v}`"
-                          class="np-trend-tick" x="2" :y="tick.y + 3" text-anchor="start">{{ tick.v }}</text>
-                    <template v-for="row in chart.rows" :key="`${chart.key}-line-${row.id}`">
-                      <g v-if="row.enabled && trendHasValue(chart.field, row, chart.points)">
-                        <path :d="trendArea(chart.field, row, chart.max, chart.points)"
-                              :fill="airportColor(row)" class="np-trend-area" />
-                        <path :d="trendPath(chart.field, row, chart.max, chart.points)"
-                              :stroke="airportColor(row)" class="np-trend-line" />
-                        <circle v-if="chart.points.length"
-                                :cx="trendXY(chart.field, row, chart.points.length - 1, chart.max, chart.points).x"
-                                :cy="trendXY(chart.field, row, chart.points.length - 1, chart.max, chart.points).y"
-                                r="2.8" :fill="airportColor(row)" class="np-trend-dot" />
-                      </g>
-                    </template>
-                    <g v-for="label in trendEndLabels(chart.field, chart.max, chart.points)" :key="`${chart.key}-label-${label.id}`">
-                      <line v-if="label.shifted" :x1="TREND.w - TREND.right" :y1="label.dotY" :x2="TREND.w - TREND.right + 6" :y2="label.y" :stroke="label.color" class="np-trend-leader" />
-                      <foreignObject :x="TREND.w - TREND.right + 2" :y="label.y - 4.5" :width="TREND.right - 2" height="9">
-                        <span xmlns="http://www.w3.org/1999/xhtml" class="np-trend-pill" :style="{ background: label.color }"><span class="np-trend-rank">{{ label.rank <= 3 ? ['🏆','🥈','🥉'][label.rank - 1] : String(label.rank).padStart(2, '0') }}</span><span>{{ label.name }}</span><span class="np-trend-pct">{{ label.pct }}%</span><span>ˑ{{ label.count }}</span></span>
-                      </foreignObject>
-                    </g>
-                    <text v-for="label in trendXLabels(chart.points, chart.field)" :key="`${chart.key}-x-${label.x}`"
-                          class="np-trend-axis" :x="label.x" :y="TREND.h - 3" :text-anchor="label.anchor">{{ label.text }}</text>
-                  </svg>
-                </div>
-              </div>
+              <TrendChart
+                :points="chart.points"
+                :rows="chart.rows"
+                :field="chart.field"
+                :range="trendRange"
+                :title="chart.title"
+                :total-label="chart.totalLabel"
+                :total-count="chart.totalCount"
+                :color="airportColor"
+              />
+            </div>
             </div>
           </div>
-        </div>
 
         <div v-if="!data.airport_list?.length" class="np-empty">缓存池为空，先到「机场管理」添加并拉取订阅。</div>
 
