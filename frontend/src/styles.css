@@ -137,13 +137,15 @@ a { color: var(--np-accent); }
 }
 .np-dash-layout {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(272px, 1fr) minmax(272px, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   height: clamp(770px, calc(100vh - 190px), 1000px);
   gap: 16px;
   align-items: stretch;
 }
-.np-dash-side { min-height: 0; display: contents; }
-.np-dash-pool { min-width: 0; min-height: 0; }
+.np-dash-side > * { min-width: 0; }
+.np-dash-side { grid-column: 2; grid-row: 1 / span 2; display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; min-height: 0; }
+.np-dash-pool { grid-column: 1; grid-row: 1 / span 2; min-width: 0; min-height: 0; }
 .np-dash-detect { min-width: 0; min-height: 0; overflow: auto; }
 .np-dash-pull { grid-area: pull; }
 .np-dash-batch { grid-area: batch; padding: 18px 20px; }
@@ -216,7 +218,8 @@ a { color: var(--np-accent); }
   font-size: 12px;
   max-height: 460px;
   overflow: auto;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   line-height: 1.65;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
 }
@@ -226,6 +229,8 @@ a { color: var(--np-accent); }
   line-height: 1.85;
   max-height: 360px;
   overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .np-log .lv-WARN { color: var(--np-warning); }
 .np-log .lv-ERROR { color: var(--np-danger); }
@@ -683,15 +688,18 @@ a { color: var(--np-accent); }
 
 @media (max-width: 1499px) {
   .np-dash-layout { grid-template-columns: minmax(0, 1.34fr) minmax(440px, 1fr); }
-  .np-dash-side { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  .np-dash-side > * { min-width: 0; }
+.np-dash-side { grid-column: 2; grid-row: 1 / span 2; display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 }
 
 @media (max-width: 1200px) {
   .np-dash-layout {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
     height: auto;
   }
-  .np-dash-side { display: block; }
+  .np-dash-pool { grid-column: 1; grid-row: auto; }
+  .np-dash-side { grid-column: 1; grid-row: auto; display: block; }
   .np-dash-detect { overflow: visible; }
   .np-log-card { margin-top: 16px; }
   .np-detect-inline { display: none; }

@@ -5,7 +5,7 @@ import { api, formatTs, logLevelLabel, logSourceLabel } from '../api'
 import TrendChart from '../components/TrendChart.vue'
 
 const data = ref(null)
-const AIRPORT_COLORS = ['#e03131', '#f76707', '#d9a300', '#2f9e44', '#0e9596', '#2563eb', '#7c3aed', '#c2255c', '#4f46e5', '#7cb305', '#8a5a00', '#475569']
+const AIRPORT_COLORS = ['#2563eb', '#e8590c', '#15803d', '#8b5cf6', '#0e9596', '#e11d48', '#ca8a04', '#475569', '#4f46e5', '#65a30d', '#b45309', '#0891b2']
 const loading = ref(false)
 const running = ref(false)
 const logs = ref([])

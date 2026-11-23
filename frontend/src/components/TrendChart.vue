@@ -264,7 +264,7 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
   <div class="np-tc">
     <div class="np-tc-head">
       <b class="np-tc-title">{{ title }}</b>
-      <i v-if="liveDiff" class="np-tc-live">实时 {{ totalCount }}</i>
+      <i v-if="lastTotal !== null" class="np-tc-live">实时 {{ lastTotal }}</i>
     </div>
     <div class="np-tc-body">
       <div ref="box" class="np-tc-plot">
