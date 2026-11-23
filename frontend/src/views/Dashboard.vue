@@ -553,6 +553,26 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           </el-tag>
         </div>
 
+        <div class="np-pool-overview">
+          <div class="np-pool-status">
+            <div class="np-pool-status-title">缓存池状态</div>
+            <div class="np-pool-status-total"><strong>{{ data.nodes_total }}</strong><span>节点</span></div>
+            <div class="np-pool-stack-wrap" :style="{ '--stack-top': statusTopColor }">
+              <div class="np-pool-stack"
+                   :title="`下发 ${statusCounts.qualified} · 未达标 ${statusCounts.qualified ? statusCounts.available - statusCounts.qualified : statusCounts.available} · 不可用 ${statusCounts.unavailable}`">
+                <div v-for="segment in statusSegments" :key="segment.key"
+                     class="np-pool-stack-seg" :class="{ 'is-thin': segment.height < 9 }"
+                     :style="{ height: `${segment.height}%`, background: `linear-gradient(90deg, ${segment.side}, ${segment.color} 38%, ${segment.light} 70%, ${segment.color})` }">
+                  <div class="np-pool-stack-label" :style="{ color: segment.ink, textShadow: segment.ink === '#ffffff' ? '0 1px 2px rgba(0,0,0,.3)' : 'none' }"
+                       :title="`${segment.label} ${segment.count} 个 · ${segment.percent}%`">
+                    <em>{{ segment.short }}</em><b>{{ segment.count }}</b><i>{{ segment.percent }}%</i>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="np-pool-side">
         <div class="np-score-head">
           <div>
             <b>机场评价</b>
@@ -623,26 +643,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 池占比 {{ scoreWeights.share }}% + 标签合格率 {{ scoreWeights.tag }}%；前 3 项取近 {{ data.score_window_days || 7 }} 天完整检测快照均值</span>
           <span>标签合格率 = 近 7 天任一启用标签通过 / 缓存节点；暂停、中断和单节点测试不计入</span>
         </div>
-        <div class="np-pool-overview">
-          <div class="np-pool-status">
-            <div class="np-pool-status-title">缓存池状态</div>
-            <div class="np-pool-status-total"><strong>{{ data.nodes_total }}</strong><span>节点</span></div>
-            <div class="np-pool-stack-wrap" :style="{ '--stack-top': statusTopColor }">
-              <div class="np-pool-stack"
-                   :title="`下发 ${statusCounts.qualified} · 未达标 ${statusCounts.qualified ? statusCounts.available - statusCounts.qualified : statusCounts.available} · 不可用 ${statusCounts.unavailable}`">
-                <div v-for="segment in statusSegments" :key="segment.key"
-                     class="np-pool-stack-seg" :class="{ 'is-thin': segment.height < 9 }"
-                     :style="{ height: `${segment.height}%`, background: `linear-gradient(90deg, ${segment.side}, ${segment.color} 38%, ${segment.light} 70%, ${segment.color})` }">
-                  <div class="np-pool-stack-label" :style="{ color: segment.ink, textShadow: segment.ink === '#ffffff' ? '0 1px 2px rgba(0,0,0,.3)' : 'none' }"
-                       :title="`${segment.label} ${segment.count} 个 · ${segment.percent}%`">
-                    <em>{{ segment.short }}</em><b>{{ segment.count }}</b><i>{{ segment.percent }}%</i>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="data.airport_list?.length" class="np-pool-charts">
+            <div v-if="data.airport_list?.length" class="np-pool-charts">
             <div class="np-trend-toolbar">
               <span>占比趋势 <em>{{ trendRangeText }} · {{ trendSampleText }}</em></span>
               <div class="np-trend-range" role="group" aria-label="趋势区间">
@@ -687,6 +688,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 </div>
               </div>
             </div>
+          </div>
           </div>
         </div>
 

@@ -850,7 +850,9 @@ a { color: var(--np-accent); }
 .np-pool-stack-seg.is-thin .np-pool-stack-label em { display: none; }
 .np-pool-stack-seg.is-thin .np-pool-stack-label b { font-size: 10px; }
 .np-pool-stack-seg.is-thin .np-pool-stack-label i { font-size: 8px; }
-.np-pool-charts { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.np-pool-side { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.np-pool-side .np-score-head { margin-top: 0; }
+.np-pool-charts { flex: 1; min-height: 430px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .np-trend-toolbar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 2px 1px; }
 .np-trend-toolbar > span { display: flex; align-items: baseline; gap: 6px; font-size: 12px; font-weight: 650; color: var(--np-text); white-space: nowrap; }
 .np-trend-toolbar em { font-style: normal; font-size: 9px; font-weight: 500; color: var(--np-tertiary); }
