@@ -218,7 +218,7 @@ const trendSampleText = computed(() => {
   return live ? `${measured} 次检测 + 当前` : `${measured} 次检测`
 })
 const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
-const TREND = { w: 336, h: 148, left: 30, right: 52, top: 12, bottom: 18 }
+const TREND = { w: 520, h: 148, left: 30, right: 52, top: 12, bottom: 18 }
 function trendCount(point, row, key) {
   return point.airports?.[String(row.id)]?.[key] || 0
 }
