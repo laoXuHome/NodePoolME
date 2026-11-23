@@ -305,7 +305,7 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
         </div>
         <div v-if="!plotted.length" class="np-tc-empty">暂无历史快照</div>
       </div>
-      <div v-if="!narrow" class="np-tc-legend">
+      <div class="np-tc-legend">
         <div v-for="l in labels" :key="l.id" class="np-tc-lab" 
              :title="`${l.name} · ${l.pct}% · ${l.value} 节点`"
              :style="{ top: `${l.y - 6.5}px`, background: l.color }">
@@ -313,11 +313,6 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
           <b>{{ l.pct }}%</b>
           <small>{{ l.value }}</small>
         </div>
-      </div>
-      <div v-else class="np-tc-chips">
-        <span v-for="l in labels" :key="l.id" :style="{ background: l.color }">
-          {{ l.name }} <b>{{ l.pct }}%</b> <small>{{ l.value }}</small>
-        </span>
       </div>
     </div>
   </div>
@@ -381,8 +376,8 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 .np-tc-tip-total { margin-top: 4px; padding-top: 3px; border-top: 1px solid #eceff4; font-size: 10px; color: #8d939d; }
 .np-tc-tip-total b { color: #2f3540; font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) {
-  .np-tc-body { flex-direction: column; }
-  .np-tc-chips { max-height: 64px; gap: 2px 10px; }
-  .np-tc-chips span { font-size: 9.5px; }
+  .np-tc-legend { width: 56px; }
+  .np-tc-lab { font-size: 8.5px; gap: 2px; padding: 0 3px; }
+  .np-tc-lab em { max-width: 24px; }
 }
 </style>
