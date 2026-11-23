@@ -218,7 +218,7 @@ const trendSampleText = computed(() => {
   return live ? `${measured} 次检测 + 当前` : `${measured} 次检测`
 })
 const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
-const TREND = { w: 520, h: 148, left: 38, right: 52, top: 12, bottom: 18 }
+const TREND = { w: 560, h: 148, left: 26, right: 52, top: 12, bottom: 18 }
 function trendDomain() {
   const days = trendRange.value === '7d' ? 7 : 1
   const end = Date.now()
@@ -681,7 +681,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                           class="np-trend-grid" :x1="TREND.left" :x2="TREND.w - TREND.right"
                           :y1="tick.y" :y2="tick.y" />
                     <text v-for="tick in trendTicks(chart.max)" :key="`${chart.key}-tick-${tick.v}`"
-                          class="np-trend-tick" :x="TREND.left - 5" :y="tick.y + 3" text-anchor="end">{{ tick.v }}</text>
+                          class="np-trend-tick" x="2" :y="tick.y + 3" text-anchor="start">{{ tick.v }}</text>
                     <template v-for="row in chart.rows" :key="`${chart.key}-line-${row.id}`">
                       <g v-if="row.enabled && trendHasValue(chart.field, row, chart.points)">
                         <path :d="trendArea(chart.field, row, chart.max, chart.points)"
