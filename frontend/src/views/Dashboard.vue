@@ -254,7 +254,7 @@ const historyPoints = computed(() => {
   return compactHistory(rows, trendRange.value === '7d' ? 20 : 16)
 })
 const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
-const TREND = { w: 336, h: 148, left: 30, right: 64, top: 12, bottom: 18 }
+const TREND = { w: 336, h: 148, left: 30, right: 58, top: 12, bottom: 18 }
 function trendCount(point, row, key) {
   return point.airports?.[String(row.id)]?.[key] || 0
 }
@@ -313,10 +313,10 @@ function trendDot(key, row, max) {
   return { ...p, v: trendCount(historyPoints.value[last], row, key) }
 }
 function trendLabelWidth(row, value, count) {
-  const nameWidth = [...row.name].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 127 ? 7.4 : 4.2), 0)
-  const valueWidth = String(Math.round(value)).length * 3.9 + 4
-  const countWidth = String(count).length * 3.9 + 4
-  return Math.max(42, Math.min(52, Math.round(nameWidth + valueWidth + countWidth + 8)))
+  const nameWidth = [...row.name].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 127 ? 6.8 : 3.8), 0)
+  const valueWidth = String(Math.round(value)).length * 3.6 + 4
+  const countWidth = String(count).length * 3.6 + 4
+  return Math.max(40, Math.min(46, Math.round(nameWidth + valueWidth + countWidth + 7)))
 }
 function trendEndLabels(key, max) {
   const labels = (data.value?.airport_list || [])
@@ -327,19 +327,28 @@ function trendEndLabels(key, max) {
       const count = trendCount(current, row, key)
       const value = trendShare(current, row, key)
       return { id: row.id, name: row.name, color: airportColor(row), y: dot.y,
-               count,
+               dotY: dot.y, count,
                pct: Math.round(value),
                width: trendLabelWidth(row, value, count) }
     })
-    .sort((a, b) => a.y - b.y)
-  let cursor = TREND.top + 6
+    .sort((a, b) => a.dotY - b.dotY)
+  const gap = 10.4
+  const top = TREND.top + 5
+  const bottom = TREND.h - TREND.bottom - 4.5
+  const groups = []
   for (const label of labels) {
-    label.y = Math.max(label.y, cursor)
-    cursor = label.y + 12.6
+    const group = groups[groups.length - 1]
+    if (group && label.dotY - group[group.length - 1].dotY < gap) group.push(label)
+    else groups.push([label])
   }
-  const bottom = TREND.h - TREND.bottom - 2
-  const overflow = labels.length ? labels[labels.length - 1].y - bottom : 0
-  if (overflow > 0) labels.forEach((label) => { label.y -= overflow })
+  for (const group of groups) {
+    if (group.length < 2) continue
+    const span = (group.length - 1) * gap
+    const center = (group[0].dotY + group[group.length - 1].dotY) / 2
+    const start = Math.max(top, Math.min(bottom - span, center - span / 2))
+    group.forEach((label, index) => { label.y = start + index * gap })
+  }
+  for (const label of labels) label.shifted = Math.abs(label.y - label.dotY) > .8
   return labels
 }
 function trendXLabels() {
@@ -601,8 +610,9 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                       </g>
                     </template>
                     <g v-for="label in trendEndLabels(chart.field, chart.max)" :key="`${chart.key}-label-${label.id}`">
-                      <rect :x="TREND.w - TREND.right + 3" :y="label.y - 5.3" :width="label.width" height="10.6" rx="2.6" :fill="label.color" />
-                      <text class="np-trend-label" :x="TREND.w - TREND.right + 6" :y="label.y + 2.5">{{ label.name }} {{ label.pct }}% {{ label.count }}</text>
+                      <line v-if="label.shifted" :x1="TREND.w - TREND.right" :y1="label.dotY" :x2="TREND.w - TREND.right + 6" :y2="label.y" :stroke="label.color" class="np-trend-leader" />
+                      <rect :x="TREND.w - TREND.right + 6" :y="label.y - 4.7" :width="label.width" height="9.4" rx="2.4" :fill="label.color" />
+                      <text class="np-trend-label" :x="TREND.w - TREND.right + 9" :y="label.y + 2.2">{{ label.name }} {{ label.pct }}% {{ label.count }}</text>
                     </g>
                     <text v-for="label in trendXLabels()" :key="`${chart.key}-x-${label.x}`"
                           class="np-trend-axis" :x="label.x" :y="TREND.h - 3" :text-anchor="label.anchor">{{ label.text }}</text>
