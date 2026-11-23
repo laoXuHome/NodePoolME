@@ -700,6 +700,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
 
       </div>
 
+      <div class="np-dash-side">
       <!-- 检测任务 + 最近批次：合并成一块实时状态 -->
       <div class="np-card np-dash-detect">
         <div class="np-detect-head">
@@ -827,33 +828,34 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="np-card np-log-card">
-      <div class="np-section-title">
-        系统日志
-        <el-tag type="info" size="small" effect="plain">唯一入口</el-tag>
-        <div class="np-flex" />
-        <div class="np-log-tools">
-          <el-select v-model="logLevel" size="small" style="width:118px" @change="loadLogs">
-            <el-option label="全部级别" value="ALL" />
-            <el-option label="信息" value="INFO" />
-            <el-option label="警告" value="WARN" />
-            <el-option label="错误" value="ERROR" />
-            <el-option label="调试" value="DEBUG" />
-          </el-select>
-          <span class="np-muted">已载入 {{ logs.length }} 条（最多 300）· 自动刷新</span>
-          <el-button size="small" :loading="logsLoading" @click="loadLogs">刷新</el-button>
+      <div class="np-card np-log-card">
+        <div class="np-section-title">
+          系统日志
+          <el-tag type="info" size="small" effect="plain">唯一入口</el-tag>
+          <div class="np-flex" />
+          <div class="np-log-tools">
+            <el-select v-model="logLevel" size="small" style="width:118px" @change="loadLogs">
+              <el-option label="全部级别" value="ALL" />
+              <el-option label="信息" value="INFO" />
+              <el-option label="警告" value="WARN" />
+              <el-option label="错误" value="ERROR" />
+              <el-option label="调试" value="DEBUG" />
+            </el-select>
+            <span class="np-muted">已载入 {{ logs.length }} 条（最多 300）· 自动刷新</span>
+            <el-button size="small" :loading="logsLoading" @click="loadLogs">刷新</el-button>
+          </div>
+        </div>
+        <div class="np-log np-log-full" v-loading="logsLoading">
+          <div v-for="log in logs" :key="log.id">
+            <span class="np-muted">{{ formatTs(log.ts) }}</span>
+            <span :class="`lv-${log.level}`"> [{{ logLevelLabel(log.level) }}]</span>
+            <span class="np-muted">{{ logSourceLabel(log.source) }}</span>
+            {{ log.message }}
+          </div>
+          <div v-if="!logs.length" class="np-empty">暂无日志</div>
         </div>
       </div>
-      <div class="np-log np-log-full" v-loading="logsLoading">
-        <div v-for="log in logs" :key="log.id">
-          <span class="np-muted">{{ formatTs(log.ts) }}</span>
-          <span :class="`lv-${log.level}`"> [{{ logLevelLabel(log.level) }}]</span>
-          <span class="np-muted">{{ logSourceLabel(log.source) }}</span>
-          {{ log.message }}
-        </div>
-        <div v-if="!logs.length" class="np-empty">暂无日志</div>
       </div>
     </div>
   </div>
