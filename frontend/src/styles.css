@@ -804,12 +804,13 @@ a { color: var(--np-accent); }
 /* ---------------------------------------------------------------- node pool distribution */
 .np-dash-pool { display: flex; flex-direction: column; padding: 20px 22px; height: 100%; }
 .np-pool-overview {
-  flex: 1; min-height: 438px;
+  flex: 1; min-height: 438px; container-type: inline-size;
   display: grid; grid-template-columns: 120px minmax(0, 1fr);
-  gap: 12px; margin-top: 6px; align-items: stretch;
+  grid-template-rows: auto minmax(430px, 1fr);
+  gap: 8px 12px; margin-top: 6px; align-items: stretch;
 }
 .np-pool-status {
-  min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center;
+  grid-column: 1; grid-row: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center;
   gap: 5px; padding: 10px 8px 12px;
   border: 1px solid var(--np-separator-soft); border-radius: 14px;
   background: linear-gradient(180deg, #fbfcfe, #f6f7fa);
@@ -847,12 +848,12 @@ a { color: var(--np-accent); }
 .np-pool-stack-label b { font-size: 14px; line-height: 1; font-weight: 700; letter-spacing: -.02em; }
 .np-pool-stack-label i { font-style: normal; font-size: 8.5px; line-height: 1; opacity: .92; }
 .np-pool-stack-seg.is-thin .np-pool-stack-label { flex-direction: row; align-items: baseline; gap: 3px; }
-.np-pool-stack-seg.is-thin .np-pool-stack-label em { display: none; }
-.np-pool-stack-seg.is-thin .np-pool-stack-label b { font-size: 10px; }
-.np-pool-stack-seg.is-thin .np-pool-stack-label i { font-size: 8px; }
-.np-pool-side { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.np-pool-side .np-score-head { margin-top: 0; }
-.np-pool-charts { flex: 1; min-height: 430px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.np-pool-stack-seg.is-thin .np-pool-stack-label em { display: block; font-size: 7px; letter-spacing: 0; }
+.np-pool-stack-seg.is-thin .np-pool-stack-label b { font-size: 9.5px; }
+.np-pool-stack-seg.is-thin .np-pool-stack-label i { font-size: 7px; }
+.np-pool-score-panel { grid-column: 2; grid-row: 1; min-width: 0; display: flex; flex-direction: column; }
+.np-pool-score-panel .np-score-head { margin-top: 0; }
+.np-pool-charts { grid-column: 1 / -1; grid-row: 2; min-height: 430px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .np-trend-toolbar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 2px 1px; }
 .np-trend-toolbar > span { display: flex; align-items: baseline; gap: 6px; font-size: 12px; font-weight: 650; color: var(--np-text); white-space: nowrap; }
 .np-trend-toolbar em { font-style: normal; font-size: 9px; font-weight: 500; color: var(--np-tertiary); }
@@ -983,9 +984,29 @@ tr.is-off .np-score-cell b { color: #b0b5bf; }
 .np-pool-score.is-off b, .np-pool-score.is-empty b { color: #c7c7cc; }
 .np-pool-score.is-off em, .np-pool-score.is-empty em { background: #f2f2f7; color: #8e8e93; }
 
+@container (max-width: 640px) {
+  .np-score-table { min-width: 0; }
+  .np-score-col-rank { width: 18px; }
+  .np-score-col-rate { width: 54px; }
+  .np-score-col-score { width: 62px; }
+  .np-score-table th { padding: 4px 2px 6px; font-size: 8px; }
+  .np-score-table th i { font-size: 7px; }
+  .np-score-table td { padding: 6px 2px; }
+  .np-score-airport { padding-left: 4px !important; }
+  .np-score-airport-name b { font-size: 11px; }
+  .np-score-airport-name .np-pool-off { display: none; }
+  .np-score-airport small { font-size: 7.5px; }
+  .np-score-rank { font-size: 8px; }
+  .np-score-cell b { font-size: 10.5px; }
+  .np-score-cell small { font-size: 7px; }
+  .np-score-cell.is-score strong { font-size: 14px; }
+}
+
 @media (max-width: 760px) {
-  .np-pool-overview { flex: none; min-height: 0; grid-template-columns: 1fr; }
-  .np-pool-status { min-height: 430px; }
+  .np-pool-overview { flex: none; min-height: 0; grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
+  .np-pool-status { grid-column: 1; grid-row: 1; min-height: 430px; }
+  .np-pool-score-panel { grid-column: 1; grid-row: 2; }
+  .np-pool-charts { grid-column: 1; grid-row: 3; }
   .np-pool-stack { width: 92px; min-height: 300px; }
   .np-pool-stack-label { gap: 1px; }
   .np-pool-stack-label em { font-size: 8px; }
