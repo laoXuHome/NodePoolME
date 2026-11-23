@@ -974,7 +974,8 @@ tr.is-off .np-score-cell b { color: #b0b5bf; }
 .np-pool-score.is-good strong { color: #1f8f45; }
 .np-pool-score.is-ok strong { color: #2563c9; }
 .np-pool-score.is-mid strong { color: #b7791f; }
-.np-pool-score.is-low strong { color: #c94b46; }
+.np-pool-score.is-low strong { color: #c26a0d; }
+.np-pool-score.is-bad strong { color: #c02c2c; }
 .np-pool-score.is-off strong, .np-pool-score.is-empty strong { color: #c7c7cc; }
 .np-score-foot {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap;
@@ -1013,8 +1014,10 @@ tr.is-off .np-score-cell b { color: #b0b5bf; }
 .np-pool-score.is-ok em { background: #edf4ff; color: #2563c9; }
 .np-pool-score.is-mid b { color: #b7791f; }
 .np-pool-score.is-mid em { background: #fff7e6; color: #b7791f; }
-.np-pool-score.is-low b { color: #c94b46; }
-.np-pool-score.is-low em { background: #fff0ef; color: #c94b46; }
+.np-pool-score.is-low b { color: #c26a0d; }
+.np-pool-score.is-low em { background: #fff5e6; color: #c26a0d; }
+.np-pool-score.is-bad b { color: #c02c2c; }
+.np-pool-score.is-bad em { background: #fdecec; color: #c02c2c; }
 .np-pool-score.is-off b, .np-pool-score.is-empty b { color: #c7c7cc; }
 .np-pool-score.is-off em, .np-pool-score.is-empty em { background: #f2f2f7; color: #8e8e93; }
 
@@ -1264,8 +1267,8 @@ tr.is-off .np-score-cell b { color: #b0b5bf; }
 }
 /* 超窄屏（<=400）评分表压缩到一屏，避免横向滚动 */
 @media (max-width: 400px) {
-  .np-score-col-rate { width: 38px; }
-  .np-score-col-score { width: 40px; }
+  .np-score-col-rate { width: 33px; }
+  .np-score-col-score { width: 54px; }
   .np-score-table th { padding: 3px 1px 4px; font-size: 7px; line-height: 1.15; }
   .np-score-table th i { display: block; font-size: 6px; margin-top: 1px; }
   .np-score-table td { padding: 5px 1px; }
@@ -1275,8 +1278,10 @@ tr.is-off .np-score-cell b { color: #b0b5bf; }
   .np-airport-dot { width: 5px; height: 5px; }
   .np-score-cell b { font-size: 9.5px; }
   .np-score-cell small { display: none; }
-  .np-score-cell.is-score .np-pool-score strong { font-size: 12px; }
-  .np-score-cell.is-score .np-pool-score em { display: none; }
+  .np-score-cell.is-score { padding-right: 3px; }
+  .np-score-cell.is-score .np-pool-score em { font-size: 6.5px; padding: 0 1.5px; }
+  .np-score-cell.is-score .np-pool-score { gap: 2px; }
+  .np-score-cell.is-score .np-pool-score strong { font-size: 11px; }
   .np-score-head b { font-size: 11px; }
   .np-score-head span { font-size: 8px; padding: 0 4px; }
   .np-score-foot { font-size: 7.5px; }

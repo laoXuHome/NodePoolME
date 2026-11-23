@@ -289,8 +289,8 @@ async def dashboard():
                 + SCORE_WEIGHTS["tag"] / 100 * tag_rate
             ))
             payload["score"] = max(0, min(100, score))
-            payload["score_grade"] = ("优" if score >= 80 else "良" if score >= 65
-                                      else "中" if score >= 50 else "低")
+            payload["score_grade"] = ("优" if score >= 80 else "良" if score >= 60
+                                      else "中" if score >= 40 else "差" if score >= 20 else "危")
         else:
             payload["available_rate"] = None
             payload["publish_rate"] = None

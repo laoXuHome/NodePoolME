@@ -1,13 +1,11 @@
 """Pull / test orchestration: discrete batches, dispersion, concurrency limits, publishing."""
 import asyncio
 import ipaddress
-import json
 import random
 from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from backend import config
 from backend.database import db
 from backend.services import fetcher
 from backend.subscriptions import builder

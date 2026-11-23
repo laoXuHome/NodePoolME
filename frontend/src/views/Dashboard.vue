@@ -159,9 +159,10 @@ function scoreTone(row) {
   if (!row.enabled) return 'is-off'
   if (row.score === null || row.score === undefined) return 'is-empty'
   if (row.score >= 80) return 'is-good'
-  if (row.score >= 65) return 'is-ok'
-  if (row.score >= 50) return 'is-mid'
-  return 'is-low'
+  if (row.score >= 60) return 'is-ok'
+  if (row.score >= 40) return 'is-mid'
+  if (row.score >= 20) return 'is-low'
+  return 'is-bad'
 }
 function scoreHint(row) {
   const pool = row.pool_count || 0
