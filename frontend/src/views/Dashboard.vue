@@ -218,7 +218,19 @@ const trendSampleText = computed(() => {
   return live ? `${measured} 次检测 + 当前` : `${measured} 次检测`
 })
 const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
-const TREND = { w: 520, h: 148, left: 30, right: 52, top: 12, bottom: 18 }
+const TREND = { w: 520, h: 148, left: 38, right: 52, top: 12, bottom: 18 }
+function trendDomain() {
+  const days = trendRange.value === '7d' ? 7 : 1
+  const end = Date.now()
+  return { start: end - days * 86400000, end }
+}
+function trendPointX(point, domain) {
+  const plotW = TREND.w - TREND.left - TREND.right
+  if (point?.live) return TREND.left + plotW
+  const t = trendPointTime(point)
+  const ratio = Math.min(1, Math.max(0, (t - domain.start) / (domain.end - domain.start)))
+  return TREND.left + ratio * plotW
+}
 function trendCount(point, row, key) {
   return point.airports?.[String(row.id)]?.[key] || 0
 }
@@ -241,11 +253,9 @@ function trendMax(key, points = historyPoints.value) {
 const availableTrendMax = computed(() => trendMax('available_count', availableTrendPoints.value))
 const publishTrendMax = computed(() => trendMax('published_count'))
 function trendXY(key, row, index, max, points = historyPoints.value) {
-  const n = points.length
-  const plotW = TREND.w - TREND.left - TREND.right
   const plotH = TREND.h - TREND.top - TREND.bottom
-  const x = n <= 1 ? TREND.left + plotW / 2 : TREND.left + index / (n - 1) * plotW
-  const q = TREND.top + (1 - Math.min(100, trendShare(points[index], row, key)) / max) * plotH
+  const x = trendPointX(points[index], trendDomain())
+  const q = TREND.top + (1 - Math.min(max, trendCount(points[index], row, key)) / Math.max(1, max)) * plotH
   return { x, y: q }
 }
 function trendPath(key, row, max, source = historyPoints.value) {
@@ -348,16 +358,19 @@ function trendEndLabels(key, max, source = historyPoints.value) {
   for (const label of labels) label.shifted = Math.abs(label.y - label.dotY) > .8
   return labels
 }
-function trendXLabels(source = historyPoints.value) {
-  const n = source.length
-  if (!n) return []
-  if (n === 1) return [{ x: TREND.left + (TREND.w - TREND.left - TREND.right) / 2, text: '当前', anchor: 'middle' }]
-  const count = n >= 4 ? 4 : n
-  const indexes = [...new Set(Array.from({ length: count }, (_, i) => Math.round(i * (n - 1) / (count - 1))) )]
-  return indexes.map((index) => {
-    const x = TREND.left + index / (n - 1) * (TREND.w - TREND.left - TREND.right)
-    const last = index === n - 1
-    return { x, text: last ? '当前' : trendPointLabel(source[index]), anchor: last ? 'end' : index === 0 ? 'start' : 'middle' }
+function trendXLabels() {
+  const domain = trendDomain()
+  const count = 4
+  const plotW = TREND.w - TREND.left - TREND.right
+  return Array.from({ length: count }, (_, index) => {
+    const last = index === count - 1
+    const time = domain.start + (domain.end - domain.start) * index / (count - 1)
+    const d = new Date(time)
+    const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    let text = `${d.getMonth() + 1}/${d.getDate()}`
+    if (!last && trendRange.value !== '7d') text = index === 0 ? `昨天 ${hm}` : hm
+    return { x: TREND.left + plotW * index / (count - 1), text: last ? '当前' : text,
+             anchor: last ? 'end' : index === 0 ? 'start' : 'middle' }
   })
 }
 function trendHasValue(key, row, source = historyPoints.value) {
@@ -377,27 +390,27 @@ function trendTicks(max) {
   const values = []
   for (let v = 0; v <= max; v += step) values.push(v)
   if (values[values.length - 1] !== max) values.push(max)
-  return values.map((v) => ({ v, y: TREND.top + (1 - v / max) * plotH }))
+  return values.map((v) => ({ v, y: TREND.top + (1 - v / Math.max(1, max)) * plotH }))
 }
 const trendCharts = computed(() => [
   {
     key: 'publish',
-    title: '下发占比趋势',
+    title: '下发节点趋势',
     totalLabel: '已下发',
     totalCount: publishTotal.value,
     field: 'published_count',
     rows: publishChartRows.value,
-    max: publishTrendMax.value,
+    max: Math.max(1, publishTotal.value),
     points: historyPoints.value,
   },
   {
     key: 'available',
-    title: '可用占比趋势',
+    title: '可用节点趋势',
     totalLabel: '可用',
     totalCount: data.value?.nodes_available || 0,
     field: 'available_count',
     rows: nodeChartRows.value,
-    max: availableTrendMax.value,
+    max: Math.max(1, data.value?.nodes_available || 0),
     points: availableTrendPoints.value,
   },
 ])
@@ -650,7 +663,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
 
         <div v-if="data.airport_list?.length" class="np-pool-charts">
             <div class="np-trend-toolbar">
-              <span>占比趋势 <em>{{ trendRangeText }} · {{ trendSampleText }}</em></span>
+              <span>节点趋势 <em>{{ trendRangeText }} · {{ trendSampleText }}</em></span>
               <div class="np-trend-range" role="group" aria-label="趋势区间">
                 <button type="button" :class="{ 'is-active': trendRange === '1d' }" @click="trendRange = '1d'">近 1 天</button>
                 <button type="button" :class="{ 'is-active': trendRange === '7d' }" @click="trendRange = '7d'">近 7 天</button>
@@ -687,7 +700,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                         <span xmlns="http://www.w3.org/1999/xhtml" class="np-trend-pill" :style="{ background: label.color }"><span class="np-trend-rank">{{ label.rank <= 3 ? ['🏆','🥈','🥉'][label.rank - 1] : String(label.rank).padStart(2, '0') }}</span><span>{{ label.name }}</span><span class="np-trend-pct">{{ label.pct }}%</span><span>ˑ{{ label.count }}</span></span>
                       </foreignObject>
                     </g>
-                    <text v-for="label in trendXLabels(chart.points)" :key="`${chart.key}-x-${label.x}`"
+                    <text v-for="label in trendXLabels()" :key="`${chart.key}-x-${label.x}`"
                           class="np-trend-axis" :x="label.x" :y="TREND.h - 3" :text-anchor="label.anchor">{{ label.text }}</text>
                   </svg>
                 </div>
