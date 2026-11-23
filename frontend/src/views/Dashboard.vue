@@ -709,6 +709,10 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
             <el-tag v-if="data?.runtime.running" :type="runTagType" size="small">{{ runStateText }}</el-tag>
             <el-tag v-else type="success" size="small">空闲</el-tag>
           </div>
+          <div class="np-detect-inline">
+            <span>引擎 <b>{{ data.runtime.engine }}</b></span>
+            <span>上次启动 {{ shortTs(data.runtime.last_cycle_at || data.batch?.started_at) }}</span>
+          </div>
           <div class="np-detect-actions">
             <el-button v-if="!data?.runtime.running" size="small" type="primary" @click="runNow">立即检测并下发</el-button>
             <el-button v-if="data?.runtime.running && !data.runtime.paused"
@@ -720,17 +724,6 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               {{ data.runtime.stop_requested ? '正在停止' : '停止并下发' }}
             </el-button>
           </div>
-        </div>
-
-        <div class="np-detect-meta">
-          <span class="np-detect-engine">引擎 <b>{{ data.runtime.engine }}</b></span>
-          <span v-if="data.runtime.running" class="np-detect-phase">
-            块 {{ data.runtime.block_index || 0 }}/{{ data.runtime.blocks || 0 }}
-            · {{ data.runtime.block_size || 0 }} 节点 · {{ data.runtime.phase }}
-          </span>
-          <span v-else class="np-detect-phase">所有标签随全局检测一起执行</span>
-          <div class="np-flex" />
-          <span class="np-detect-time">上次启动 {{ shortTs(data.runtime.last_cycle_at || data.batch?.started_at) }}</span>
         </div>
 
         <div v-if="data.batch" class="np-detect-batch" :class="`is-${batchTone}`">
@@ -830,19 +823,17 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
       </div>
 
       <div class="np-card np-log-card">
-        <div class="np-section-title">
-          系统日志
-          <el-tag type="info" size="small" effect="plain">唯一入口</el-tag>
-          <div class="np-flex" />
+        <div class="np-section-title np-log-head">
+          <span class="np-log-title">系统日志</span>
           <div class="np-log-tools">
-            <el-select v-model="logLevel" size="small" style="width:118px" @change="loadLogs">
+            <el-select v-model="logLevel" size="small" style="width:92px" @change="loadLogs">
               <el-option label="全部级别" value="ALL" />
               <el-option label="信息" value="INFO" />
               <el-option label="警告" value="WARN" />
               <el-option label="错误" value="ERROR" />
               <el-option label="调试" value="DEBUG" />
             </el-select>
-            <span class="np-muted">已载入 {{ logs.length }} 条（最多 300）· 自动刷新</span>
+            <span class="np-muted">{{ logs.length }}/300 · 自动刷新</span>
             <el-button size="small" :loading="logsLoading" @click="loadLogs">刷新</el-button>
           </div>
         </div>
