@@ -250,19 +250,19 @@ function trendShare(point, row, key) {
     : key === 'pool_count' ? point.total_nodes : point.total_published
   return total ? trendCount(point, row, key) / total * 100 : 0
 }
-function trendMax(key, points = historyPoints.value) {
-  const rows = data.value?.airport_list || []
-  let max = 0
-  for (const point of points) {
-    for (const row of rows) {
-      if (!row.enabled) continue
-      max = Math.max(max, trendShare(point, row, key))
-    }
-  }
-  return Math.max(20, Math.ceil(max / 10) * 10)
+function trendScaleMax(value) {
+  const n = Math.max(1, Number(value) || 0)
+  const step = n <= 20 ? 5 : n <= 50 ? 10 : 20
+  return Math.ceil(n / step) * step
 }
-const availableTrendMax = computed(() => trendMax('available_count', availableTrendPoints.value))
-const publishTrendMax = computed(() => trendMax('published_count'))
+function trendMax(key, points = historyPoints.value, current = 0) {
+  const totalKey = key === 'available_count' ? 'total_available' : 'total_published'
+  let max = Number(current) || 0
+  for (const point of points) max = Math.max(max, Number(point?.[totalKey]) || 0)
+  return trendScaleMax(max)
+}
+const availableTrendMax = computed(() => trendMax('available_count', availableTrendPoints.value, data.value?.nodes_available || 0))
+const publishTrendMax = computed(() => trendMax('published_count', historyPoints.value, publishTotal.value))
 function trendXY(key, row, index, max, points = historyPoints.value) {
   const plotH = TREND.h - TREND.top - TREND.bottom
   const x = trendPointX(points[index], trendDomain(points))
@@ -412,7 +412,7 @@ const trendCharts = computed(() => [
     totalCount: publishTotal.value,
     field: 'published_count',
     rows: publishChartRows.value,
-    max: Math.max(1, publishTotal.value),
+    max: publishTrendMax.value,
     points: trendChartPoints(historyPoints.value, 'published_count', publishChartRows.value),
   },
   {
@@ -422,7 +422,7 @@ const trendCharts = computed(() => [
     totalCount: data.value?.nodes_available || 0,
     field: 'available_count',
     rows: nodeChartRows.value,
-    max: Math.max(1, data.value?.nodes_available || 0),
+    max: availableTrendMax.value,
     points: trendChartPoints(availableTrendPoints.value, 'available_count', nodeChartRows.value),
   },
 ])
@@ -689,6 +689,10 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               <div class="np-pool-chart-body">
                 <div class="np-trend">
                   <svg :viewBox="`0 0 ${TREND.w} ${TREND.h}`" class="np-trend-svg">
+                    <line class="np-trend-axisline" :x1="TREND.left" :x2="TREND.left"
+                          :y1="TREND.top" :y2="TREND.h - TREND.bottom" />
+                    <line class="np-trend-axisline" :x1="TREND.left" :x2="TREND.w - TREND.right"
+                          :y1="TREND.h - TREND.bottom" :y2="TREND.h - TREND.bottom" />
                     <line v-for="tick in trendTicks(chart.max)" :key="`${chart.key}-grid-${tick.v}`"
                           class="np-trend-grid" :x1="TREND.left" :x2="TREND.w - TREND.right"
                           :y1="tick.y" :y2="tick.y" />
