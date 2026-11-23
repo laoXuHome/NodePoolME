@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS share_history (
     total_nodes INTEGER NOT NULL DEFAULT 0,
     total_published INTEGER NOT NULL DEFAULT 0,
     total_available INTEGER NOT NULL DEFAULT 0,
+    available_known INTEGER NOT NULL DEFAULT 1,
     UNIQUE (ts, airport_id)
 );
 CREATE INDEX IF NOT EXISTS idx_share_history_ts ON share_history(ts);
@@ -301,10 +302,12 @@ def init_db() -> None:
     for column, ddl in (
         ("available_count", "INTEGER NOT NULL DEFAULT 0"),
         ("total_available", "INTEGER NOT NULL DEFAULT 0"),
+        ("available_known", "INTEGER NOT NULL DEFAULT 1"),
     ):
         if column not in share_cols:
             conn.execute(f"ALTER TABLE share_history ADD COLUMN {column} {ddl}")
-            availability_added = True
+            if column != "available_known":
+                availability_added = True
     conn.commit()
     if availability_added:
         rows = conn.execute(
@@ -321,6 +324,9 @@ def init_db() -> None:
                 (count, airport_id),
             )
         conn.commit()
+    # Backfilled availability was copied from the current pool, not measured at that time.
+    conn.execute("UPDATE share_history SET available_known=0 WHERE reason='backfill'")
+    conn.commit()
     # Anything left mid-flight from a previous run must not be treated as live
     conn.execute("UPDATE batches SET status='aborted', finished_at=? WHERE status='running'", (now(),))
     conn.execute("UPDATE tasks SET status='aborted', finished_at=? WHERE status='running'", (now(),))

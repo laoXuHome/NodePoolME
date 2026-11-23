@@ -236,23 +236,27 @@ def _batch_pool_counts(batch_id: int) -> tuple[dict[int, int], int]:
 
 def record_share_snapshot(nodes: list[dict], batch_id: int | None = None, reason: str = "publish",
                           ts: str | None = None, pool_counts: dict[int, int] | None = None,
-                          total_nodes: int | None = None) -> None:
+                          total_nodes: int | None = None, available_known: bool = True) -> None:
     """Persist one per-airport pool/publish snapshot for the dashboard trend charts."""
     if pool_counts is None:
         pool_counts, total_nodes = _pool_counts()
     total_nodes = total_nodes if total_nodes is not None else sum(pool_counts.values())
-    available_by_airport, total_available = _available_counts()
+    if available_known:
+        available_by_airport, total_available = _available_counts()
+    else:
+        available_by_airport, total_available = {}, 0
     published_by_airport = Counter(n.get("airport_id") for n in nodes)
     stamp = ts or _fmt_ts()
     for airport_id, pool_count in pool_counts.items():
         db.execute(
             """INSERT OR REPLACE INTO share_history
                (ts, batch_id, reason, airport_id, pool_count, published_count,
-                available_count, total_nodes, total_published, total_available)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                available_count, total_nodes, total_published, total_available, available_known)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (stamp, batch_id, reason, airport_id, pool_count,
              published_by_airport.get(airport_id, 0), available_by_airport.get(airport_id, 0),
-             total_nodes, len(nodes), total_available),
+             total_nodes, len(nodes), total_available,
+             1 if available_known else 0),
         )
 
 
@@ -287,6 +291,7 @@ def ensure_share_history(days: int = 7) -> None:
                 record_share_snapshot(
                     selected, batch["id"], "backfill",
                     ts=stamp, pool_counts=pool_counts, total_nodes=total_nodes,
+                    available_known=False,
                 )
     except Exception as exc:  # history is diagnostic, never block the dashboard
         db.append_log("WARN", "仪表盘", f"占比历史回填失败：{exc}")
@@ -303,7 +308,7 @@ def share_history(days: int = 7, complete_only: bool = False) -> list[dict]:
     cutoff = (datetime.now().astimezone() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     if complete_only:
         sql = """SELECT h.ts, h.batch_id, h.total_nodes, h.total_published, h.total_available,
-                        h.airport_id, h.pool_count, h.published_count, h.available_count
+                        h.airport_id, h.pool_count, h.published_count, h.available_count, h.available_known
                  FROM share_history h
                  JOIN batches b ON b.id = h.batch_id
                  WHERE h.ts >= ? AND b.status = 'complete'
@@ -311,7 +316,7 @@ def share_history(days: int = 7, complete_only: bool = False) -> list[dict]:
                  ORDER BY h.ts, h.id"""
     else:
         sql = """SELECT ts, batch_id, total_nodes, total_published, total_available,
-                        airport_id, pool_count, published_count, available_count
+                        airport_id, pool_count, published_count, available_count, available_known
                  FROM share_history WHERE ts >= ? ORDER BY ts, id"""
     rows = db.rows(sql, (cutoff,))
     points: dict[str, dict] = {}
@@ -319,7 +324,7 @@ def share_history(days: int = 7, complete_only: bool = False) -> list[dict]:
         point = points.setdefault(row["ts"], {
             "ts": row["ts"], "batch_id": row["batch_id"], "total_nodes": row["total_nodes"],
             "total_published": row["total_published"], "total_available": row["total_available"],
-            "airports": {},
+            "available_known": row["available_known"], "airports": {},
         })
         point["airports"][str(row["airport_id"])] = {
             "pool_count": row["pool_count"], "published_count": row["published_count"],

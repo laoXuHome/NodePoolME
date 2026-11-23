@@ -147,7 +147,8 @@ async def dashboard():
             if not pool:
                 continue
             score_samples.setdefault(int(airport_id), []).append({
-                "available": (counts.get("available_count") or 0) / pool,
+                "available": ((counts.get("available_count") or 0) / pool)
+                if point.get("available_known", 1) else None,
                 "published": (counts.get("published_count") or 0) / pool,
                 "share": pool / point_total if point_total else 0,
             })
@@ -181,13 +182,13 @@ async def dashboard():
         if airport["enabled"] and pool_count:
             # 综合评分：近 7 天可用率 45% + 下发率 45% + 池占比 5% + 标签合格率 5%
             if samples:
-                health = sum(item["available"] for item in samples) / len(samples)
                 publish_rate = sum(item["published"] for item in samples) / len(samples)
                 share = sum(item["share"] for item in samples) / len(samples)
             else:
-                health = avail_count / pool_count
                 publish_rate = payload["published_count"] / pool_count
                 share = pool_count / nodes_total if nodes_total else 0
+            avail_samples = [item["available"] for item in samples if item["available"] is not None]
+            health = (sum(avail_samples) / len(avail_samples)) if avail_samples else avail_count / pool_count
             tag_rate = tag_count / pool_count
             payload["available_rate"] = round(health * 100, 1)
             payload["publish_rate"] = round(publish_rate * 100, 1)
@@ -239,6 +240,7 @@ async def dashboard():
     history.append({
         "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
         "live": True,
+        "available_known": 1,
         "total_nodes": nodes_total,
         "total_published": len(selected),
         "total_available": available,

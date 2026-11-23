@@ -111,8 +111,27 @@ def test_score_history_uses_only_complete_batches():
     assert len(builder.share_history(7)) == 4
 
 
+def test_share_history_keeps_backfilled_availability_unknown():
+    from datetime import datetime, timedelta
+
+    from backend.database import db
+    from backend.subscriptions import builder
+
+    db.execute("DELETE FROM share_history")
+    stamp = (datetime.now().astimezone() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    builder.record_share_snapshot(
+        [], ts=stamp, pool_counts={999: 10}, total_nodes=10,
+        reason="backfill", available_known=False,
+    )
+    points = builder.share_history(7)
+    assert len(points) == 1
+    assert points[0]["available_known"] == 0
+    assert points[0]["total_available"] == 0
+
+
 if __name__ == "__main__":
     test_dashboard_has_latency_probe()
     test_share_history_uses_seven_day_window_and_sorted_time()
     test_score_history_uses_only_complete_batches()
+    test_share_history_keeps_backfilled_availability_unknown()
     print("PASS dashboard contract")
