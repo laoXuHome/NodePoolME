@@ -254,7 +254,7 @@ const historyPoints = computed(() => {
   return compactHistory(rows, trendRange.value === '7d' ? 20 : 16)
 })
 const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
-const TREND = { w: 336, h: 148, left: 30, right: 58, top: 12, bottom: 18 }
+const TREND = { w: 336, h: 148, left: 30, right: 54, top: 12, bottom: 18 }
 function trendCount(point, row, key) {
   return point.airports?.[String(row.id)]?.[key] || 0
 }
@@ -313,10 +313,10 @@ function trendDot(key, row, max) {
   return { ...p, v: trendCount(historyPoints.value[last], row, key) }
 }
 function trendLabelWidth(row, value, count) {
-  const nameWidth = [...row.name].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 127 ? 6.8 : 3.8), 0)
-  const valueWidth = String(Math.round(value)).length * 3.6 + 4
-  const countWidth = String(count).length * 3.6 + 4
-  return Math.max(40, Math.min(46, Math.round(nameWidth + valueWidth + countWidth + 7)))
+  const nameWidth = [...row.name].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 127 ? 6.4 : 3.4), 0)
+  const valueWidth = String(Math.round(value)).length * 3.4 + 4.2
+  const countWidth = String(count).length * 3.2 + 2.4
+  return Math.max(34, Math.min(42, Math.round(nameWidth + valueWidth + countWidth + 8.4)))
 }
 function trendEndLabels(key, max) {
   const labels = (data.value?.airport_list || [])
@@ -612,7 +612,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                     <g v-for="label in trendEndLabels(chart.field, chart.max)" :key="`${chart.key}-label-${label.id}`">
                       <line v-if="label.shifted" :x1="TREND.w - TREND.right" :y1="label.dotY" :x2="TREND.w - TREND.right + 6" :y2="label.y" :stroke="label.color" class="np-trend-leader" />
                       <rect :x="TREND.w - TREND.right + 6" :y="label.y - 4.7" :width="label.width" height="9.4" rx="2.4" :fill="label.color" />
-                      <text class="np-trend-label" :x="TREND.w - TREND.right + 9" :y="label.y + 2.2">{{ label.name }} {{ label.pct }}% {{ label.count }}</text>
+                      <text class="np-trend-label" :x="TREND.w - TREND.right + 9" :y="label.y + 2.2">{{ label.name }} {{ label.pct }}<tspan class="np-trend-pct">%</tspan> {{ label.count }}</text>
                     </g>
                     <text v-for="label in trendXLabels()" :key="`${chart.key}-x-${label.x}`"
                           class="np-trend-axis" :x="label.x" :y="TREND.h - 3" :text-anchor="label.anchor">{{ label.text }}</text>

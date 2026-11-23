@@ -883,6 +883,7 @@ a { color: var(--np-accent); }
 .np-trend-dot { stroke: #fff; stroke-width: .8; vector-effect: non-scaling-stroke; }
 .np-trend-leader { stroke-width: .65; opacity: .72; vector-effect: non-scaling-stroke; }
 .np-trend-label { fill: #fff; font-size: 6px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.np-trend-pct { font-size: 5.2px; letter-spacing: -.12px; }
 .np-score-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   margin: 12px 0 4px; padding-top: 10px; border-top: 1px solid var(--np-separator-soft);
