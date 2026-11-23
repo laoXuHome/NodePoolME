@@ -244,14 +244,23 @@ function compactHistory(rows, max) {
   }
   return [...buckets.filter((bucket) => bucket.length).map(averageHistoryBucket), current]
 }
-const historyPoints = computed(() => {
+const trendWindowPoints = computed(() => {
   const all = allHistoryPoints.value
   if (!all.length) return []
   const days = trendRange.value === '7d' ? 7 : 1
   const cutoff = Date.now() - days * 86400000
-  let rows = all.filter((point) => point.live || trendPointTime(point) >= cutoff)
-  if (!rows.length) rows = all.slice(-1)
-  return compactHistory(rows, trendRange.value === '7d' ? 20 : 16)
+  const rows = all.filter((point) => point.live || trendPointTime(point) >= cutoff)
+  return rows.length ? rows : all.slice(-1)
+})
+const historyPoints = computed(() => compactHistory(
+  trendWindowPoints.value,
+  trendRange.value === '7d' ? 20 : 16,
+))
+const trendSampleText = computed(() => {
+  const raw = trendWindowPoints.value.length
+  const drawn = historyPoints.value.length
+  if (!raw) return '暂无数据'
+  return raw > drawn ? `${raw} 条数据 → ${drawn} 个点` : `${raw} 个数据点`
 })
 const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
 const TREND = { w: 336, h: 148, left: 30, right: 54, top: 12, bottom: 18 }
@@ -312,12 +321,6 @@ function trendDot(key, row, max) {
   const p = trendXY(key, row, last, max)
   return { ...p, v: trendCount(historyPoints.value[last], row, key) }
 }
-function trendLabelWidth(row, value, count) {
-  const nameWidth = [...row.name].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 127 ? 6.4 : 3.4), 0)
-  const valueWidth = String(Math.round(value)).length * 3.4 + 4.2
-  const countWidth = String(count).length * 3.2 + 2.4
-  return Math.max(34, Math.min(42, Math.round(nameWidth + valueWidth + countWidth + 8.4)))
-}
 function trendEndLabels(key, max) {
   const labels = (data.value?.airport_list || [])
     .filter((row) => row.enabled && trendHasValue(key, row))
@@ -328,8 +331,7 @@ function trendEndLabels(key, max) {
       const value = trendShare(current, row, key)
       return { id: row.id, name: row.name, color: airportColor(row), y: dot.y,
                dotY: dot.y, count,
-               pct: Math.round(value),
-               width: trendLabelWidth(row, value, count) }
+               pct: Math.round(value) }
     })
     .sort((a, b) => a.dotY - b.dotY)
   const gap = 10.4
@@ -578,7 +580,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
 
           <div v-if="data.airport_list?.length" class="np-pool-charts">
             <div class="np-trend-toolbar">
-              <span>占比趋势 <em>{{ trendRangeText }} · {{ historyPoints.length }} 个采样</em></span>
+              <span>占比趋势 <em>{{ trendRangeText }} · {{ trendSampleText }}</em></span>
               <div class="np-trend-range" role="group" aria-label="趋势区间">
                 <button type="button" :class="{ 'is-active': trendRange === '1d' }" @click="trendRange = '1d'">近 1 天</button>
                 <button type="button" :class="{ 'is-active': trendRange === '7d' }" @click="trendRange = '7d'">近 7 天</button>
@@ -611,8 +613,9 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                     </template>
                     <g v-for="label in trendEndLabels(chart.field, chart.max)" :key="`${chart.key}-label-${label.id}`">
                       <line v-if="label.shifted" :x1="TREND.w - TREND.right" :y1="label.dotY" :x2="TREND.w - TREND.right + 6" :y2="label.y" :stroke="label.color" class="np-trend-leader" />
-                      <rect :x="TREND.w - TREND.right + 6" :y="label.y - 4.7" :width="label.width" height="9.4" rx="2.4" :fill="label.color" />
-                      <text class="np-trend-label" :x="TREND.w - TREND.right + 9" :y="label.y + 2.2">{{ label.name }} {{ label.pct }}<tspan class="np-trend-pct">%</tspan> {{ label.count }}</text>
+                      <foreignObject :x="TREND.w - TREND.right + 6" :y="label.y - 5" :width="TREND.right - 6" height="10">
+                        <span xmlns="http://www.w3.org/1999/xhtml" class="np-trend-pill" :style="{ background: label.color }">{{ label.name }} {{ label.pct }}<span class="np-trend-pct">%</span> {{ label.count }}</span>
+                      </foreignObject>
                     </g>
                     <text v-for="label in trendXLabels()" :key="`${chart.key}-x-${label.x}`"
                           class="np-trend-axis" :x="label.x" :y="TREND.h - 3" :text-anchor="label.anchor">{{ label.text }}</text>
