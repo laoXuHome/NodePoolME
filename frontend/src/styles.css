@@ -805,7 +805,7 @@ a { color: var(--np-accent); }
 .np-dash-pool { display: flex; flex-direction: column; padding: 20px 22px; height: 100%; }
 .np-pool-overview {
   flex: 1; min-height: 438px;
-  display: grid; grid-template-columns: 132px minmax(0, 1fr);
+  display: grid; grid-template-columns: 120px minmax(0, 1fr);
   gap: 12px; margin-top: 6px; align-items: stretch;
 }
 .np-pool-status {
@@ -881,7 +881,7 @@ a { color: var(--np-accent); }
 .np-trend-area { opacity: .022; pointer-events: none; }
 .np-trend-line { fill: none; stroke-width: 1.55; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .np-trend-dot { stroke: #fff; stroke-width: .8; vector-effect: non-scaling-stroke; }
-.np-trend-label { fill: #fff; font-size: 8px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.np-trend-label { fill: #fff; font-size: 7.1px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .np-score-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   margin: 12px 0 4px; padding-top: 10px; border-top: 1px solid var(--np-separator-soft);
