@@ -882,11 +882,12 @@ a { color: var(--np-accent); }
 .np-trend-line { fill: none; stroke-width: 1.55; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .np-trend-dot { stroke: #fff; stroke-width: .8; vector-effect: non-scaling-stroke; }
 .np-trend-leader { stroke-width: .65; opacity: .72; vector-effect: non-scaling-stroke; }
-.np-trend-pill { display: inline-flex; align-items: center; height: 7.2px; padding: 0 2.2px; border-radius: 1.8px; color: #fff; font-size: 5.1px; font-weight: 600; gap: .9px; line-height: 1; letter-spacing: -.06px; white-space: nowrap; vertical-align: top; font-variant-numeric: tabular-nums; overflow: visible; }
-.np-trend-pct { font-size: 4.1px; letter-spacing: -.12px; }
+.np-trend-pill { display: inline-flex; align-items: center; height: 8.3px; padding: 0 2.5px; border-radius: 2.1px; color: #fff; font-size: 5.9px; font-weight: 600; gap: 1px; line-height: 1; letter-spacing: -.07px; white-space: nowrap; vertical-align: top; font-variant-numeric: tabular-nums; overflow: visible; }
+.np-trend-rank { flex: none; min-width: 6.8px; text-align: center; font-size: 5.9px; line-height: 1; }
+.np-trend-pct { font-size: 4.7px; letter-spacing: -.14px; }
 .np-score-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
-  margin: 12px 0 4px; padding-top: 10px; border-top: 1px solid var(--np-separator-soft);
+  margin: 8px 0 4px; padding-top: 0; border-top: 0;
 }
 .np-score-head > div { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
 .np-score-head b { font-size: 13.5px; font-weight: 650; color: var(--np-text); white-space: nowrap; }
@@ -894,7 +895,7 @@ a { color: var(--np-accent); }
 .np-score-head > div span { padding: 1px 6px; border-radius: 99px; background: #f2f4f8; color: var(--np-secondary); }
 .np-score-table-wrap { width: 100%; overflow-x: auto; }
 .np-score-table {
-  width: 100%; min-width: 600px; border-collapse: collapse; table-layout: fixed;
+  width: 100%; min-width: 500px; border-collapse: collapse; table-layout: fixed;
   font-variant-numeric: tabular-nums;
 }
 .np-score-col-rank { width: 24px; }
