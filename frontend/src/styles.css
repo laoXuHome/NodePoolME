@@ -862,7 +862,7 @@ a { color: var(--np-accent); }
 }
 .np-trend-range button:hover { color: var(--np-text); }
 .np-trend-range button.is-active { background: #fff; color: var(--np-text); font-weight: 650; box-shadow: 0 1px 3px rgba(20, 30, 50, .12); }
-.np-pool-chart { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 8px 10px 6px; border: 1px solid var(--np-separator-soft); border-radius: 12px; background: #fbfbfd; }
+.np-pool-chart { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 6px 6px 4px; border: 1px solid var(--np-separator-soft); border-radius: 12px; background: #fbfbfd; }
 .np-pool-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
 .np-pool-chart-head b { font-size: 12.5px; font-weight: 650; color: var(--np-text); white-space: nowrap; }
 .np-pool-chart-head span { font-size: 9.5px; color: var(--np-tertiary); white-space: nowrap; }
@@ -881,7 +881,7 @@ a { color: var(--np-accent); }
 .np-trend-area { opacity: .022; pointer-events: none; }
 .np-trend-line { fill: none; stroke-width: 1.55; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .np-trend-dot { stroke: #fff; stroke-width: .8; vector-effect: non-scaling-stroke; }
-.np-trend-label { fill: #fff; font-size: 7.1px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.np-trend-label { fill: #fff; font-size: 6.6px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .np-score-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   margin: 12px 0 4px; padding-top: 10px; border-top: 1px solid var(--np-separator-soft);
