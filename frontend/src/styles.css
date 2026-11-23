@@ -882,8 +882,8 @@ a { color: var(--np-accent); }
 .np-trend-line { fill: none; stroke-width: 1.55; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .np-trend-dot { stroke: #fff; stroke-width: .8; vector-effect: non-scaling-stroke; }
 .np-trend-leader { stroke-width: .65; opacity: .72; vector-effect: non-scaling-stroke; }
-.np-trend-pill { display: inline-flex; align-items: center; height: 8.2px; padding: 0 2.8px; border-radius: 2px; color: #fff; font-size: 5.4px; font-weight: 600; line-height: 1; white-space: nowrap; vertical-align: top; font-variant-numeric: tabular-nums; overflow: visible; }
-.np-trend-pct { font-size: 4.6px; letter-spacing: -.14px; }
+.np-trend-pill { display: inline-flex; align-items: center; height: 7.2px; padding: 0 2.2px; border-radius: 1.8px; color: #fff; font-size: 5.1px; font-weight: 600; gap: .9px; line-height: 1; letter-spacing: -.06px; white-space: nowrap; vertical-align: top; font-variant-numeric: tabular-nums; overflow: visible; }
+.np-trend-pct { font-size: 4.1px; letter-spacing: -.12px; }
 .np-score-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   margin: 12px 0 4px; padding-top: 10px; border-top: 1px solid var(--np-separator-soft);

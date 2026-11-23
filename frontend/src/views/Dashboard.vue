@@ -251,9 +251,34 @@ function trendPath(key, row, max) {
   const points = historyPoints.value.map((_, index) => trendXY(key, row, index, max))
   if (!points.length) return ''
   if (points.length === 1) return `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`
+  // Monotone cubic Hermite: smooth through every snapshot without overshooting sharp peaks.
+  const spans = []
+  const slopes = []
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const h = points[i + 1].x - points[i].x || 1
+    spans.push(h)
+    slopes.push((points[i + 1].y - points[i].y) / h)
+  }
+  const tangents = points.map((_, i) => {
+    if (i === 0) return slopes[0]
+    if (i === points.length - 1) return slopes[slopes.length - 1]
+    const prev = slopes[i - 1]
+    const next = slopes[i]
+    if (prev * next <= 0) return 0
+    const hPrev = spans[i - 1]
+    const hNext = spans[i]
+    const w1 = 2 * hNext + hPrev
+    const w2 = hNext + 2 * hPrev
+    return (w1 + w2) / (w1 / prev + w2 / next)
+  })
   let d = `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`
-  for (let i = 1; i < points.length; i += 1) {
-    d += ` L${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)}`
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const h = spans[i]
+    const c1x = points[i].x + h / 3
+    const c1y = points[i].y + tangents[i] * h / 3
+    const c2x = points[i + 1].x - h / 3
+    const c2y = points[i + 1].y - tangents[i + 1] * h / 3
+    d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${points[i + 1].x.toFixed(1)} ${points[i + 1].y.toFixed(1)}`
   }
   return d
 }
@@ -285,8 +310,8 @@ function trendEndLabels(key, max) {
                pct: Math.round(value) }
     })
     .sort((a, b) => a.dotY - b.dotY)
-  const gap = 9.4
-  const top = TREND.top + 4.4
+  const gap = 8.2
+  const top = TREND.top + 4
   const bottom = TREND.h - TREND.bottom - 4
   const groups = []
   for (const label of labels) {
@@ -300,6 +325,22 @@ function trendEndLabels(key, max) {
     const center = (group[0].dotY + group[group.length - 1].dotY) / 2
     const start = Math.max(top, Math.min(bottom - span, center - span / 2))
     group.forEach((label, index) => { label.y = start + index * gap })
+  }
+  // Final collision pass: even unrelated groups must never overlap vertically.
+  let cursor = top
+  for (const label of labels) {
+    label.y = Math.max(label.y, cursor)
+    cursor = label.y + gap
+  }
+  const overflow = labels.length && labels[labels.length - 1].y > bottom
+    ? labels[labels.length - 1].y - bottom : 0
+  if (overflow > 0) {
+    cursor = top
+    for (const label of labels) {
+      label.y = Math.max(top, label.y - overflow)
+      label.y = Math.max(label.y, cursor)
+      cursor = label.y + gap
+    }
   }
   for (const label of labels) label.shifted = Math.abs(label.y - label.dotY) > .8
   return labels
@@ -564,8 +605,8 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                     </template>
                     <g v-for="label in trendEndLabels(chart.field, chart.max)" :key="`${chart.key}-label-${label.id}`">
                       <line v-if="label.shifted" :x1="TREND.w - TREND.right" :y1="label.dotY" :x2="TREND.w - TREND.right + 6" :y2="label.y" :stroke="label.color" class="np-trend-leader" />
-                      <foreignObject :x="TREND.w - TREND.right + 2" :y="label.y - 4.4" :width="TREND.right - 2" height="8.8">
-                        <span xmlns="http://www.w3.org/1999/xhtml" class="np-trend-pill" :style="{ background: label.color }">{{ label.name }} {{ label.pct }}<span class="np-trend-pct">%</span> {{ label.count }}</span>
+                      <foreignObject :x="TREND.w - TREND.right + 2" :y="label.y - 3.9" :width="TREND.right - 2" height="7.8">
+                        <span xmlns="http://www.w3.org/1999/xhtml" class="np-trend-pill" :style="{ background: label.color }"><span>{{ label.name }}</span><span class="np-trend-pct">{{ label.pct }}%</span><span>{{ label.count }}</span></span>
                       </foreignObject>
                     </g>
                     <text v-for="label in trendXLabels()" :key="`${chart.key}-x-${label.x}`"
