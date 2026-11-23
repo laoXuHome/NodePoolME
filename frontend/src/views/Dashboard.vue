@@ -230,10 +230,9 @@ function trendDomain(points = trendWindowPoints.value) {
   }
   return { start, end }
 }
-function trendChartPoints(points, key) {
+function trendChartPoints(points, key, rows) {
   if (trendRange.value !== '7d' || !points.length) return points
-  const totalKey = key === 'available_count' ? 'total_available' : 'total_published'
-  const first = points.findIndex((point) => Number(point[totalKey] || 0) > 0)
+  const first = points.findIndex((point) => rows?.some((row) => row.enabled && trendCount(point, row, key) > 0))
   return first > 0 ? points.slice(first) : points
 }
 function trendPointX(point, domain) {
@@ -414,7 +413,7 @@ const trendCharts = computed(() => [
     field: 'published_count',
     rows: publishChartRows.value,
     max: Math.max(1, publishTotal.value),
-    points: trendChartPoints(historyPoints.value, 'published_count'),
+    points: trendChartPoints(historyPoints.value, 'published_count', publishChartRows.value),
   },
   {
     key: 'available',
@@ -424,7 +423,7 @@ const trendCharts = computed(() => [
     field: 'available_count',
     rows: nodeChartRows.value,
     max: Math.max(1, data.value?.nodes_available || 0),
-    points: trendChartPoints(availableTrendPoints.value, 'available_count'),
+    points: trendChartPoints(availableTrendPoints.value, 'available_count', nodeChartRows.value),
   },
 ])
 const fetchState = computed(() => {
