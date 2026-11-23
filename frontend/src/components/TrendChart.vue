@@ -264,10 +264,7 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
   <div class="np-tc">
     <div class="np-tc-head">
       <b class="np-tc-title">{{ title }}</b>
-      <span class="np-tc-total">
-        {{ totalLabel }} <b>{{ lastTotal }}</b>
-        <i v-if="liveDiff" class="np-tc-live">实时 {{ totalCount }}</i>
-      </span>
+      <i v-if="liveDiff" class="np-tc-live">实时 {{ totalCount }}</i>
     </div>
     <div class="np-tc-body">
       <div ref="box" class="np-tc-plot">
@@ -323,7 +320,7 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 .np-tc-head { flex: none; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 0 2px 4px; }
 .np-tc-title { font-size: 12.5px; font-weight: 650; color: var(--np-text, #1c1c1e); white-space: nowrap; }
 .np-tc-total { font-size: 10px; color: var(--np-tertiary, #8d939d); white-space: nowrap; }
-.np-tc-live { margin-left: 6px; padding: 1px 5px; border-radius: 5px; background: #eef3ff; color: #2f6bdd; font-style: normal; font-size: 9px; }
+.np-tc-live { padding: 1px 6px; border-radius: 5px; background: #eef3ff; color: #2f6bdd; font-style: normal; font-size: 10px; line-height: 1.45; }
 .np-tc-total b { font-size: 15px; font-weight: 700; color: var(--np-text, #1c1c1e); font-variant-numeric: tabular-nums; margin-left: 2px; }
 .np-tc-body { flex: 1; display: flex; gap: 0; min-height: 0; min-width: 0; }
 .np-tc-plot { position: relative; flex: 1; min-width: 0; min-height: 0; }
