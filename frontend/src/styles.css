@@ -719,7 +719,16 @@ a { color: var(--np-accent); }
 .np-dash-side { grid-column: 2; grid-row: 1 / span 2; display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 }
 
-@media (max-width: 1200px) {
+/* 900–1199：保持 PC 双栏，侧栏收成图标栏腾出宽度 */
+@media (max-width: 1199px) and (min-width: 900px) {
+  .layout-sidebar { width: 92px; flex: 0 0 92px; }
+  .layout-sidebar .brand .name, .layout-sidebar .brand .sub { display: none; }
+  .layout-sidebar .el-menu-item span { display: none; }
+  .layout-sidebar .el-menu-item { justify-content: center; padding-left: 0 !important; padding-right: 0 !important; }
+  .np-dash-layout { grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); height: clamp(900px, calc(100vh - 190px), 1180px); }
+}
+
+@media (max-width: 899px) {
   .np-dash-layout {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto;

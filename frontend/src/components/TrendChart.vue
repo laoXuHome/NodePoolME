@@ -37,10 +37,16 @@ onMounted(() => {
   if (!el) return
   measure = () => {
     const rect = el.getBoundingClientRect()
-    const scale = detectScale()
+    let scale = detectScale()
+    // 卡片本身很窄时，标签放大到整卡一半宽会挤掉曲线，按宽度封顶
+    const fullW = el.parentElement ? el.parentElement.getBoundingClientRect().width : rect.width
+    scale = Math.min(scale, Math.max(1.15, Math.round((fullW / 300) * 100) / 100))
     uiScale.value = scale
-    w.value = Math.max(240, Math.round(rect.width / scale))
-    h.value = Math.max(120, Math.round(rect.height / scale))
+    // 先在 CSS 像素上兜底，再折算设计尺寸，保证 viewBox → 容器的缩放比恒等于 scale
+    const cssW = Math.max(240, rect.width)
+    const cssH = Math.max(120, rect.height)
+    w.value = Math.round(cssW / scale)
+    h.value = Math.round(cssH / scale)
     narrow.value = w.value < 480 || window.matchMedia('(max-width: 760px)').matches
   }
   measure()
@@ -224,7 +230,7 @@ const labels = computed(() => {
   })
   items.sort((a, b) => a.dotY - b.dotY || a.id - b.id)
   const top = PAD.t + 4
-  const bottom = PAD.t + plotH.value - 2
+  const bottom = PAD.t + plotH.value - 7
   const gap = 11
   // 单列贴线尾；末端数值过近的一组上下居中均分，其余按线尾 Y 精确落位
   let ys = items.map(it => Math.max(top, Math.min(bottom, it.dotY)))
