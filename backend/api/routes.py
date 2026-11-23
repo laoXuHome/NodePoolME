@@ -1,6 +1,5 @@
 """HTTP API."""
 import asyncio
-import base64
 import html
 import json
 import os
@@ -8,7 +7,6 @@ import secrets
 import shutil
 import sqlite3
 from datetime import datetime, timedelta
-from pathlib import Path
 import urllib.parse
 import urllib.request
 
@@ -627,7 +625,6 @@ async def delete_group(group_id: int):
 def _node_names() -> dict[int, str]:
     groups = db.rows("SELECT id, ident, sort_order FROM test_groups WHERE enabled=1 ORDER BY sort_order, id")
     results = builder.latest_results()
-    airports = {a["id"]: a["name"] for a in db.rows("SELECT id, name FROM airports")}
     names: dict[int, list[str]] = {}
     for node_id, per_group in results.items():
         passed = [g["ident"] for g in groups if per_group.get(g["id"], {}).get("ok")]
@@ -647,7 +644,6 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
            WHERE a.enabled=1"""
     )
     groups = {g["id"]: g for g in db.rows("SELECT * FROM test_groups ORDER BY sort_order, id")}
-    enabled_groups = [g for g in groups.values() if g["enabled"]]
     results = builder.latest_results()
     latests = builder.latest_latency()
     ceiling = db.get_int("sub_max_latency", 1000)

@@ -7,8 +7,6 @@ const props = defineProps({
   field: { type: String, required: true },
   range: { type: String, default: '1d' },
   title: { type: String, default: '' },
-  totalLabel: { type: String, default: '' },
-  totalCount: { type: [Number, String], default: 0 },
   color: { type: Function, required: true },
 })
 
@@ -47,7 +45,6 @@ onMounted(() => {
     const cssH = Math.max(120, rect.height)
     w.value = Math.round(cssW / scale)
     h.value = Math.round(cssH / scale)
-    narrow.value = w.value < 480 || window.matchMedia('(max-width: 760px)').matches
   }
   measure()
   ro = new ResizeObserver(measure)
@@ -200,13 +197,6 @@ const lastTotal = computed(() => {
   if (!last) return 0
   return series.value.reduce((acc, row) => acc + (row.values[lastIndex.value] || 0), 0)
 })
-const liveDiff = computed(() => {
-  const live = props.points.find((point) => point.live)
-  const n = Number(props.totalCount)
-  if (!live || !Number.isFinite(n)) return false
-  return n !== lastTotal.value
-})
-const narrow = ref(false)
 
 // 末端标签：按每条曲线的最后一个数值定位，纵向贴住线尾；数值相同就落在同一条高度上，
 // 太近时按最小间距微调，并画一小段引导线指回数据点。
@@ -280,12 +270,11 @@ function onMove(event) {
     .map((s) => ({ name: s.name, color: s.color, v: s.values[best] || 0,
       pct: pointTotal ? Math.round((s.values[best] || 0) / pointTotal * 100) : 0 }))
     .sort((a, b) => b.v - a.v)
-  const dots = values.slice(0, 6).map((item) => item.v)
   const anchorX = px(pointTime(point))
   const tipLeft = Math.min(Math.max(anchorX + 10, 8), Math.max(8, w.value - 172))
   hover.value = { x: anchorX, stamp, values: values.slice(0, 5), more: Math.max(0, values.length - 5),
     dots: series.value.map((s) => ({ color: s.color, cx: anchorX, cy: py(s.values[best] || 0) })),
-    tip: { left: tipLeft, top: 4 }, count: dots.length }
+    tip: { left: tipLeft, top: 4 } }
 }
 function onLeave() { hover.value = null }
 const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b) => a + b.v, 0) : 0)
@@ -350,9 +339,7 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 .np-tc { flex: 1; width: 100%; display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
 .np-tc-head { flex: none; display: flex; align-items: baseline; justify-content: space-between; gap: calc(10px * var(--tcs, 1)); padding: 0 calc(2px * var(--tcs, 1)) calc(4px * var(--tcs, 1)); }
 .np-tc-title { font-size: calc(12.5px * var(--tcs, 1)); font-weight: 650; color: var(--np-text, #1c1c1e); white-space: nowrap; }
-.np-tc-total { font-size: 10px; color: var(--np-tertiary, #8d939d); white-space: nowrap; }
 .np-tc-live { padding: calc(1px * var(--tcs, 1)) calc(6px * var(--tcs, 1)); border-radius: calc(5px * var(--tcs, 1)); background: #eef3ff; color: #2f6bdd; font-style: normal; font-size: calc(10px * var(--tcs, 1)); line-height: 1.45; }
-.np-tc-total b { font-size: 15px; font-weight: 700; color: var(--np-text, #1c1c1e); font-variant-numeric: tabular-nums; margin-left: 2px; }
 .np-tc-body { flex: 1; display: flex; gap: 0; min-height: 0; min-width: 0; }
 .np-tc-plot { position: relative; flex: 1; min-width: 0; min-height: 0; }
 .np-tc-svg { display: block; width: 100%; height: 100%; }
@@ -388,10 +375,6 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 .np-tc-lab b { font-weight: 500; opacity: .82; font-variant-numeric: tabular-nums; }
 .np-tc-lab small { font-weight: 700; font-variant-numeric: tabular-nums; }
 .np-tc-leader { stroke-width: .9; opacity: .8; }
-.np-tc-chips { display: flex; flex-wrap: wrap; gap: 2px 12px; max-height: 56px; overflow-y: auto; padding: 2px 0 0; flex: none; }
-.np-tc-chips span { display: inline-flex; align-items: center; gap: 3px; height: 14px; padding: 0 4.5px; border-radius: 3px; font-size: 9.5px; font-weight: 600; color: #fff; white-space: nowrap; }
-.np-tc-chips span b { font-weight: 500; opacity: .82; }
-.np-tc-chips span small { font-weight: 700; }
 .np-tc-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #9aa1ab; }
 .np-tc-tip { position: absolute; z-index: 3; min-width: calc(148px * var(--tcs, 1)); padding: calc(6px * var(--tcs, 1)) calc(8px * var(--tcs, 1)); border-radius: calc(8px * var(--tcs, 1)); background: rgba(255, 255, 255, .97); box-shadow: 0 6px 20px rgba(20, 30, 50, .16); border: 1px solid #e6eaf0; pointer-events: none; }
 .np-tc-tip-time { display: block; font-size: calc(10px * var(--tcs, 1)); font-weight: 650; color: #6b7280; margin-bottom: 3px; }

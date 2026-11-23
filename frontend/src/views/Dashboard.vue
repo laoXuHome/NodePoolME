@@ -106,7 +106,6 @@ async function runNow() {
   }
 }
 
-const publishTotal = computed(() => chartTotal(data.value?.airport_list || [], 'published_count'))
 const nodeChartRows = computed(() => rankRows(data.value?.airport_list || [], 'available_count'))
 const publishChartRows = computed(() => rankRows(data.value?.airport_list || [], 'published_count'))
 const statusSegments = computed(() => {
@@ -231,8 +230,6 @@ const trendCharts = computed(() => [
   {
     key: 'publish',
     title: '下发节点趋势',
-    totalLabel: '已下发',
-    totalCount: publishTotal.value,
     field: 'published_count',
     rows: publishChartRows.value,
     points: trendChartPoints(historyPoints.value, 'published_count', publishChartRows.value),
@@ -240,8 +237,6 @@ const trendCharts = computed(() => [
   {
     key: 'available',
     title: '可用节点趋势',
-    totalLabel: '可用',
-    totalCount: data.value?.nodes_available || 0,
     field: 'available_count',
     rows: nodeChartRows.value,
     points: trendChartPoints(availableTrendPoints.value, 'available_count', nodeChartRows.value),
@@ -509,8 +504,6 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 :field="chart.field"
                 :range="trendRange"
                 :title="chart.title"
-                :total-label="chart.totalLabel"
-                :total-count="chart.totalCount"
                 :color="airportColor"
               />
             </div>
