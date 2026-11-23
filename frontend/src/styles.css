@@ -315,7 +315,34 @@ a { color: var(--np-accent); }
   backdrop-filter: saturate(180%) blur(20px);
 }
 .header-bar .title { font-weight: 650; font-size: 16px; letter-spacing: -.02em; }
-.np-header-version { color: var(--np-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.np-header-tools { display: flex; align-items: center; gap: 8px; }
+.np-header-tools .el-button { margin-left: 2px; }
+.np-ver {
+  display: inline-flex; align-items: center; gap: 5px; height: 25px; padding: 0 10px 0 8px;
+  border-radius: 999px; background: #f5f6f8; border: 1px solid #e8eaee;
+  font-size: 11.5px; font-weight: 600; color: #4a515b; letter-spacing: .01em;
+  font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default;
+}
+.np-ver-dot { width: 6px; height: 6px; border-radius: 50%; background: #34c759; box-shadow: 0 0 0 2px rgba(52, 199, 89, .14); flex: none; }
+.np-ver-dot.is-new { background: #f5a623; box-shadow: 0 0 0 2px rgba(245, 166, 35, .16); }
+.np-mini-btn {
+  display: inline-flex; align-items: center; gap: 4px; height: 25px; padding: 0 10px;
+  border-radius: 999px; border: 1px solid #e8eaee; background: #fff;
+  font-size: 11.5px; font-weight: 550; color: #4a515b; cursor: pointer;
+  transition: color .16s, border-color .16s, background .16s, box-shadow .16s;
+}
+.np-mini-btn .el-icon { font-size: 13px; }
+.np-mini-btn:hover { color: var(--np-accent); border-color: #cddcf8; background: #f4f8ff; box-shadow: 0 1px 3px rgba(47, 107, 221, .08); }
+.np-mini-btn.is-busy { color: var(--np-accent); border-color: #cddcf8; background: #f4f8ff; cursor: progress; }
+.np-mini-btn.is-busy .el-icon { animation: np-spin 1s linear infinite; }
+@keyframes np-spin { to { transform: rotate(360deg); } }
+.np-gh {
+  display: inline-flex; align-items: center; height: 25px; padding: 0 10px;
+  border-radius: 999px; border: 1px solid #e8eaee; background: #fff;
+  font-size: 11.5px; font-weight: 550; color: #4a515b; text-decoration: none;
+  transition: color .16s, border-color .16s, background .16s;
+}
+.np-gh:hover { color: var(--np-accent); border-color: #cddcf8; background: #f4f8ff; }
 .np-admin-tag { border-radius: 999px !important; }
 .np-main { flex: 1; }
 .np-mobile-brand {

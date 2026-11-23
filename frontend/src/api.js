@@ -106,6 +106,10 @@ export async function logout() {
   state.loggedIn = false
 }
 
+export async function checkUpdate(force = false) {
+  return api.get(`/api/system/update${force ? '?force=true' : ''}`)
+}
+
 export async function checkAuth() {
   try {
     const me = await api.get('/api/auth/me')

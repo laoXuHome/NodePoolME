@@ -15,22 +15,47 @@ const props = defineProps({
 const box = ref(null)
 const w = ref(560)
 const h = ref(170)
+const uiScale = ref(1)
 let ro = null
+let measure = null
+
+// 手机「电脑模式」下整页被缩小，按 视觉缩放比 放大内部设计尺寸，保证字号/间距在屏幕上仍可读
+function detectScale() {
+  if (typeof window === 'undefined') return 1
+  if (window.__npChartScale) return Math.min(3, Math.max(1, Number(window.__npChartScale) || 1))
+  const coarse = window.matchMedia?.('(pointer: coarse)').matches
+  const screenW = window.screen?.width || 0
+  const innerW = window.innerWidth || 0
+  if (!coarse || !screenW || !innerW) return 1
+  const ratio = innerW / screenW
+  if (ratio < 1.35) return 1
+  return Math.min(2.8, Math.round(ratio * 100) / 100)
+}
 
 onMounted(() => {
   const el = box.value
   if (!el) return
-  const measure = () => {
+  measure = () => {
     const rect = el.getBoundingClientRect()
-    w.value = Math.max(240, Math.round(rect.width))
-    h.value = Math.max(120, Math.round(rect.height))
+    const scale = detectScale()
+    uiScale.value = scale
+    w.value = Math.max(240, Math.round(rect.width / scale))
+    h.value = Math.max(120, Math.round(rect.height / scale))
     narrow.value = w.value < 480 || window.matchMedia('(max-width: 760px)').matches
   }
   measure()
   ro = new ResizeObserver(measure)
   ro.observe(el)
+  window.addEventListener('resize', measure)
+  window.addEventListener('orientationchange', measure)
+  window.visualViewport?.addEventListener('resize', measure)
 })
-onBeforeUnmount(() => { ro?.disconnect(); ro = null })
+onBeforeUnmount(() => {
+  ro?.disconnect(); ro = null
+  window.removeEventListener('resize', measure)
+  window.removeEventListener('orientationchange', measure)
+  window.visualViewport?.removeEventListener('resize', measure)
+})
 
 const PAD = { l: 34, r: 3, t: 12, b: 22 }
 const plotW = computed(() => Math.max(80, w.value - PAD.l - PAD.r))
@@ -231,7 +256,7 @@ const hover = ref(null)
 function onMove(event) {
   if (!plotted.value.length) return
   const rect = event.currentTarget.getBoundingClientRect()
-  const relX = Math.max(0, Math.min(w.value, event.clientX - rect.left))
+  const relX = Math.max(0, Math.min(w.value, (event.clientX - rect.left) / uiScale.value))
   const span = domain.value.end - domain.value.start || 1
   const time = domain.value.start + (relX - PAD.l) / plotW.value * span
   let best = 0
@@ -261,7 +286,7 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 </script>
 
 <template>
-  <div class="np-tc">
+  <div class="np-tc" :style="{ '--tcs': String(uiScale) }">
     <div class="np-tc-head">
       <b class="np-tc-title">{{ title }}</b>
       <i v-if="lastTotal !== null" class="np-tc-live">实时 {{ lastTotal }}</i>
@@ -305,7 +330,7 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
       <div class="np-tc-legend">
         <div v-for="l in labels" :key="l.id" class="np-tc-lab" 
              :title="`${l.name} · ${l.pct}% · ${l.value} 节点`"
-             :style="{ top: `${l.y - 6.5}px`, background: l.color }">
+             :style="{ top: `${(l.y - 6.5) * uiScale}px`, background: l.color }">
           <em>{{ l.name }}</em>
           <b>{{ l.pct }}%</b>
           <small>{{ l.value }}</small>
@@ -317,10 +342,10 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 
 <style scoped>
 .np-tc { flex: 1; width: 100%; display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
-.np-tc-head { flex: none; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 0 2px 4px; }
-.np-tc-title { font-size: 12.5px; font-weight: 650; color: var(--np-text, #1c1c1e); white-space: nowrap; }
+.np-tc-head { flex: none; display: flex; align-items: baseline; justify-content: space-between; gap: calc(10px * var(--tcs, 1)); padding: 0 calc(2px * var(--tcs, 1)) calc(4px * var(--tcs, 1)); }
+.np-tc-title { font-size: calc(12.5px * var(--tcs, 1)); font-weight: 650; color: var(--np-text, #1c1c1e); white-space: nowrap; }
 .np-tc-total { font-size: 10px; color: var(--np-tertiary, #8d939d); white-space: nowrap; }
-.np-tc-live { padding: 1px 6px; border-radius: 5px; background: #eef3ff; color: #2f6bdd; font-style: normal; font-size: 10px; line-height: 1.45; }
+.np-tc-live { padding: calc(1px * var(--tcs, 1)) calc(6px * var(--tcs, 1)); border-radius: calc(5px * var(--tcs, 1)); background: #eef3ff; color: #2f6bdd; font-style: normal; font-size: calc(10px * var(--tcs, 1)); line-height: 1.45; }
 .np-tc-total b { font-size: 15px; font-weight: 700; color: var(--np-text, #1c1c1e); font-variant-numeric: tabular-nums; margin-left: 2px; }
 .np-tc-body { flex: 1; display: flex; gap: 0; min-height: 0; min-width: 0; }
 .np-tc-plot { position: relative; flex: 1; min-width: 0; min-height: 0; }
@@ -333,27 +358,27 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 .np-tc-dot { stroke: #fff; stroke-width: 1; }
 .np-tc-cross { stroke: #c3cbd6; stroke-width: 1; }
 .np-tc-hdot { stroke: #fff; stroke-width: 1; }
-.np-tc-legend { position: relative; flex: none; width: 60px; align-self: stretch; }
+.np-tc-legend { position: relative; flex: none; width: calc(60px * var(--tcs, 1)); align-self: stretch; }
 .np-tc-lab {
   position: absolute;
   left: 0;
   right: 0;
   justify-content: flex-start;
-  height: 12px;
+  height: calc(12px * var(--tcs, 1));
   display: inline-flex;
   align-items: center;
-  gap: 2.5px;
-  padding: 0 4px;
-  border-radius: 3px;
+  gap: calc(2.5px * var(--tcs, 1));
+  padding: 0 calc(4px * var(--tcs, 1));
+  border-radius: calc(3px * var(--tcs, 1));
   color: #fff;
-  font-size: 9px;
+  font-size: calc(9px * var(--tcs, 1));
   font-weight: 600;
   line-height: 1;
   letter-spacing: -.1px;
   white-space: nowrap;
   box-shadow: 0 0 0 1px #fff, 0 1px 2px rgba(20, 30, 50, .08);
 }
-.np-tc-lab em { font-style: normal; min-width: 0; max-width: 27px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-tc-lab em { font-style: normal; min-width: 0; max-width: calc(27px * var(--tcs, 1)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-tc-lab b { font-weight: 500; opacity: .82; font-variant-numeric: tabular-nums; }
 .np-tc-lab small { font-weight: 700; font-variant-numeric: tabular-nums; }
 .np-tc-leader { stroke-width: .9; opacity: .8; }
@@ -362,19 +387,19 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 .np-tc-chips span b { font-weight: 500; opacity: .82; }
 .np-tc-chips span small { font-weight: 700; }
 .np-tc-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #9aa1ab; }
-.np-tc-tip { position: absolute; z-index: 3; min-width: 148px; padding: 6px 8px; border-radius: 8px; background: rgba(255, 255, 255, .97); box-shadow: 0 6px 20px rgba(20, 30, 50, .16); border: 1px solid #e6eaf0; pointer-events: none; }
-.np-tc-tip-time { display: block; font-size: 10px; font-weight: 650; color: #6b7280; margin-bottom: 3px; }
-.np-tc-tip-row { display: flex; align-items: center; gap: 5px; font-size: 10.5px; line-height: 15px; color: #404653; }
+.np-tc-tip { position: absolute; z-index: 3; min-width: calc(148px * var(--tcs, 1)); padding: calc(6px * var(--tcs, 1)) calc(8px * var(--tcs, 1)); border-radius: calc(8px * var(--tcs, 1)); background: rgba(255, 255, 255, .97); box-shadow: 0 6px 20px rgba(20, 30, 50, .16); border: 1px solid #e6eaf0; pointer-events: none; }
+.np-tc-tip-time { display: block; font-size: calc(10px * var(--tcs, 1)); font-weight: 650; color: #6b7280; margin-bottom: 3px; }
+.np-tc-tip-row { display: flex; align-items: center; gap: calc(5px * var(--tcs, 1)); font-size: calc(10.5px * var(--tcs, 1)); line-height: calc(15px * var(--tcs, 1)); color: #404653; }
 .np-tc-tip-row i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
 .np-tc-tip-row em { flex: 1; min-width: 0; font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-tc-tip-row b { font-weight: 650; font-variant-numeric: tabular-nums; }
-.np-tc-tip-pct { flex: none; width: 26px; text-align: right; color: #98a0ad; font-size: 9.5px; font-variant-numeric: tabular-nums; }
-.np-tc-tip-more { font-size: 9.5px; color: #98a0ad; margin-top: 2px; }
-.np-tc-tip-total { margin-top: 4px; padding-top: 3px; border-top: 1px solid #eceff4; font-size: 10px; color: #8d939d; }
+.np-tc-tip-pct { flex: none; width: calc(26px * var(--tcs, 1)); text-align: right; color: #98a0ad; font-size: calc(9.5px * var(--tcs, 1)); font-variant-numeric: tabular-nums; }
+.np-tc-tip-more { font-size: calc(9.5px * var(--tcs, 1)); color: #98a0ad; margin-top: 2px; }
+.np-tc-tip-total { margin-top: calc(4px * var(--tcs, 1)); padding-top: calc(3px * var(--tcs, 1)); border-top: 1px solid #eceff4; font-size: calc(10px * var(--tcs, 1)); color: #8d939d; }
 .np-tc-tip-total b { color: #2f3540; font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) {
-  .np-tc-legend { width: 56px; }
-  .np-tc-lab { font-size: 8.5px; gap: 2px; padding: 0 3px; }
-  .np-tc-lab em { max-width: 24px; }
+  .np-tc-legend { width: calc(56px * var(--tcs, 1)); }
+  .np-tc-lab { font-size: calc(8.5px * var(--tcs, 1)); gap: calc(2px * var(--tcs, 1)); padding: 0 calc(3px * var(--tcs, 1)); }
+  .np-tc-lab em { max-width: calc(24px * var(--tcs, 1)); }
 }
 </style>

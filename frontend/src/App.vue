@@ -1,8 +1,8 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { checkAuth, logout, state } from './api'
-import { ElMessageBox } from 'element-plus'
+import { checkAuth, checkUpdate, logout, state } from './api'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,6 +33,50 @@ async function refresh() {
   await checkAuth()
   ready.value = true
   if (!state.loggedIn) router.replace('/login')
+}
+
+const checking = ref(false)
+const update = ref(null)
+const verTitle = computed(() => {
+  if (!update.value) return '当前版本'
+  if (update.value.error) return update.value.error
+  if (update.value.has_update) return `最新 v${update.value.latest}`
+  return `已是最新（最新 v${update.value.latest}）`
+})
+
+async function runCheck(force = true) {
+  if (checking.value) return
+  checking.value = true
+  try {
+    const data = await checkUpdate(force)
+    update.value = data
+    if (data.error) {
+      ElMessage.warning(data.error)
+    } else if (data.has_update) {
+      const asset = !data.asset ? '离线包未打包'
+        : (data.asset.size ? `${data.asset.name}（${(data.asset.size / 1048576).toFixed(1)}MB）` : data.asset.name)
+      ElMessageBox({
+        title: '发现新版本',
+        message: `<div style="line-height:1.9;font-size:13px">
+          <div>当前版本：<b>v${data.current}</b></div>
+          <div>最新版本：<b style="color:#2f6bdd">v${data.latest}</b></div>
+          <div>离线包：${asset}</div>
+          <div style="margin-top:6px;color:#8d939d">NAS 升级：<code>sudo npup v${data.latest}</code></div></div>`,
+        dangerouslyUseHTMLString: true,
+        confirmButtonText: data.asset ? '去下载' : '知道了',
+        showCancelButton: !!data.asset,
+        cancelButtonText: '稍后',
+      }).then(() => {
+        if (data.asset) window.open(data.asset.url || data.html_url, '_blank', 'noopener')
+      }).catch(() => {})
+    } else {
+      ElMessage.success(`已是最新版本 v${data.latest}`)
+    }
+  } catch (e) {
+    ElMessage.error('检测更新失败，请检查服务器网络')
+  } finally {
+    checking.value = false
+  }
 }
 
 async function doLogout() {
@@ -81,10 +125,6 @@ function onMenu(path) {
           <span>{{ m.label }}</span>
         </el-menu-item>
       </el-menu>
-      <div class="sidebar-foot">
-        <div class="sidebar-version">v{{ version }}</div>
-        <a :href="repoUrl" target="_blank" rel="noopener">GitHub 仓库 ↗</a>
-      </div>
     </aside>
 
     <section class="np-workspace">
@@ -95,9 +135,18 @@ function onMenu(path) {
         </div>
         <span v-else class="title">{{ title }}</span>
         <div class="np-flex" />
-        <span v-if="!isMobile" class="np-header-version">v{{ version }}</span>
-        <el-tag v-if="!isMobile" size="small" type="info" effect="plain" class="np-admin-tag">admin</el-tag>
-        <el-button v-if="!isMobile" link type="primary" @click="doLogout">退出</el-button>
+        <div v-if="!isMobile" class="np-header-tools">
+          <span class="np-ver" :title="verTitle">
+            <i class="np-ver-dot" :class="{ 'is-new': update && update.has_update }" />
+            <span class="np-ver-text">v{{ version }}</span>
+          </span>
+          <button class="np-mini-btn" :class="{ 'is-busy': checking }" title="对比 GitHub 最新离线包" @click="runCheck">
+            <el-icon><Refresh /></el-icon>
+            <span>{{ checking ? '检测中' : '检测更新' }}</span>
+          </button>
+          <a class="np-gh" :href="repoUrl" target="_blank" rel="noopener">GitHub ↗</a>
+          <el-button link type="primary" @click="doLogout">退出</el-button>
+        </div>
         <button v-else class="np-icon-btn" aria-label="退出登录" @click="doLogout">
           <el-icon size="19"><SwitchButton /></el-icon>
         </button>

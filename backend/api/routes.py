@@ -10,6 +10,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 import urllib.parse
+import urllib.request
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, File
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -44,6 +45,96 @@ async def login(payload: LoginIn, response: Response):
 async def logout(response: Response):
     auth.clear_session(response)
     return {"ok": True}
+
+
+_UPDATE_CACHE = {"at": 0.0, "data": None}
+REPO_SLUG = "laoXuHome/NodePoolME"
+
+
+def _parse_ver(text):
+    parts = []
+    for chunk in str(text or "").strip().lstrip("vV").split("."):
+        num = "".join(ch for ch in chunk if ch.isdigit())
+        parts.append(int(num) if num else 0)
+    return tuple(parts + [0, 0, 0])[:3]
+
+
+def _get_json(url):
+    req = urllib.request.Request(url, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "NodePoolME-Update-Check",
+    })
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _latest_tag_web():
+    """走网页版 releases/latest 跟随跳转拿 tag，绕开 API 未登录的 403 限流。"""
+    req = urllib.request.Request(f"https://github.com/{REPO_SLUG}/releases/latest",
+                                 headers={"User-Agent": "Mozilla/5.0 NodePoolME-Update"})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        final = resp.geturl()
+    tag = final.rstrip("/").split("/")[-1]
+    return tag if tag.startswith("v") else None
+
+
+def _asset_size(url):
+    try:
+        req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "NodePoolME-Update"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            length = resp.headers.get("Content-Length")
+        return int(length) if length else None
+    except Exception:
+        return None
+
+
+@api.get("/system/update", dependencies=protected)
+def check_update(force: bool = False):
+    """对比仓库最新 Release 的 amd64 离线包，判断是否有更新。"""
+    now = datetime.now().timestamp()
+    cached = _UPDATE_CACHE["data"]
+    if cached and not force and now - _UPDATE_CACHE["at"] < 600:
+        return cached
+    current = config.VERSION
+    latest, published, api_asset = None, None, None
+    try:
+        release = _get_json(f"https://api.github.com/repos/{REPO_SLUG}/releases/latest")
+        latest = str(release.get("tag_name") or "").lstrip("v") or None
+        published = release.get("published_at")
+        assets = [a for a in (release.get("assets") or []) if str(a.get("name", "")).endswith(".tar.gz")]
+        if assets:
+            api_asset = {"name": assets[0].get("name"), "size": assets[0].get("size"),
+                         "url": assets[0].get("browser_download_url")}
+    except Exception:
+        pass
+    if not latest:
+        try:
+            tag = _latest_tag_web()
+            if tag:
+                latest = tag.lstrip("v")
+        except Exception as exc:
+            return {"current": current, "latest": None, "has_update": False,
+                    "error": f"无法访问 GitHub：{exc.__class__.__name__}"}
+    if not latest:
+        return {"current": current, "latest": None, "has_update": False,
+                "error": "未能解析仓库最新版本"}
+    asset = api_asset
+    if not asset:
+        name = f"nodepoolme-v{latest}-amd64.tar.gz"
+        asset = {"name": name, "size": _asset_size(
+            f"https://github.com/{REPO_SLUG}/releases/download/v{latest}/{name}"),
+            "url": f"https://github.com/{REPO_SLUG}/releases/download/v{latest}/{name}"}
+    data = {
+        "current": current,
+        "latest": latest,
+        "has_update": _parse_ver(latest) > _parse_ver(current),
+        "published_at": published,
+        "html_url": f"https://github.com/{REPO_SLUG}/releases/tag/v{latest}",
+        "asset": asset,
+        "error": None,
+    }
+    _UPDATE_CACHE.update(at=now, data=data)
+    return data
 
 
 @api.get("/auth/me", dependencies=protected)
