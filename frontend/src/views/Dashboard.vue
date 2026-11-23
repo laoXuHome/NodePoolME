@@ -200,50 +200,6 @@ function trendPointTime(point) {
   const time = new Date(String(point?.ts || '').replace(' ', 'T')).getTime()
   return Number.isNaN(time) ? 0 : time
 }
-function averageHistoryBucket(bucket) {
-  const airportIds = new Set()
-  for (const point of bucket) {
-    for (const id of Object.keys(point.airports || {})) airportIds.add(id)
-  }
-  const airports = {}
-  for (const id of airportIds) {
-    const totals = { pool_count: 0, published_count: 0, available_count: 0 }
-    for (const point of bucket) {
-      const counts = point.airports?.[id] || {}
-      for (const key of Object.keys(totals)) totals[key] += counts[key] || 0
-    }
-    airports[id] = {
-      pool_count: totals.pool_count / bucket.length,
-      published_count: totals.published_count / bucket.length,
-      available_count: totals.available_count / bucket.length,
-    }
-  }
-  const total = (key) => bucket.reduce((sum, point) => sum + (point[key] || 0), 0) / bucket.length
-  const last = bucket[bucket.length - 1]
-  return {
-    ts: last.ts,
-    live: bucket.some((point) => point.live),
-    airports,
-    total_nodes: total('total_nodes'),
-    total_published: total('total_published'),
-    total_available: total('total_available'),
-  }
-}
-function compactHistory(rows, max) {
-  if (rows.length <= max) return rows
-  const current = rows[rows.length - 1]
-  const earlier = rows.slice(0, -1)
-  const slots = Math.max(1, max - 1)
-  const first = trendPointTime(rows[0])
-  const end = trendPointTime(current)
-  const buckets = Array.from({ length: slots }, () => [])
-  for (const point of earlier) {
-    const ratio = end > first ? (trendPointTime(point) - first) / (end - first) : 0
-    const index = Math.min(slots - 1, Math.max(0, Math.floor(ratio * slots)))
-    buckets[index].push(point)
-  }
-  return [...buckets.filter((bucket) => bucket.length).map(averageHistoryBucket), current]
-}
 const trendWindowPoints = computed(() => {
   const all = allHistoryPoints.value
   if (!all.length) return []
@@ -252,18 +208,16 @@ const trendWindowPoints = computed(() => {
   const rows = all.filter((point) => point.live || trendPointTime(point) >= cutoff)
   return rows.length ? rows : all.slice(-1)
 })
-const historyPoints = computed(() => compactHistory(
-  trendWindowPoints.value,
-  trendRange.value === '7d' ? 20 : 16,
-))
+const historyPoints = computed(() => trendWindowPoints.value)
 const trendSampleText = computed(() => {
   const raw = trendWindowPoints.value.length
-  const drawn = historyPoints.value.length
   if (!raw) return '暂无数据'
-  return raw > drawn ? `${raw} 条数据 → ${drawn} 个点` : `${raw} 个数据点`
+  const live = trendWindowPoints.value.some((point) => point.live)
+  const measured = Math.max(0, raw - (live ? 1 : 0))
+  return live ? `${measured} 次检测 + 当前` : `${measured} 次检测`
 })
 const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
-const TREND = { w: 336, h: 148, left: 30, right: 54, top: 12, bottom: 18 }
+const TREND = { w: 336, h: 148, left: 30, right: 46, top: 12, bottom: 18 }
 function trendCount(point, row, key) {
   return point.airports?.[String(row.id)]?.[key] || 0
 }
@@ -299,10 +253,7 @@ function trendPath(key, row, max) {
   if (points.length === 1) return `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`
   let d = `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`
   for (let i = 1; i < points.length; i += 1) {
-    const prev = points[i - 1]
-    const cur = points[i]
-    const mid = (prev.x + cur.x) / 2
-    d += ` C${mid.toFixed(1)} ${prev.y.toFixed(1)}, ${mid.toFixed(1)} ${cur.y.toFixed(1)}, ${cur.x.toFixed(1)} ${cur.y.toFixed(1)}`
+    d += ` L${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)}`
   }
   return d
 }
@@ -334,9 +285,9 @@ function trendEndLabels(key, max) {
                pct: Math.round(value) }
     })
     .sort((a, b) => a.dotY - b.dotY)
-  const gap = 10.4
-  const top = TREND.top + 5
-  const bottom = TREND.h - TREND.bottom - 4.5
+  const gap = 9.4
+  const top = TREND.top + 4.4
+  const bottom = TREND.h - TREND.bottom - 4
   const groups = []
   for (const label of labels) {
     const group = groups[groups.length - 1]
@@ -613,7 +564,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                     </template>
                     <g v-for="label in trendEndLabels(chart.field, chart.max)" :key="`${chart.key}-label-${label.id}`">
                       <line v-if="label.shifted" :x1="TREND.w - TREND.right" :y1="label.dotY" :x2="TREND.w - TREND.right + 6" :y2="label.y" :stroke="label.color" class="np-trend-leader" />
-                      <foreignObject :x="TREND.w - TREND.right + 6" :y="label.y - 5" :width="TREND.right - 6" height="10">
+                      <foreignObject :x="TREND.w - TREND.right + 2" :y="label.y - 4.4" :width="TREND.right - 2" height="8.8">
                         <span xmlns="http://www.w3.org/1999/xhtml" class="np-trend-pill" :style="{ background: label.color }">{{ label.name }} {{ label.pct }}<span class="np-trend-pct">%</span> {{ label.count }}</span>
                       </foreignObject>
                     </g>
