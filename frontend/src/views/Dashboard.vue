@@ -219,10 +219,22 @@ const trendSampleText = computed(() => {
 })
 const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
 const TREND = { w: 560, h: 148, left: 26, right: 52, top: 12, bottom: 18 }
-function trendDomain() {
+function trendDomain(points = trendWindowPoints.value) {
   const days = trendRange.value === '7d' ? 7 : 1
   const end = Date.now()
-  return { start: end - days * 86400000, end }
+  let start = end - days * 86400000
+  if (days === 7) {
+    const first = points[0]
+    const firstTime = first ? trendPointTime(first) : 0
+    if (firstTime && firstTime > start) start = firstTime
+  }
+  return { start, end }
+}
+function trendChartPoints(points, key) {
+  if (trendRange.value !== '7d' || !points.length) return points
+  const totalKey = key === 'available_count' ? 'total_available' : 'total_published'
+  const first = points.findIndex((point) => Number(point[totalKey] || 0) > 0)
+  return first > 0 ? points.slice(first) : points
 }
 function trendPointX(point, domain) {
   const plotW = TREND.w - TREND.left - TREND.right
@@ -254,7 +266,7 @@ const availableTrendMax = computed(() => trendMax('available_count', availableTr
 const publishTrendMax = computed(() => trendMax('published_count'))
 function trendXY(key, row, index, max, points = historyPoints.value) {
   const plotH = TREND.h - TREND.top - TREND.bottom
-  const x = trendPointX(points[index], trendDomain())
+  const x = trendPointX(points[index], trendDomain(points))
   const q = TREND.top + (1 - Math.min(max, trendCount(points[index], row, key)) / Math.max(1, max)) * plotH
   return { x, y: q }
 }
@@ -358,8 +370,8 @@ function trendEndLabels(key, max, source = historyPoints.value) {
   for (const label of labels) label.shifted = Math.abs(label.y - label.dotY) > .8
   return labels
 }
-function trendXLabels() {
-  const domain = trendDomain()
+function trendXLabels(points = historyPoints.value, key = 'published_count') {
+  const domain = trendDomain(points)
   const count = 4
   const plotW = TREND.w - TREND.left - TREND.right
   return Array.from({ length: count }, (_, index) => {
@@ -369,6 +381,7 @@ function trendXLabels() {
     const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
     let text = `${d.getMonth() + 1}/${d.getDate()}`
     if (!last && trendRange.value !== '7d') text = index === 0 ? `昨天 ${hm}` : hm
+    if (!last && trendRange.value === '7d' && (domain.end - domain.start) < 3 * 86400000) text = `${text} ${hm}`
     return { x: TREND.left + plotW * index / (count - 1), text: last ? '当前' : text,
              anchor: last ? 'end' : index === 0 ? 'start' : 'middle' }
   })
@@ -401,7 +414,7 @@ const trendCharts = computed(() => [
     field: 'published_count',
     rows: publishChartRows.value,
     max: Math.max(1, publishTotal.value),
-    points: historyPoints.value,
+    points: trendChartPoints(historyPoints.value, 'published_count'),
   },
   {
     key: 'available',
@@ -411,7 +424,7 @@ const trendCharts = computed(() => [
     field: 'available_count',
     rows: nodeChartRows.value,
     max: Math.max(1, data.value?.nodes_available || 0),
-    points: availableTrendPoints.value,
+    points: trendChartPoints(availableTrendPoints.value, 'available_count'),
   },
 ])
 const fetchState = computed(() => {
@@ -700,7 +713,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                         <span xmlns="http://www.w3.org/1999/xhtml" class="np-trend-pill" :style="{ background: label.color }"><span class="np-trend-rank">{{ label.rank <= 3 ? ['🏆','🥈','🥉'][label.rank - 1] : String(label.rank).padStart(2, '0') }}</span><span>{{ label.name }}</span><span class="np-trend-pct">{{ label.pct }}%</span><span>ˑ{{ label.count }}</span></span>
                       </foreignObject>
                     </g>
-                    <text v-for="label in trendXLabels()" :key="`${chart.key}-x-${label.x}`"
+                    <text v-for="label in trendXLabels(chart.points, chart.field)" :key="`${chart.key}-x-${label.x}`"
                           class="np-trend-axis" :x="label.x" :y="TREND.h - 3" :text-anchor="label.anchor">{{ label.text }}</text>
                   </svg>
                 </div>
