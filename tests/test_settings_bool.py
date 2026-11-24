@@ -81,5 +81,5 @@ if __name__ == "__main__":
     print("PASS test_bool_setting_roundtrip")
     test_legacy_true_string_is_migrated()
     print("PASS test_legacy_true_string_is_migrated")
-    test_favicon_204_has_no_body()
+    test_favicon_never_falls_back_to_html()
     print("PASS favicon 204 no body")
