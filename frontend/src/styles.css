@@ -834,14 +834,15 @@ tr.is-off .np-score-airport-name b { color: #8e8e93; }
 .np-score-cell b { display: block; font-size: 12.5px; line-height: 1.1; font-weight: 650; color: var(--np-text); }
 .np-score-cell small { display: block; margin-top: 2px; font-size: 8px; line-height: 1.1; color: #b0b5bf; }
 tr.is-off .np-score-cell b { color: #b0b5bf; }
-.np-score-cell.is-score { padding-right: 0; border-left: 1px solid var(--np-separator-soft); }
+.np-score-cell.is-score { padding-right: 3px; border-left: 1px solid var(--np-separator-soft); }
 .np-score-cell.is-score .np-pool-score { justify-content: flex-end; }
 .np-score-cell.is-score .np-pool-score strong {
   font-size: 17px; line-height: 1; font-weight: 700; letter-spacing: -.03em;
   font-variant-numeric: tabular-nums;
 }
 /* 评分数字跟随档位颜色 */
-.np-score-cell.is-score .np-pool-score.is-good strong { color: #8b5cf6; }
+.np-score-cell.is-score .np-score-raw { display: block; margin-top: 1px; font-size: 8.5px; line-height: 1; color: #9aa1ab; text-align: right; font-variant-numeric: tabular-nums; }
+.np-pool-score.is-good strong { color: #8b5cf6; }
 .np-score-cell.is-score .np-pool-score.is-ok strong { color: #16a34a; }
 .np-score-cell.is-score .np-pool-score.is-mid strong { color: #2563eb; }
 .np-score-cell.is-score .np-pool-score.is-low strong { color: #ea580c; }

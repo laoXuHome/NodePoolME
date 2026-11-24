@@ -28,6 +28,29 @@ from backend.testers import engine as engine_mod
 api = APIRouter(prefix="/api")
 protected = [Depends(auth.require_auth)]
 SCORE_WEIGHTS = {"available": 60, "publish": 35, "tag": 5}
+# 追加分：原始 10 分加 1 分，70 分及以上固定加 15 分，10–70 分之间线性递增
+BONUS_MIN, BONUS_MAX = 1.0, 15.0
+BONUS_KNEE_LOW, BONUS_KNEE_HIGH = 10.0, 70.0
+
+
+def bonus_score(raw):
+    """在原始评分上追加的分值，只按原始分算一次。"""
+    raw = float(raw)
+    return max(BONUS_MIN, min(BONUS_MAX, BONUS_MIN + (raw - BONUS_KNEE_LOW)
+                                     / (BONUS_KNEE_HIGH - BONUS_KNEE_LOW) * (BONUS_MAX - BONUS_MIN)))
+
+
+def final_score(raw):
+    """最终展示分数：原始分 + 追加分，封顶 100。"""
+    raw = float(raw)
+    return min(100.0, raw + bonus_score(raw))
+
+
+def score_grade_of(value):
+    """按最终展示分数判定五级：优 ≥85、良 70–84、中 55–69、差 40–54、劣 <40。"""
+    value = float(value)
+    return ("优" if value >= 85 else "良" if value >= 70 else "中" if value >= 55
+            else "差" if value >= 40 else "劣")
 DATA_STATUS_TEXT = {
     "ample": "充足", "normal": "正常", "reference": "参考", "rough": "大概",
     "insufficient": "数据不足", "unknown": "计划未知",
@@ -457,27 +480,37 @@ async def dashboard(days: int = 7):
                 + SCORE_WEIGHTS["publish"] / 100 * publish_rate
                 + SCORE_WEIGHTS["tag"] / 100 * tag_rate
             ))
+            raw = max(0, min(100, score))
+            payload["raw_score"] = round(raw, 1)
+            payload["bonus_score"] = round(bonus_score(raw), 2)
+            shown = final_score(raw)
             if maturity_status == "insufficient":
                 # 数据不足只表示缺证据，不代表机场质量差：评分留空，不参与正式排名
                 payload["score"] = None
+                payload["score_exact"] = None
                 payload["score_grade"] = "—"
             else:
-                payload["score"] = max(0, min(100, score))
-                payload["score_grade"] = ("优" if score >= 80 else "良" if score >= 60
-                                          else "中" if score >= 40 else "差" if score >= 20 else "危")
+                # 展示用四舍五入整数，排序仍用保留精度的 score_exact
+                payload["score_exact"] = round(shown, 2)
+                payload["score"] = int(round(shown))
+                payload["score_grade"] = score_grade_of(shown)
             payload["data_status_detail"] = detail
         else:
             payload["available_rate"] = None
             payload["publish_rate"] = None
             payload["share_rate"] = None
             payload["score"] = None
+            payload["score_exact"] = None
+            payload["raw_score"] = None
+            payload["bonus_score"] = None
             payload["score_grade"] = "停用" if not airport["enabled"] else "空"
             payload["data_status_detail"] = detail
         airport_list.append(payload)
     airport_list.sort(key=lambda item: (
         0 if item.get("enabled") else 1,
         int(item.get("rank_tier") or 0),
-        -float(item["score"]) if item.get("score") is not None else 0,
+        -float(item.get("score_exact") if item.get("score_exact") is not None else item["score"])
+        if item.get("score_exact") is not None or item.get("score") is not None else 0,
         -(item.get("pool_count") or 0),
     ))
     enabled_airports = [a for a in airports if a["enabled"]]

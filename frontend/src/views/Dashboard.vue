@@ -169,10 +169,11 @@ const statusCounts = computed(() => ({
 function scoreTone(row) {
   if (!row.enabled) return 'is-off'
   if (row.score === null || row.score === undefined) return 'is-empty'
-  if (row.score >= 80) return 'is-good'
-  if (row.score >= 60) return 'is-ok'
-  if (row.score >= 40) return 'is-mid'
-  if (row.score >= 20) return 'is-low'
+  const shown = row.score_exact ?? row.score
+  if (shown >= 85) return 'is-good'
+  if (shown >= 70) return 'is-ok'
+  if (shown >= 55) return 'is-mid'
+  if (shown >= 40) return 'is-low'
   return 'is-bad'
 }
 function dayHint(row) {
@@ -193,7 +194,8 @@ function scoreHint(row) {
   const publish = row.publish_rate ?? Math.round((row.published_count || 0) / pool * 100)
   const tag = row.tag_rate ?? Math.round((row.tag_ok_count || 0) / pool * 100)
   const basis = row.score_samples ? `近 7 天 ${row.score_samples} 个完整检测快照` : '无完整检测快照，按当前值'
-  return `${basis} · 可用率 ${health}%（×${scoreWeights.value.available}%）· 下发率 ${publish}%（×${scoreWeights.value.publish}%）· 标签合格率 ${tag}%（×${scoreWeights.value.tag}%）→ 综合 ${row.score} 分`
+  const rawLine = `可用率 ${health}%（×${scoreWeights.value.available}%）· 下发率 ${publish}%（×${scoreWeights.value.publish}%）· 标签合格率 ${tag}%（×${scoreWeights.value.tag}%）→ 原始 ${row.raw_score} 分 · 追加 ${row.bonus_score} 分 → 展示 ${row.score} 分（${row.score_grade}）`
+  return `${basis} · ${rawLine}。追加分按原始分线性计算，只加一次，封顶 100`
 }
 function scoreSampleText(row) {
   if (!row.enabled) return '未启用'
@@ -442,13 +444,14 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                   <div class="np-pool-score" :class="scoreTone(row)">
                     <strong>{{ row.enabled && row.score !== null ? row.score : '—' }}</strong><em>{{ row.score_grade }}</em>
                   </div>
+                  <small v-if="row.enabled && row.raw_score !== null" class="np-score-raw">原 {{ row.raw_score }}</small>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
         <div v-if="data.airport_list?.length" class="np-score-foot">
-          <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 标签合格率 {{ scoreWeights.tag }}%；前 2 项取近 {{ data.score_window_days || 7 }} 天里按检测计划生成、且被快照命中的采样点，再做时段加权（17:00–01:00 权重 50%、01:00–08:00 15%、08:00–17:00 35%）</span>
+          <span>原始评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 标签合格率 {{ scoreWeights.tag }}%；前 2 项取近 {{ data.score_window_days || 7 }} 天里按检测计划生成、且被快照命中的采样点，再做时段加权（17:00–01:00 权重 50%、01:00–08:00 15%、08:00–17:00 35%）。展示分 = min(100, 原始分 + 追加分)，追加分 = 1 + (原始分 − 10) / 60 × 14（10 分以下固定 +1、70 分及以上固定 +15）</span>
           <span>覆盖率 = 有效采样点 / 计划采样点，只反映数据完整度，不参与评分；每天不足 4 份或 60 分钟内超过 2 份的日期整日淘汰，暂停、中断和单节点测试不计入</span>
         </div>
         </div>

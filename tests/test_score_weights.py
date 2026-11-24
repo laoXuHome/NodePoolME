@@ -26,7 +26,7 @@ def test_score_ignores_pool_share():
         + SCORE_WEIGHTS["publish"] / 100 * row["publish_rate"]
         + SCORE_WEIGHTS["tag"] / 100 * row["tag_rate"]
     )
-    assert abs(row["score"] - expected) <= 1
+    assert abs(row["raw_score"] - expected) <= 1
     # 池占比无论多少都不进入评分
     assert row["share_rate"] >= 0
 
