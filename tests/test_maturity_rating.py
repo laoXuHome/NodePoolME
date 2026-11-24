@@ -2,6 +2,7 @@
 import os
 import sys
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -70,15 +71,32 @@ def test_day_ratios_count_final_kept_snapshots():
     assert full == 1 and qualified == 3     # 淘汰日与 11 份的日子都不算完整
 
 
-def _seed(days_ago_to_times, interval=30, nodes=4):
+@contextmanager
+def _freeze_at(hour):
+    import backend.api.routes as routes
+    real = routes.datetime
+
+    class Frozen(real):
+        @classmethod
+        def now(cls, tz=None):
+            return real.now(tz).replace(hour=hour, minute=0, second=0, microsecond=0)
+
+    routes.datetime = Frozen
+    try:
+        yield
+    finally:
+        routes.datetime = real
+
+
+def _seed(days_ago_to_times, interval=30, nodes=4, now=None):
     for table in ("schedule_history", "share_history", "batches", "airports", "run_events"):
         db.execute(f"DELETE FROM {table}")
     db.set_setting("test_interval_minutes", interval)
-    created = (datetime.now() - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S")
+    now = now or datetime.now()
+    created = (now - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S")
     db.execute("INSERT INTO airports (name, url, enabled, interval_minutes, created_at, updated_at)"
                " VALUES ('成熟度机场','http://x',1,60,?,?)", (created, created))
     airport_id = db.row("SELECT id FROM airports")["id"]
-    now = datetime.now()
     db.execute("INSERT INTO batches (started_at, finished_at, status, target_count, processed_count, published)"
                " VALUES (?,?, 'complete', 3, 3, 1)", (created, created))
     batch_id = db.row("SELECT MAX(id) AS id FROM batches")["id"]
@@ -111,8 +129,9 @@ def _half_hour_day():
 
 
 def test_full_seven_days_is_ample_and_scored():
-    _seed({back: _half_hour_day() for back in range(0, 7)})
-    with TestClient(app) as client:
+    base = datetime.now().replace(hour=23, minute=0, second=0, microsecond=0)
+    _seed({back: _half_hour_day() for back in range(0, 7)}, now=base)
+    with _freeze_at(23), TestClient(app) as client:
         row = _row(client)
     assert row["maturity_score"] >= 90
     assert row["data_status"] == "ample"
@@ -133,10 +152,11 @@ def test_qualified_but_not_full_days():
 
 def test_mixed_days():
     # 6 天各 12 份（完整）+ 1 天 3 份（不合格）
+    base = datetime.now().replace(hour=23, minute=0, second=0, microsecond=0)
     spec = {back: _half_hour_day() for back in range(0, 6)}
     spec[6] = [(h, 0) for h in range(3)]
-    _seed(spec, interval=30)
-    with TestClient(app) as client:
+    _seed(spec, interval=30, now=base)
+    with _freeze_at(23), TestClient(app) as client:
         row = _row(client)
     assert row["full_days"] == 6
     assert row["qualified_days"] == 6

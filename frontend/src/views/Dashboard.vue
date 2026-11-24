@@ -166,6 +166,11 @@ const statusCounts = computed(() => ({
   unknown: data.value?.nodes_unknown || 0,
 }))
 
+const rateMetrics = [
+  { key: 'available_rate' },
+  { key: 'publish_rate' },
+  { key: 'tag_rate' },
+]
 function scoreTone(row) {
   if (!row.enabled) return 'is-off'
   if (row.score === null || row.score === undefined) return 'is-empty'
@@ -205,7 +210,12 @@ function scoreSampleText(row) {
 }
 function rateText(row, key) {
   if (!row.enabled || row[key] === null || row[key] === undefined) return '—'
-  return `${Number(row[key]).toFixed(1)}%`
+  const value = Number(row[key])
+  return `${value % 1 === 0 ? value.toFixed(0) : value.toFixed(1)}%`
+}
+function metricWidth(row, key) {
+  if (!row.enabled || row[key] === null || row[key] === undefined) return 0
+  return Math.max(0, Math.min(100, Number(row[key])))
 }
 const rankedAirports = computed(() => {
   return [...(data.value?.airport_list || [])].sort((a, b) => {
@@ -386,7 +396,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
             <b>机场评价</b>
             <span>近 {{ data.score_window_days || 7 }} 天数据</span>
           </div>
-          <span>评分降序</span>
+          <span class="np-score-sort">按展示分降序 ↓</span>
         </div>
 
         <div v-if="data.airport_list?.length" class="np-score-table-wrap">
@@ -422,29 +432,21 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                   </div>
                   <small>{{ row.enabled ? `${row.pool_count} 节点` : `${row.node_count} 缓存` }} · {{ scoreSampleText(row) }}</small>
                 </td>
-                <td class="np-score-cell">
-                  <b>{{ rateText(row, 'available_rate') }}</b>
-                  <small>{{ row.enabled ? '加权' : '—' }}</small>
-                </td>
-                <td class="np-score-cell">
-                  <b>{{ rateText(row, 'publish_rate') }}</b>
-                  <small>{{ row.enabled ? '加权' : '—' }}</small>
-                </td>
-                <td class="np-score-cell">
-                  <b>{{ rateText(row, 'tag_rate') }}</b>
-                  <small>{{ row.enabled ? `${row.tag_ok_count || 0}/${row.pool_count}` : '—' }}</small>
+                <td v-for="metric in rateMetrics" :key="metric.key" class="np-score-cell">
+                  <div class="np-score-metric">
+                    <b>{{ rateText(row, metric.key) }}</b>
+                    <i v-if="row.enabled" class="np-meter"><s :style="{ width: metricWidth(row, metric.key) + '%' }" /></i>
+                  </div>
                 </td>
                 <td class="np-score-cell is-status" :title="statusHint(row)">
                   <div class="np-data-status" :class="statusTone(row)">
-                    <b>{{ row.data_status_text || '—' }}</b>
-                    <small>{{ row.data_status_detail || '' }}</small>
+                    <b>{{ row.data_status_text || '—' }}<em v-if="row.data_status_detail">{{ row.data_status_detail }}</em></b>
                   </div>
                 </td>
                 <td class="np-score-cell is-score" :title="scoreHint(row)">
                   <div class="np-pool-score" :class="scoreTone(row)">
                     <strong>{{ row.enabled && row.score !== null ? row.score : '—' }}</strong><em>{{ row.score_grade }}</em>
                   </div>
-                  <small v-if="row.enabled && row.raw_score !== null" class="np-score-raw">原 {{ row.raw_score }}</small>
                 </td>
               </tr>
             </tbody>
