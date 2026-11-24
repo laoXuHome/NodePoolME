@@ -25,7 +25,7 @@ from backend.testers import engine as engine_mod
 
 api = APIRouter(prefix="/api")
 protected = [Depends(auth.require_auth)]
-SCORE_WEIGHTS = {"available": 45, "publish": 45, "share": 5, "tag": 5}
+SCORE_WEIGHTS = {"available": 50, "publish": 40, "share": 5, "tag": 5}
 
 
 # ---------------------------------------------------------------------------- auth

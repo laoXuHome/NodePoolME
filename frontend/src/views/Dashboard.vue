@@ -151,8 +151,8 @@ const statusTopColor = computed(() => statusSegments.value[0]?.color || '#c7c7cc
 const scoreWeights = computed(() => {
   const weights = data.value?.score_weights || {}
   return {
-    available: weights.available ?? 45,
-    publish: weights.publish ?? 45,
+    available: weights.available ?? 50,
+    publish: weights.publish ?? 40,
     share: weights.share ?? 5,
     tag: weights.tag ?? 5,
   }
