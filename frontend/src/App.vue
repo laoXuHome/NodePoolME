@@ -135,6 +135,13 @@ function onMenu(path) {
         </div>
         <span v-else class="title">{{ title }}</span>
         <div class="np-flex" />
+        <div v-if="isMobile" class="np-mobile-tools">
+          <span class="np-ver is-mobile" :title="verTitle">
+            <i class="np-ver-dot" :class="{ 'is-new': update && update.has_update }" />
+            <span class="np-ver-text">v{{ version }}</span>
+          </span>
+          <a class="np-gh is-mobile" :href="repoUrl" target="_blank" rel="noopener">GitHub ↗</a>
+        </div>
         <div v-if="!isMobile" class="np-header-tools">
           <span class="np-ver" :title="verTitle">
             <i class="np-ver-dot" :class="{ 'is-new': update && update.has_update }" />

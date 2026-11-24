@@ -36,6 +36,14 @@ class RuntimeState:
         self.paused = False
         self.stop_requested = False
         self.pause_event: asyncio.Event | None = None
+        # 延迟检测 / 标签检测分开统计，供前端两条环形进度使用
+        self.latency_done = 0
+        self.latency_total = 0
+        self.tag_done = 0
+        self.tag_total = 0
+        # 当前正在测的节点（机场、节点名、当前检测项、延迟/结果），随请求更新
+        self.current: dict | None = None
+        self.airport_names: dict = {}
 
     def as_dict(self) -> dict:
         return {
@@ -57,6 +65,13 @@ class RuntimeState:
             "block_size": self.block_size,
             "paused": self.paused,
             "stop_requested": self.stop_requested,
+            "latency_done": self.latency_done,
+            "latency_total": self.latency_total,
+            "latency_pct": round(self.latency_done / self.latency_total * 100, 1) if self.latency_total else 0,
+            "tag_done": self.tag_done,
+            "tag_total": self.tag_total,
+            "tag_pct": round(self.tag_done / self.tag_total * 100, 1) if self.tag_total else 0,
+            "current": self.current,
         }
 
     def request_pause(self) -> dict:
@@ -240,6 +255,9 @@ async def _latency_task(nodes: list[dict], probes: list[dict], batch_id: int, gl
     async def one(node: dict) -> None:
         per_probe: dict[str, list] = {}
         try:
+            state.current = {"airport": state.airport_names.get(node.get("airport_id")),
+                             "node": node["raw_name"], "stage": "延迟检测", "result": "检测中",
+                             "protocol": node.get("protocol")}
             await _control_point()
             # Strictly alternating G, W, G, W, G, W; one request in flight per node.
             for _round in range(LATENCY_ROUNDS):
@@ -253,7 +271,17 @@ async def _latency_task(nodes: list[dict], probes: list[dict], batch_id: int, gl
                     per_probe.setdefault(probe["ident"], []).append(outcome)
                     _record_latency(node, probe, batch_id, outcome)
                     counters["ok"] += 1 if outcome.ok else 0
-            _apply_latency_gate(node, probes, per_probe)
+            passed = _apply_latency_gate(node, probes, per_probe)
+            best: dict[str, int | None] = {}
+            for ident, outcomes in per_probe.items():
+                values = [o.latency_ms for o in outcomes if o.ok and o.latency_ms]
+                best[ident] = min(values) if values else None
+            state.latency_done += 1
+            state.current = {"airport": state.airport_names.get(node.get("airport_id")),
+                             "node": node["raw_name"], "stage": "延迟检测",
+                             "result": "达标" if passed else "未达标",
+                             "g": best.get("G"), "w": best.get("W"),
+                             "protocol": node.get("protocol")}
             for probe in probes:
                 counters["groups"][probe["name"]] = counters["groups"].get(probe["name"], 0) + 1
                 for item in state.group_progress:
@@ -327,10 +355,18 @@ async def _test_one(node: dict, group: dict, batch_id: int | None, global_sem, g
                 if subnet_sem is not None:
                     await subnet_sem.acquire()
                 try:
+                    state.current = {"airport": state.airport_names.get(node.get("airport_id")),
+                                     "node": node["raw_name"], "stage": f"标签 {group['name']}",
+                                     "result": "检测中", "protocol": node.get("protocol")}
                     await _control_point()
                     await asyncio.sleep(engine_mod.jitter_ms())
                     outcome = await engine_mod.engine_manager.test(node, group)
                     _record(node, group, batch_id, outcome, manage_status=manage_status)
+                    state.current = {"airport": state.airport_names.get(node.get("airport_id")),
+                                     "node": node["raw_name"], "stage": f"标签 {group['name']}",
+                                     "result": "通过" if outcome.ok else "未通过",
+                                     "latency": outcome.latency_ms, "protocol": node.get("protocol")}
+                    state.tag_done += 1
                     counters["done"] += 1
                     counters["ok"] += 1 if outcome.ok else 0
                     counters["groups"][group["name"]] = counters["groups"].get(group["name"], 0) + 1
@@ -447,6 +483,12 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
             + [{"name": g["name"], "ident": g["ident"]} for g in groups]
         ]
         state.blocks = (len(nodes) + BLOCK_SIZE - 1) // BLOCK_SIZE
+        state.latency_total = len(nodes) if probes else 0
+        state.latency_done = 0
+        state.tag_total = len(nodes) * len(groups)
+        state.tag_done = 0
+        state.current = None
+        state.airport_names = {row["id"]: row["name"] for row in db.rows("SELECT id, name FROM airports")}
         state.block_index = 0
         state.block_size = 0
         global_sem = asyncio.Semaphore(max(1, db.get_int("global_concurrency", 10)))
@@ -467,10 +509,10 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                 state.phase = f"绑定第 {state.block_index}/{state.blocks} 块"
                 await engine_mod.engine_manager.prepare(block)
                 state.phase = "检测中"
-                tasks = []
+                # 先跑完延迟检测再跑标签检测：两条进度环各自推进，不会互相抢并发导致一环卡在 0%
                 if probes:
-                    tasks.append(_latency_task(block, probes, batch_id, global_sem,
-                                               node_locks, counters))
+                    await _latency_task(block, probes, batch_id, global_sem, node_locks, counters)
+                tasks = []
                 tasks.extend(
                     _group_task(g, block, batch_id, global_sem, node_locks, ip_sems,
                                 subnet_sems, counters, manage_status=not probes)

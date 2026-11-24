@@ -14,8 +14,10 @@ const logs = ref([])
 const logLevel = ref('ALL')
 const logsLoading = ref(false)
 const timer = ref(null)
+const rt = ref(null)
+const runtime = computed(() => rt.value || data.value?.runtime || {})
+let rtBusy = false
 const liveTimer = ref(null)
-let liveBusy = false
 
 async function loadLogs() {
   logsLoading.value = true
@@ -29,23 +31,12 @@ async function loadLogs() {
   }
 }
 
-async function refreshDashboard() {
-  if (liveBusy) return
-  liveBusy = true
-  try {
-    const next = await api.get('/api/dashboard')
-    data.value = next
-    running.value = next.runtime.running
-    syncLiveTimer()
-  } catch { /* 自动刷新失败时保留上一帧，不弹错打断阅读 */ }
-  finally { liveBusy = false }
-}
-
 async function load() {
   loading.value = true
   try {
     data.value = await api.get('/api/dashboard')
     running.value = data.value.runtime.running
+    rt.value = null
   } catch (err) {
     ElMessage.error(err.message)
   } finally {
@@ -55,11 +46,27 @@ async function load() {
   await loadLogs()
 }
 
+/** 只拉检测状态：仅在检测进行中轮询，且只更新检测卡片，不重绘曲线。 */
+async function pollRuntime() {
+  if (rtBusy) return
+  rtBusy = true
+  try {
+    const next = await api.get('/api/runtime')
+    rt.value = next
+    if (!next.running) {
+      rt.value = null
+      syncLiveTimer()
+      await load()
+    }
+  } catch { /* 轮询失败保留上一帧 */ }
+  finally { rtBusy = false }
+}
+
 function syncLiveTimer() {
   clearInterval(liveTimer.value)
   liveTimer.value = null
-  if (data.value?.batch?.status === 'running') {
-    liveTimer.value = setInterval(() => { if (!document.hidden) refreshDashboard() }, 3000)
+  if (runtime.value?.running) {
+    liveTimer.value = setInterval(() => { if (!document.hidden) pollRuntime() }, 2000)
   }
 }
 
@@ -254,14 +261,14 @@ const fetchState = computed(() => {
   return { text: '正常', type: 'success' }
 })
 const runStateText = computed(() => {
-  const r = data.value?.runtime
+  const r = runtime.value
   if (!r?.running) return '空闲'
   if (r.stop_requested) return '正在停止'
   if (r.paused) return '已暂停'
   return '检测中'
 })
 const runTagType = computed(() => {
-  const r = data.value?.runtime
+  const r = runtime.value
   if (!r?.running) return 'success'
   return r.stop_requested ? 'danger' : r.paused ? 'info' : 'warning'
 })
@@ -269,8 +276,15 @@ const batchStatusLabel = computed(() => {
   const map = { running: '检测中', complete: '已完成', stopped: '已停止', failed: '失败', aborted: '已中止' }
   return map[data.value?.batch?.status] || data.value?.batch?.status || '—'
 })
+const latencyPct = computed(() => Math.round(runtime.value?.latency_pct || 0))
+const tagPct = computed(() => Math.round(runtime.value?.tag_pct || 0))
+const runTone = computed(() => {
+  const r = runtime.value
+  if (!r?.running) return 'done'
+  return r.stop_requested ? 'failed' : 'running'
+})
 const cyclePct = computed(() => {
-  const r = data.value?.runtime
+  const r = runtime.value
   if (!r || !r.total) return 0
   return Math.round((r.done || 0) / r.total * 100)
 })
@@ -362,18 +376,18 @@ const nextAutoText = computed(() => {
 })
 
 function roundDone(name) {
-  const item = (data.value?.runtime?.group_progress || []).find((g) => g.name === name)
+  const item = (runtime.value?.group_progress || []).find((g) => g.name === name)
   return item ? `${item.done}/${item.total}` : '—'
 }
 function roundPercent(name) {
-  const item = (data.value?.runtime?.group_progress || []).find((g) => g.name === name)
+  const item = (runtime.value?.group_progress || []).find((g) => g.name === name)
   if (!item || !item.total) return 0
   return Math.round(item.done / item.total * 100)
 }
 
 onMounted(() => {
+  // 只在检测进行中才轮询，空闲时不做任何定时刷新
   load()
-  timer.value = setInterval(() => { if (!document.hidden) load() }, 15000)
 })
 onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) })
 </script>
@@ -517,119 +531,106 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
         <div class="np-detect-head">
           <div class="np-detect-title">
             检测任务
-            <el-tag v-if="data?.runtime.running" :type="runTagType" size="small">{{ runStateText }}</el-tag>
+            <el-tag v-if="runtime.running" :type="runTagType" size="small">{{ runStateText }}</el-tag>
             <el-tag v-else type="success" size="small">空闲</el-tag>
           </div>
           <div class="np-detect-inline">
-            <span>引擎 <b>{{ data.runtime.engine }}</b></span>
-            <span>上次启动 {{ shortTs(data.runtime.last_cycle_at || data.batch?.started_at) }}</span>
+            <span>引擎 <b>{{ runtime.engine }}</b></span>
+            <span>上次启动 {{ shortTs(runtime.last_cycle_at || data.batch?.started_at) }}</span>
           </div>
           <div class="np-detect-actions">
-            <el-button v-if="!data?.runtime.running" size="small" type="primary" @click="runNow">立即检测并下发</el-button>
-            <el-button v-if="data?.runtime.running && !data.runtime.paused"
-                       size="small" :disabled="data.runtime.stop_requested" @click="pauseCycle">暂停</el-button>
-            <el-button v-if="data?.runtime.running && data.runtime.paused"
-                       size="small" type="success" :disabled="data.runtime.stop_requested" @click="resumeCycle">继续</el-button>
-            <el-button v-if="data?.runtime.running" size="small" type="danger" plain
-                       :disabled="data.runtime.stop_requested" @click="stopCycle">
-              {{ data.runtime.stop_requested ? '正在停止' : '停止并下发' }}
+            <el-button v-if="!runtime.running" size="small" type="primary" @click="runNow">立即检测</el-button>
+            <el-button v-if="runtime.running && !runtime.paused"
+                       size="small" :disabled="runtime.stop_requested" @click="pauseCycle">暂停</el-button>
+            <el-button v-if="runtime.running && runtime.paused"
+                       size="small" type="success" :disabled="runtime.stop_requested" @click="resumeCycle">继续</el-button>
+            <el-button v-if="runtime.running" size="small" type="danger" plain
+                       :disabled="runtime.stop_requested" @click="stopCycle">
+              {{ runtime.stop_requested ? '正在停止' : '停止检测' }}
             </el-button>
           </div>
         </div>
 
-        <div v-if="data.batch" class="np-detect-batch" :class="`is-${batchTone}`">
-          <div class="np-detect-batch-main">
-            <div class="np-batch-gauge is-compact" :class="`is-${batchTone}`">
+        <div class="np-detect-rings">
+          <div class="np-ring-item">
+            <div class="np-batch-gauge is-ring" :class="`is-${runTone}`">
               <svg viewBox="0 0 160 160" aria-hidden="true">
                 <circle class="np-batch-gauge-track" cx="80" cy="80" r="65" pathLength="100" />
                 <circle class="np-batch-gauge-value" cx="80" cy="80" r="65" pathLength="100"
-                        :style="{ strokeDasharray: `${batchPct} 100` }" />
+                        :style="{ strokeDasharray: `${latencyPct} 100` }" />
               </svg>
-              <div class="np-batch-gauge-label">
-                <strong>{{ batchPct }}</strong><span>%</span>
-              </div>
+              <div class="np-batch-gauge-label"><strong>{{ latencyPct }}</strong><span>%</span></div>
             </div>
-            <div class="np-detect-batch-copy">
-              <div class="np-batch-state">
-                <i class="np-batch-state-dot" />
-                <b>{{ batchStatusLabel }}</b>
-                <span>批次 #{{ data.batch.id }}</span>
-              </div>
-              <div class="np-batch-count">
-                <strong>{{ data.batch.processed_count }}</strong>
-                <span>/ {{ data.batch.target_count }}</span>
-              </div>
-              <div class="np-batch-count-label">已处理检测项 · {{ data.batch.published ? '已发布' : '未发布' }}</div>
-              <div class="np-detect-batch-kpis">
-                <div><span>剩余</span><b>{{ batchRemaining }}</b></div>
-                <div><span>耗时</span><b>{{ batchDuration }}</b></div>
-              </div>
+            <div class="np-ring-meta">
+              <b>延迟检测</b>
+              <span>{{ runtime.latency_done || 0 }} / {{ runtime.latency_total || 0 }} 节点</span>
             </div>
           </div>
-          <div class="np-detect-batch-steps">
-            <div class="is-done"><i>1</i><span>开始</span><b>{{ shortTs(data.batch.started_at) }}</b></div>
-            <div :class="{ 'is-active': data.batch.status === 'running', 'is-done': batchTone === 'done', 'is-failed': batchTone === 'failed' }">
-              <i>2</i><span>检测</span><b>{{ batchPct }}%</b>
+          <div class="np-ring-item">
+            <div class="np-batch-gauge is-ring is-tag" :class="`is-${runTone}`">
+              <svg viewBox="0 0 160 160" aria-hidden="true">
+                <circle class="np-batch-gauge-track" cx="80" cy="80" r="65" pathLength="100" />
+                <circle class="np-batch-gauge-value" cx="80" cy="80" r="65" pathLength="100"
+                        :style="{ strokeDasharray: `${tagPct} 100` }" />
+              </svg>
+              <div class="np-batch-gauge-label"><strong>{{ tagPct }}</strong><span>%</span></div>
             </div>
-            <div :class="{ 'is-done': data.batch.published, 'is-failed': batchTone === 'failed' && !data.batch.published }">
-              <i>3</i><span>发布</span><b>{{ data.batch.published ? '已发布' : '未发布' }}</b>
+            <div class="np-ring-meta">
+              <b>标签检测</b>
+              <span>{{ runtime.tag_done || 0 }} / {{ runtime.tag_total || 0 }} 项</span>
             </div>
           </div>
         </div>
-        <div v-else class="np-empty">尚未运行过检测批次</div>
+
+        <div class="np-current" :class="{ 'is-idle': !runtime.running }">
+          <template v-if="runtime.running && runtime.current">
+            <div class="np-current-head">
+              <i class="np-current-dot" />
+              <span>正在检测</span>
+              <span class="np-flex" />
+              <span class="np-current-stage">{{ runtime.current.stage }}</span>
+            </div>
+            <div class="np-current-node">
+              <b :title="runtime.current.node">{{ runtime.current.node }}</b>
+            </div>
+            <div class="np-current-meta">
+              <span>{{ runtime.current.airport || '—' }}</span>
+              <span v-if="runtime.current.protocol">{{ runtime.current.protocol }}</span>
+              <span v-if="runtime.current.g || runtime.current.w" class="np-current-lat">
+                G {{ runtime.current.g ?? '—' }}ms · W {{ runtime.current.w ?? '—' }}ms
+              </span>
+              <span v-else-if="runtime.current.latency" class="np-current-lat">{{ runtime.current.latency }}ms</span>
+              <span class="np-current-result" :class="{ 'is-bad': ['未达标','未通过'].includes(runtime.current.result) }">
+                {{ runtime.current.result }}
+              </span>
+            </div>
+          </template>
+          <template v-else>
+            <div class="np-current-head">
+              <i class="np-current-dot is-idle" />
+              <span>{{ runtime.running ? '等待节点数据' : '当前空闲' }}</span>
+              <span class="np-flex" />
+              <span v-if="runtime.phase && runtime.running" class="np-current-stage">{{ runtime.phase }}</span>
+            </div>
+            <div class="np-current-meta">
+              <span>批次 #{{ runtime.batch_id || '—' }}</span>
+              <span>已处理 {{ runtime.done || 0 }} / {{ runtime.total || 0 }} 项</span>
+              <span v-if="runtime.last_cycle_at">上次启动 {{ shortTs(runtime.last_cycle_at) }}</span>
+            </div>
+          </template>
+        </div>
+
+        <div class="np-detect-batch-meta">
+          <span>批次 #{{ data.batch?.id || '—' }}</span>
+          <span>{{ batchStatusLabel }}</span>
+          <span>耗时 {{ batchDuration }}</span>
+          <span>剩余 {{ batchRemaining }}</span>
+        </div>
 
         <div class="np-detect-sumstats">
           <div><span>启用标签</span><b>{{ data.group_summary?.count || 0 }}</b></div>
           <div><span>命中节点</span><b>{{ data.group_summary?.hits || 0 }}</b></div>
           <div><span>累计通过</span><b>{{ data.group_summary?.passed || 0 }}</b></div>
-        </div>
-
-        <div class="np-detect-list">
-          <div v-for="row in data.groups" :key="row.id" class="np-detect-label-row" :class="{ 'is-off': !row.enabled }">
-            <span class="np-detect-ident">{{ row.ident }}</span>
-            <div class="np-detect-label-main">
-              <div class="np-detect-label-title">
-                <span class="np-detect-label-name">{{ row.name }}</span>
-                <el-tag :type="row.enabled ? 'success' : 'info'" size="small" effect="plain">
-                  {{ row.enabled ? '启用' : '停用' }}
-                </el-tag>
-              </div>
-              <div class="np-detect-label-url" :title="row.url">{{ row.url }}</div>
-              <div v-if="data.runtime.running" class="np-detect-progress">
-                <div class="np-detect-track"><i :style="{ width: `${roundPercent(row.name)}%` }" /></div>
-                <div class="np-detect-progress-meta"><span>{{ roundDone(row.name) }}</span><b>{{ roundPercent(row.name) }}%</b></div>
-              </div>
-            </div>
-            <div class="np-detect-passed">
-              <b>{{ row.passed }}</b><span>累计通过</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="np-detect-footer">
-          <span>延迟门槛</span>
-          <el-tooltip :content="`${data.latency_probe?.url || '—'} / ${data.latency_probe?.url2 || '—'}`" placement="top">
-            <b>{{ data.latency_probe?.names?.G?.short || 'G' }} ≤ {{ data.latency_probe?.ceiling || '不限' }}ms · {{ data.latency_probe?.names?.W?.short || 'W' }} ≤ {{ data.latency_probe?.ceiling2 || '不限' }}ms</b>
-          </el-tooltip>
-          <span class="np-flex" />
-          <span>每批重测 G / W</span>
-        </div>
-
-        <div class="np-detect-sub">
-          <div class="np-detect-sub-head">
-            <span class="np-dot" :class="data.publish_schedule?.enabled ? 'is-success' : 'is-info'" />
-            <b>订阅下发</b>
-            <el-tag :type="data.publish_schedule?.enabled ? 'success' : 'info'" size="small" effect="plain">
-              {{ data.publish_schedule?.enabled ? '已启用' : '未启用' }}
-            </el-tag>
-            <span class="np-flex" />
-            <span class="np-detect-sub-note">{{ subText }}自动下发</span>
-          </div>
-          <div class="np-detect-sub-grid">
-            <div><span>下次执行</span><b>{{ nextAutoText }}</b></div>
-            <div><span>上次下发</span><b>{{ shortTs(data.publish?.last_auto_at || data.publish?.last_batch_at) }}</b></div>
-            <div><span>最近生成</span><b>{{ shortTs(data.subscription?.updated_at) }}</b></div>
-          </div>
         </div>
       </div>
 
