@@ -27,7 +27,7 @@ from backend.testers import engine as engine_mod
 
 api = APIRouter(prefix="/api")
 protected = [Depends(auth.require_auth)]
-SCORE_WEIGHTS = {"available": 50, "publish": 40, "share": 5, "tag": 5}
+SCORE_WEIGHTS = {"available": 60, "publish": 35, "tag": 5}
 DATA_STATUS_TEXT = {
     "ample": "充足", "normal": "正常", "reference": "参考", "rough": "大概",
     "insufficient": "数据不足", "unknown": "计划未知",
@@ -436,16 +436,15 @@ async def dashboard(days: int = 7):
         payload["plan_estimated"] = plan_estimated
         detail = f"{maturity_value:.0f} 分" + ("（推定）" if plan_estimated else "")
         if airport["enabled"] and pool_count:
-            # 综合评分：近 7 天可用率 50% + 下发率 40% + 池占比 5% + 标签合格率 5%
+            # 综合评分：近 7 天可用率 60% + 下发率 35% + 标签合格率 5%
+            # 池占比是节点池自身的结构特征，不代表机场质量，不参与评分
             if samples:
                 publish_rate = _weighted_mean(samples, "published")
-                share = _weighted_mean(samples, "share")
-                if publish_rate is None or share is None:
+                if publish_rate is None:
                     publish_rate = payload["published_count"] / pool_count
-                    share = pool_count / nodes_total if nodes_total else 0
             else:
                 publish_rate = payload["published_count"] / pool_count
-                share = pool_count / nodes_total if nodes_total else 0
+            share = pool_count / nodes_total if nodes_total else 0
             health = _weighted_mean(samples, "available")
             if health is None:
                 health = avail_count / pool_count
@@ -456,7 +455,6 @@ async def dashboard(days: int = 7):
             score = round(100 * (
                 SCORE_WEIGHTS["available"] / 100 * health
                 + SCORE_WEIGHTS["publish"] / 100 * publish_rate
-                + SCORE_WEIGHTS["share"] / 100 * share
                 + SCORE_WEIGHTS["tag"] / 100 * tag_rate
             ))
             if maturity_status == "insufficient":

@@ -191,10 +191,9 @@ function scoreHint(row) {
   if (!pool) return '缓存池为空，暂不评分'
   const health = row.available_rate ?? Math.round((row.available_count || 0) / pool * 100)
   const publish = row.publish_rate ?? Math.round((row.published_count || 0) / pool * 100)
-  const share = row.share_rate ?? Math.round(pool / (data.value?.nodes_total || 1) * 100)
   const tag = row.tag_rate ?? Math.round((row.tag_ok_count || 0) / pool * 100)
   const basis = row.score_samples ? `近 7 天 ${row.score_samples} 个完整检测快照` : '无完整检测快照，按当前值'
-  return `${basis} · 可用率 ${health}%（×${scoreWeights.value.available}%）· 下发率 ${publish}%（×${scoreWeights.value.publish}%）· 池占比 ${share}%（×${scoreWeights.value.share}%）· 标签合格率 ${tag}%（×${scoreWeights.value.tag}%）→ 综合 ${row.score} 分`
+  return `${basis} · 可用率 ${health}%（×${scoreWeights.value.available}%）· 下发率 ${publish}%（×${scoreWeights.value.publish}%）· 标签合格率 ${tag}%（×${scoreWeights.value.tag}%）→ 综合 ${row.score} 分`
 }
 function scoreSampleText(row) {
   if (!row.enabled) return '未启用'
@@ -396,7 +395,6 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               <col class="np-score-col-rate" />
               <col class="np-score-col-rate" />
               <col class="np-score-col-rate" />
-              <col class="np-score-col-rate" />
               <col class="np-score-col-status" />
               <col class="np-score-col-score" />
             </colgroup>
@@ -406,7 +404,6 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 <th class="is-left">机场</th>
                 <th>可用率 <i>{{ scoreWeights.available }}%</i></th>
                 <th>下发率 <i>{{ scoreWeights.publish }}%</i></th>
-                <th>池占比 <i>{{ scoreWeights.share }}%</i></th>
                 <th>标签合格率 <i>{{ scoreWeights.tag }}%</i></th>
                 <th class="is-status">数据成熟度</th>
                 <th class="is-score">评分</th>
@@ -432,10 +429,6 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                   <small>{{ row.enabled ? '加权' : '—' }}</small>
                 </td>
                 <td class="np-score-cell">
-                  <b>{{ rateText(row, 'share_rate') }}</b>
-                  <small>{{ row.enabled ? '加权' : '—' }}</small>
-                </td>
-                <td class="np-score-cell">
                   <b>{{ rateText(row, 'tag_rate') }}</b>
                   <small>{{ row.enabled ? `${row.tag_ok_count || 0}/${row.pool_count}` : '—' }}</small>
                 </td>
@@ -455,7 +448,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           </table>
         </div>
         <div v-if="data.airport_list?.length" class="np-score-foot">
-          <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 池占比 {{ scoreWeights.share }}% + 标签合格率 {{ scoreWeights.tag }}%；前 3 项取近 {{ data.score_window_days || 7 }} 天里按检测计划生成、且被快照命中的采样点，再做时段加权（17:00–01:00 权重 50%、01:00–08:00 15%、08:00–17:00 35%）</span>
+          <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 标签合格率 {{ scoreWeights.tag }}%；前 2 项取近 {{ data.score_window_days || 7 }} 天里按检测计划生成、且被快照命中的采样点，再做时段加权（17:00–01:00 权重 50%、01:00–08:00 15%、08:00–17:00 35%）</span>
           <span>覆盖率 = 有效采样点 / 计划采样点，只反映数据完整度，不参与评分；每天不足 4 份或 60 分钟内超过 2 份的日期整日淘汰，暂停、中断和单节点测试不计入</span>
         </div>
         </div>

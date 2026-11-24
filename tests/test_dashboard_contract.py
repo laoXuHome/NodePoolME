@@ -34,7 +34,7 @@ def test_dashboard_has_latency_probe():
         assert {"count", "hits", "passed"} <= set(data["group_summary"].keys())
         assert {"last_auto", "nodes"} <= set(data["publish"].keys())
         assert data.get("score_window_days") == 7
-        assert data.get("score_weights") == {"available": 50, "publish": 40, "share": 5, "tag": 5}
+        assert data.get("score_weights") == {"available": 60, "publish": 35, "tag": 5}
         assert isinstance(data.get("share_history"), list)
         for point in data.get("share_history", []):
             assert "total_available" in point
