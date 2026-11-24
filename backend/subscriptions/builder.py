@@ -126,6 +126,41 @@ def latest_latency(batch_id: int | None = None) -> dict[int, dict]:
     return out
 
 
+def filter_keywords() -> list[str]:
+    """下发关键词过滤：每行一个关键词，# 开头为注释，逗号也视为分隔。
+
+    只作用于「订阅输出」，不参与机场评分（评分用的是未过滤的检测快照）。
+    """
+    raw = db.get("sub_filter_keywords") or ""
+    keys: list[str] = []
+    for piece in raw.replace("，", ",").splitlines():
+        for item in piece.split(","):
+            key = item.strip().lower()
+            if key and not key.startswith("#") and key not in keys:
+                keys.append(key)
+    return keys
+
+
+def apply_name_filter(nodes: list[dict]) -> tuple[list[dict], list[dict]]:
+    """按关键词剔除不适合下发的节点（机场名、节点名、服务器地址任一命中即剔除）。"""
+    keys = filter_keywords()
+    if not keys:
+        return nodes, []
+    kept: list[dict] = []
+    dropped: list[dict] = []
+    for node in nodes:
+        haystack = " ".join(str(x or "") for x in (
+            node.get("display_name"), node.get("raw_name"), node.get("server"),
+        )).lower()
+        hit = next((k for k in keys if k in haystack), None)
+        if hit:
+            dropped.append({"id": node.get("id"), "name": node.get("display_name"),
+                            "airport_id": node.get("airport_id"), "keyword": hit})
+        else:
+            kept.append(node)
+    return kept, dropped
+
+
 def collect_nodes(batch_id: int | None = None) -> tuple[list[dict], dict]:
     """Apply eligibility rules and compute display names.
 
@@ -491,6 +526,10 @@ def add_published_node(node_id: int) -> dict:
     entry = next((n for n in fresh if n["id"] == node_id), None)
     if not entry:
         return {"ok": False, "reason": "节点未达到下发条件"}
+    kept, dropped = apply_name_filter([entry])
+    if not kept:
+        return {"ok": False,
+                "reason": f"该节点命中下发过滤关键词「{dropped[0]['keyword']}」，请先到设置页移除对应关键词"}
     nodes.append(entry)
 
     sub_name = db.get("sub_name", "NodePool Unified") or "NodePool Unified"
@@ -526,16 +565,29 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
     cycle early publishes exactly the progress achieved so far.
     """
     nodes, stats = collect_nodes(batch_id)
+    out_nodes, dropped = apply_name_filter(nodes)
+    if dropped:
+        sample = "、".join(str(d["name"]) for d in dropped[:3])
+        db.append_log("INFO", "下发",
+                      f"关键词过滤剔除 {len(dropped)} 个节点（{sample}"
+                      f"{'…' if len(dropped) > 3 else ''}），评分统计仍按 {len(nodes)} 个达标节点计算")
+    stats = {**stats, "filtered": len(dropped), "after_filter": len(out_nodes),
+             "filter_hits": dropped[:10]}
     sub_name = db.get("sub_name", "NodePool Unified") or "NodePool Unified"
     previous = meta()
-    if not nodes and previous.get("nodes"):
+    if not out_nodes and previous.get("nodes"):
         db.append_log("WARN", "下发",
-                      "本批次没有符合下发条件的节点，保留原有订阅不变")
+                      "本批次没有可下发的节点（已达标的节点可能全部被关键词过滤），保留原有订阅不变")
+        try:
+            # 仍按未过滤的达标节点记录快照，保证下拉/评分曲线不因过滤出现断点
+            record_share_snapshot(nodes, batch_id, reason, total_nodes=stats.get("total"))
+        except Exception as exc:
+            db.append_log("WARN", "仪表盘", f"占比历史写入失败：{exc}")
         return {**previous, "skipped": True, "stats": stats}
     written = {}
     for fmt, (filename, fn) in FORMATS.items():
-        content = fn(nodes, sub_name) if fmt != "base64" else fn(nodes)
-        validate(fmt, content, nodes)
+        content = fn(out_nodes, sub_name) if fmt != "base64" else fn(out_nodes)
+        validate(fmt, content, out_nodes)
         target = config.SUB_DIR / filename
         tmp = config.SUB_DIR / f".{filename}.tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -544,9 +596,9 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
         written[fmt] = str(target)
     manifest = {
         "name": sub_name,
-        "nodes": len(nodes),
-        "node_ids": [n["id"] for n in nodes],
-        "node_names": [{"id": n["id"], "name": n["display_name"]} for n in nodes],
+        "nodes": len(out_nodes),
+        "node_ids": [n["id"] for n in out_nodes],
+        "node_names": [{"id": n["id"], "name": n["display_name"]} for n in out_nodes],
         "updated_at": _fmt_ts(),
         "batch_id": batch_id,
         "reason": reason,
@@ -558,14 +610,16 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
         json.dump(manifest, fh, ensure_ascii=False, indent=2)
     os.replace(tmp, config.SUB_DIR / "meta.json")
     db.set_setting("sub_last_generated_at", manifest["updated_at"])
-    db.set_setting("sub_node_count", str(len(nodes)))
+    db.set_setting("sub_node_count", str(len(out_nodes)))
     reason_cn = {
         "airport toggle": "机场启停", "manual": "手动", "manual rebuild": "手动重建",
         "restore": "数据库恢复", "schedule": "定时检测", "scheduled publish": "定时下发",
     }.get(reason, reason)
     if str(reason).startswith("batch#"):
         reason_cn = "批次 #" + str(reason)[6:]
-    db.append_log("INFO", "下发", f"订阅已下发（{len(nodes)} 个节点，原因：{reason_cn}）")
+    filtered_note = f"，过滤 {len(dropped)} 个" if dropped else ""
+    db.append_log("INFO", "下发",
+                  f"订阅已下发（{len(out_nodes)} 个节点{filtered_note}，原因：{reason_cn}）")
     try:
         record_share_snapshot(nodes, batch_id, reason, ts=manifest["updated_at"], total_nodes=stats.get("total"))
     except Exception as exc:

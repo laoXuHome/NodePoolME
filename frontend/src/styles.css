@@ -1408,3 +1408,11 @@ tr.is-off .np-score-cell b { color: #b0b5bf; }
   .np-tabx .el-icon { font-size: 15px; }
   .np-brandname { display: none; }
 }
+
+/* 下发关键词过滤：多行输入框 */
+.np-filter-box textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.8px;
+  line-height: 1.75;
+  letter-spacing: 0.2px;
+}

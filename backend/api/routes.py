@@ -932,6 +932,7 @@ async def rebuild_subscription():
 @api.get("/subscription/preview", dependencies=protected)
 async def preview_subscription(fmt: str = "clash"):
     nodes, stats = builder.collect_nodes()
+    nodes, dropped = builder.apply_name_filter(nodes)
     sub_name = db.get("sub_name", "NodePool Unified")
     if fmt == "clash":
         content = builder.build_clash(nodes, sub_name)
@@ -940,7 +941,8 @@ async def preview_subscription(fmt: str = "clash"):
     else:
         content = builder.build_base64(nodes)
     return PlainTextResponse(content, media_type="text/plain; charset=utf-8",
-                             headers={"X-Nodepool-Nodes": str(len(nodes))})
+                             headers={"X-Nodepool-Nodes": str(len(nodes)),
+                                      "X-Nodepool-Filtered": str(len(dropped))})
 
 
 # ---------------------------------------------------------------------------- settings
@@ -952,7 +954,7 @@ SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "su
                 "latency_test_name2", "latency_test_status",
                 "latency_test_timeout", "sub_max_latency", "sub_max_latency2",
                 "sub_publish_enabled", "sub_publish_time", "sub_publish_mode",
-                "sub_publish_interval_minutes", "sub_required_tags"]
+                "sub_publish_interval_minutes", "sub_required_tags", "sub_filter_keywords"]
 
 
 @api.get("/settings", dependencies=protected)

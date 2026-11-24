@@ -68,6 +68,7 @@ class SubSettings(BaseModel):
     sub_publish_mode: Optional[str] = Field(default=None, pattern=r"^(time|interval)$")
     sub_publish_interval_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
     sub_required_tags: Optional[list[str]] = None
+    sub_filter_keywords: Optional[str] = Field(default=None, max_length=4000)
 
 
 class SettingsIn(BaseModel):
@@ -96,6 +97,7 @@ class SettingsIn(BaseModel):
     sub_publish_mode: Optional[str] = Field(default=None, pattern=r"^(time|interval)$")
     sub_publish_interval_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
     sub_required_tags: Optional[list[str]] = None
+    sub_filter_keywords: Optional[str] = Field(default=None, max_length=4000)
 
 
 class RunIn(BaseModel):
