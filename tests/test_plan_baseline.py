@@ -58,7 +58,7 @@ def test_legacy_db_gets_estimated_baseline():
 
 
 def test_recorded_plan_is_not_marked_estimated():
-    _seed_legacy()
+    _seed_legacy(days=7)
     db.execute("INSERT INTO schedule_history (changed_at, interval_minutes, source)"
                " VALUES (?, 30, 'settings')",
                ((datetime.now() - timedelta(days=9)).strftime("%Y-%m-%d %H:%M:%S"),))

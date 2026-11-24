@@ -85,6 +85,7 @@ class RuntimeState:
         self.paused = True
         self.phase = "已暂停"
         db.append_log("INFO", "检测", f"批次 #{self.batch_id} 已暂停")
+        db.record_run_event("pause", self.batch_id)
         return {"ok": True, **self.as_dict()}
 
     def request_resume(self) -> dict:
@@ -96,6 +97,7 @@ class RuntimeState:
         self.paused = False
         self.phase = "检测中"
         db.append_log("INFO", "检测", f"批次 #{self.batch_id} 已继续")
+        db.record_run_event("resume", self.batch_id)
         return {"ok": True, **self.as_dict()}
 
     def request_stop(self) -> dict:
@@ -108,6 +110,7 @@ class RuntimeState:
             self.pause_event = asyncio.Event()
         self.pause_event.set()
         db.append_log("INFO", "检测", f"批次 #{self.batch_id} 正在停止，将按当前进度下发")
+        db.record_run_event("stop", self.batch_id)
         return {"ok": True, **self.as_dict()}
 
 
@@ -543,6 +546,7 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                     "stopped": stopped, "reason": reason}
         except Exception as exc:
             state.last_error = "检测批次失败，请查看系统日志"
+            db.record_run_event("crash", batch_id, str(exc)[:200])
             db.execute("UPDATE batches SET finished_at=?, status='failed', note=? WHERE id=?",
                        (db.now(), state.last_error[:500], batch_id))
             db.append_log("ERROR", "检测", f"批次 #{batch_id} 失败：{state.last_error}（{type(exc).__name__}：{exc}）")

@@ -21,7 +21,7 @@ from backend.models.schemas import (AirportIn, AirportPatch, GroupIn, GroupPatch
                                     NodeTestIn, PasswordIn, RunIn, SettingsIn, SubSettings)
 from backend.scheduler import manager
 from backend.services import fetcher
-from backend.scoring import sampler
+from backend.scoring import eligibility, sampler
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
 
@@ -335,17 +335,35 @@ async def dashboard(days: int = 7):
                               and baseline_stamp and baseline_stamp > window_start)
     segments = sampler.build_segments(_schedule_plan(), window_start, local_now)
     sample_points = sampler.generate_points(segments, snapshot_stamps, local_now)
-    matched = sampler.match_points(sample_points, snapshot_stamps)
-    known_points = [point for point in sample_points if point.known]
-    matched_known = [pair for pair in matched if sample_points[pair[0]].known]
-    coverage = (len(matched_known) / len(known_points)) if known_points else None
+    # 每日准入：整日 ≥4 份 → 60 分钟密度 ≤2 份 → 复核 ≥4 份，淘汰日的点不进分母
+    abnormal = eligibility.build_abnormal_ranges(
+        db.rows("SELECT started_at, finished_at, status FROM batches WHERE started_at >= ?",
+                (window_start.strftime("%Y-%m-%d %H:%M:%S"),)),
+        db.rows("SELECT ts, kind, batch_id FROM run_events WHERE ts >= ?",
+                (window_start.strftime("%Y-%m-%d %H:%M:%S"),)),
+        db.rows("SELECT ts, message FROM logs WHERE ts >= ? AND source='系统'",
+                (window_start.strftime("%Y-%m-%d %H:%M:%S"),)),
+        window_start, local_now,
+    )
+    selection = eligibility.select_snapshots(snapshot_stamps, sample_points, abnormal)
+    score_days_set = selection.scored_days
+    excluded_points = sum(1 for point in sample_points
+                          if point.known and eligibility.is_excluded(point.time, abnormal))
+    known_points = [point for point in sample_points
+                    if point.known and eligibility.local_day(point.time) in score_days_set
+                    and not eligibility.is_excluded(point.time, abnormal)]
+    matched = sampler.match_points(known_points, selection.kept)
+    coverage = (len(matched) / len(known_points)) if known_points else None
     plan_known = bool(segments) and all(segment.known for segment in segments)
     # 只有"计划要求、又被真实快照匹配上"的采样点参与评分；缺失的点不补零、不去凑
+    snapshot_by_ts = {point["ts"][:19]: point for point in snapshot_points}
     score_samples: dict[int, list[dict]] = {}
-    for point_index, snapshot_index in matched_known:
-        point = snapshot_points[snapshot_index]
+    for point_index, snapshot_index in matched:
+        point = snapshot_by_ts.get(selection.kept[snapshot_index].strftime("%Y-%m-%d %H:%M:%S"))
+        if not point:
+            continue
         point_total = point.get("total_nodes") or 0
-        stamp = sample_points[point_index].time.strftime("%Y-%m-%d %H:%M:%S")
+        stamp = known_points[point_index].time.strftime("%Y-%m-%d %H:%M:%S")
         for airport_id, counts in (point.get("airports") or {}).items():
             pool = counts.get("pool_count") or 0
             if not pool:
@@ -357,6 +375,12 @@ async def dashboard(days: int = 7):
                 "share": pool / point_total if point_total else 0,
                 "ts": stamp,
             })
+    ok_days = len(score_days_set)
+    day_stats_payload = [
+        {"date": item.date, "eligible": item.eligible,
+         "kept": item.kept, "reason": item.reason}
+        for item in selection.day_stats
+    ]
     fetch_next: list[str] = []
     manual_only = 0
     airport_list: list[dict] = []
@@ -370,6 +394,10 @@ async def dashboard(days: int = 7):
             else:
                 fetch_next.append(airport["next_run_at"])
         payload = _airport_payload(airport)
+        payload["eligible_days"] = ok_days
+        payload["dropped_days"] = len(selection.dropped_days)
+        payload["day_stats"] = day_stats_payload
+        payload["excluded_points"] = excluded_points
         payload["next_run_at"] = airport["next_run_at"]
         payload["manual_only"] = airport["manual_only"]
         payload["published_count"] = published_by_airport.get(airport["id"], 0)
@@ -389,6 +417,12 @@ async def dashboard(days: int = 7):
         detail_coverage = coverage if plan_known else None
         status = sampler.data_status(maturity_days, detail_coverage)
         if plan_estimated and status == "normal":
+            status = "reference"
+        ok_days = len(score_days_set)
+        if maturity_days >= 1 and ok_days < eligibility.MIN_DAILY_SNAPSHOTS:
+            # 合格日不足 4 天：证据不够，不给评分
+            status = "insufficient"
+        elif status == "normal" and ok_days < score_days:
             status = "reference"
         payload["coverage"] = round(detail_coverage * 100, 1) if detail_coverage is not None else None
         payload["maturity_days"] = round(maturity_days, 1)
@@ -435,9 +469,10 @@ async def dashboard(days: int = 7):
                 payload["data_status_detail"] = f"{maturity_days:.1f}/7 天"
             elif payload["coverage"] is not None:
                 payload["data_status_detail"] = (f"{payload['coverage']:.1f}%"
-                                                 + ("（推定）" if plan_estimated else ""))
+                                                 + ("（推定）" if plan_estimated else "")
+                                                 + (f"，{ok_days}/{score_days} 天" if ok_days < score_days else ""))
             else:
-                payload["data_status_detail"] = ""
+                payload["data_status_detail"] = (f"{ok_days}/{score_days} 天" if ok_days < score_days else "")
         else:
             payload["available_rate"] = None
             payload["publish_rate"] = None

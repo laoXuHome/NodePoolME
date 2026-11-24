@@ -175,6 +175,14 @@ CREATE TABLE IF NOT EXISTS logs (
     source TEXT NOT NULL,
     message TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS run_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    batch_id INTEGER,
+    note TEXT
+);
 """
 
 
@@ -404,6 +412,12 @@ def execute(sql: str, params: Iterable = ()) -> int:
     cur = conn.execute(sql, tuple(params))
     conn.commit()
     return cur.lastrowid
+
+
+def record_run_event(kind: str, batch_id: int | None = None, note: str | None = None) -> None:
+    """记录暂停/恢复/停止/启动/停服，供每日准入判断排除区间。"""
+    execute("INSERT INTO run_events (ts, kind, batch_id, note) VALUES (?,?,?,?)",
+            (now(), str(kind), batch_id, note))
 
 
 def append_log(level: str, source: str, message: str) -> None:

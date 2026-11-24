@@ -44,6 +44,7 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             log.warning("过滤默认关键词迁移后重建订阅失败：%s", exc)
     db.append_log("INFO", "系统", f"NodePool {config.VERSION} 启动，数据目录 {config.DATA_DIR}")
+    db.record_run_event("start")
     await engine_mod.engine_manager.start()
     manager.start_scheduler()
     log.info("NodePool 已启动（内核：%s）", engine_mod.engine_manager.name)
@@ -53,6 +54,7 @@ async def lifespan(app: FastAPI):
         manager.stop_scheduler()
         await engine_mod.engine_manager.stop()
         db.append_log("INFO", "系统", "NodePool 已停止")
+        db.record_run_event("shutdown")
 
 
 app = FastAPI(title="NodePoolME", version=config.VERSION, lifespan=lifespan,

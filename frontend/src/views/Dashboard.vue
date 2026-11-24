@@ -175,14 +175,21 @@ function scoreTone(row) {
   if (row.score >= 20) return 'is-low'
   return 'is-bad'
 }
+function dayHint(row) {
+  const ok = row.eligible_days
+  const drop = row.dropped_days
+  if (!ok && !drop) return ''
+  return `有效日期 ${ok} 天${drop ? `，淘汰 ${drop} 天（不足 4 份或 60 分钟内超过 2 份）` : ''}`
+}
 function statusHint(row) {
   const cov = row.coverage
+  const days = dayHint(row)
   if (!row.enabled) return '机场未启用，不参与评分'
   if (row.data_status === 'collecting') return '数据积累不足 24 小时，暂不评分'
-  if (row.data_status === 'insufficient') return `有效采样覆盖率 ${cov ?? '—'}%，缺少检测证据，不代表机场质量差`
+  if (row.data_status === 'insufficient') return `有效采样覆盖率 ${cov ?? '—'}%，缺少检测证据，不代表机场质量差${days ? '；' + days : ''}`
   if (row.data_status === 'unknown') return '检测计划历史不完整，覆盖率无法准确还原，不参与正式排名'
-  if (row.data_status === 'normal') return `采样覆盖率 ${cov}%，数据完整，参与正式排名`
-  return `采样覆盖率 ${cov}%，数据仅作参考，不参与正式排名`
+  if (row.data_status === 'normal') return `采样覆盖率 ${cov}%，数据完整，参与正式排名${days ? '；' + days : ''}`
+  return `采样覆盖率 ${cov}%，数据仅作参考，不参与正式排名${days ? '；' + days : ''}`
 }
 function scoreHint(row) {
   const pool = row.pool_count || 0
@@ -455,7 +462,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
         </div>
         <div v-if="data.airport_list?.length" class="np-score-foot">
           <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 池占比 {{ scoreWeights.share }}% + 标签合格率 {{ scoreWeights.tag }}%；前 3 项取近 {{ data.score_window_days || 7 }} 天里按检测计划生成、且被快照命中的采样点，再做时段加权（17:00–01:00 权重 50%、01:00–08:00 15%、08:00–17:00 35%）</span>
-          <span>覆盖率 = 有效采样点 / 计划采样点，只反映数据完整度，不参与评分；暂停、中断和单节点测试不计入</span>
+          <span>覆盖率 = 有效采样点 / 计划采样点，只反映数据完整度，不参与评分；每天不足 4 份或 60 分钟内超过 2 份的日期整日淘汰，暂停、中断和单节点测试不计入</span>
         </div>
         </div>
 
