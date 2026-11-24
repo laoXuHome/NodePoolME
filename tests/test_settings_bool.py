@@ -23,7 +23,10 @@ def test_bool_setting_roundtrip():
     with TestClient(app) as client:
         assert client.post("/api/auth/login", json={"password": "test123"}).status_code == 200
         fav = client.get("/favicon.ico")
-        assert fav.status_code == 204 and not fav.content, fav
+        # 构建产物里带了 favicon.ico 就返回图标，没带才回 204（两种情况都不能是 HTML 兜底）
+        assert fav.status_code in (200, 204), fav
+        assert fav.headers.get("content-type", "").split(";")[0] in ("image/x-icon", "image/vnd.microsoft.icon", "")
+        assert "text/html" not in fav.headers.get("content-type", "")
         assert client.patch("/api/settings", json={
             "sub_publish_enabled": True,
             "sub_publish_mode": "interval",
@@ -53,11 +56,15 @@ def test_bool_setting_roundtrip():
         assert client.get("/api/dashboard").json()["publish_schedule"]["enabled"] is False
 
 
-def test_favicon_204_has_no_body():
-    from backend.main import favicon
+def test_favicon_never_falls_back_to_html():
+    from backend.main import favicon, favicon_svg
     res = asyncio.run(favicon())
-    assert res.status_code == 204
-    assert getattr(res, "body", b"") == b""
+    assert res.status_code in (200, 204)
+    if res.status_code == 204:
+        assert getattr(res, "body", b"") == b""
+    svg = asyncio.run(favicon_svg())
+    assert svg.status_code == 200
+    assert svg.media_type == "image/svg+xml"
 
 
 def test_legacy_true_string_is_migrated():

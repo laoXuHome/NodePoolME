@@ -82,13 +82,45 @@ async def index():
                          "note": "前端资源尚未构建"})
 
 
+_ICON_TYPES = {
+    "favicon.svg": "image/svg+xml",
+    "favicon.ico": "image/x-icon",
+    "favicon-32.png": "image/png",
+    "apple-touch-icon.png": "image/png",
+}
+
+
 @app.get("/favicon.ico")
 async def favicon():
     icon = STATIC_DIR / "favicon.ico"
     if icon.exists():
-        return FileResponse(icon)
+        return FileResponse(icon, media_type="image/x-icon")
     # A 204 response must not carry a body. JSONResponse(None) serialises "null"
     # and uvicorn then raises "Response content longer than Content-Length".
+    return Response(status_code=204)
+
+
+@app.get("/favicon.svg")
+async def favicon_svg():
+    icon = STATIC_DIR / "favicon.svg"
+    if icon.exists():
+        return FileResponse(icon, media_type="image/svg+xml")
+    return Response(status_code=204)
+
+
+@app.get("/favicon-32.png")
+async def favicon_png():
+    icon = STATIC_DIR / "favicon-32.png"
+    if icon.exists():
+        return FileResponse(icon, media_type="image/png")
+    return Response(status_code=204)
+
+
+@app.get("/apple-touch-icon.png")
+async def apple_touch_icon():
+    icon = STATIC_DIR / "apple-touch-icon.png"
+    if icon.exists():
+        return FileResponse(icon, media_type="image/png")
     return Response(status_code=204)
 
 
