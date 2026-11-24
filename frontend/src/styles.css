@@ -51,9 +51,9 @@ a { color: var(--np-accent); }
 
 /* ---------------------------------------------------------------- typography */
 .np-page {
-  max-width: 1320px;
-  margin: 0 auto;
-  padding: 30px 34px 54px;
+  max-width: none;
+  margin: 0;
+  padding: 26px 30px 48px;
 }
 .np-page-title {
   font-size: 31px;
@@ -243,7 +243,7 @@ a { color: var(--np-accent); }
 .np-log-full { flex: 1; min-height: 0; max-height: none; padding-top: 2px; overflow: auto; }
 
 /* ---------------------------------------------------------------- shell / sidebar */
-.np-shell { min-height: 100vh; background: var(--np-bg); display: flex; }
+.np-shell { min-height: 100vh; background: var(--np-bg); display: flex; width: 100%; max-width: 1680px; margin: 0 auto; }
 .np-workspace { flex: 1; min-width: 0; min-height: 100vh; display: flex; flex-direction: column; }
 .layout-sidebar {
   width: 232px;
@@ -728,6 +728,7 @@ a { color: var(--np-accent); }
   .np-dash-detect { overflow: visible; }
   .np-log-card { margin-top: 16px; }
   .np-detect-inline { display: none; }
+  .np-detect-head > .np-header-tools { display: none; }
   .np-log-card .np-log-head { flex-wrap: wrap; }
   .np-pool-row { grid-template-columns: minmax(90px, .9fr) 1fr; gap: 14px; }
   .np-pool-row .np-pool-metric:last-child { grid-column: 2; }
@@ -1327,6 +1328,17 @@ tr.is-off .np-score-cell b { color: #b0b5bf; }
 
 @media (max-width: 760px) {
   .np-detect-inline { display: none; }
+  .np-detect-head > .np-header-tools { display: none; }
   .np-detect-rings { gap: 6px; }
   .np-ring-meta span { font-size: 9px; }
 }
+
+/* 页头工具：放在检测任务卡右上角 */
+.np-detect-head { flex-wrap: wrap; row-gap: 8px; }
+.np-detect-head > .np-header-tools { margin-left: auto; }
+.np-header-tools.is-compact { gap: 6px; }
+.np-header-tools.is-compact .np-ver { height: 24px; padding: 0 9px; }
+.np-header-tools.is-compact .np-mini-btn { height: 24px; padding: 0 9px; font-size: 10.5px; }
+.np-header-tools.is-compact .np-gh { height: 24px; padding: 0 9px; font-size: 10.5px; }
+.np-quit { height: 24px; padding: 0 8px; border: 0; background: none; color: #2f6bdd; font-size: 10.5px; cursor: pointer; border-radius: 6px; }
+.np-quit:hover { background: #eef3ff; }
