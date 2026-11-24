@@ -233,7 +233,7 @@ const labels = computed(() => {
   items.sort((a, b) => a.dotY - b.dotY || a.id - b.id)
   const top = PAD.t + 4
   const bottom = PAD.t + plotH.value - 7
-  const gap = 11
+  const gap = 13
   // 单列贴线尾；末端数值过近的一组上下居中均分，其余按线尾 Y 精确落位
   let ys = items.map(it => Math.max(top, Math.min(bottom, it.dotY)))
   const runs = []
@@ -363,27 +363,27 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 .np-tc-dot { stroke: #fff; stroke-width: 1; }
 .np-tc-cross { stroke: #c3cbd6; stroke-width: 1; }
 .np-tc-hdot { stroke: #fff; stroke-width: 1; }
-.np-tc-legend { position: relative; flex: none; width: calc(60px * var(--tcs, 1)); align-self: stretch; }
+.np-tc-legend { position: relative; flex: none; width: calc(69px * var(--tcs, 1)); align-self: stretch; }
 .np-tc-lab {
   position: absolute;
   left: 0;
   right: 0;
   justify-content: flex-start;
-  height: calc(12px * var(--tcs, 1));
+  height: calc(14px * var(--tcs, 1));
   display: inline-flex;
   align-items: center;
-  gap: calc(2.5px * var(--tcs, 1));
-  padding: 0 calc(4px * var(--tcs, 1));
-  border-radius: calc(3px * var(--tcs, 1));
+  gap: calc(3px * var(--tcs, 1));
+  padding: 0 calc(4.6px * var(--tcs, 1));
+  border-radius: calc(3.5px * var(--tcs, 1));
   color: #fff;
-  font-size: calc(9px * var(--tcs, 1));
+  font-size: calc(10.4px * var(--tcs, 1));
   font-weight: 600;
   line-height: 1;
   letter-spacing: -.1px;
   white-space: nowrap;
   box-shadow: 0 0 0 1px #fff, 0 1px 2px rgba(20, 30, 50, .08);
 }
-.np-tc-lab em { font-style: normal; min-width: 0; max-width: calc(27px * var(--tcs, 1)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-tc-lab em { font-style: normal; min-width: 0; max-width: calc(31px * var(--tcs, 1)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-tc-lab b { font-weight: 500; opacity: .82; font-variant-numeric: tabular-nums; }
 .np-tc-lab small { font-weight: 700; font-variant-numeric: tabular-nums; }
 .np-tc-leader { stroke-width: .9; opacity: .8; }
