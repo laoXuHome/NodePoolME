@@ -878,7 +878,19 @@ def _sub_link(token: str) -> str:
 @api.get("/subscription", dependencies=protected)
 async def subscription_info(request: Request):
     token = auth.sub_token()
+    # 只读提示：当前关键词过滤命中了多少个已筛选出的合格节点（不影响检测与评分）
+    keywords = builder.filter_keywords()
+    eligible, _ = builder.collect_nodes()
+    kept, dropped = builder.apply_name_filter(eligible)
+    filter_hint = {
+        "keywords": keywords,
+        "eligible": len(eligible),
+        "kept": len(kept),
+        "dropped": len(dropped),
+        "sample": [d.get("name") for d in dropped[:5]],
+    }
     return {
+        "filter": filter_hint,
         "settings": {
             "sub_name": db.get("sub_name"),
             "sub_token": token,

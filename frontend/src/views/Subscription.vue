@@ -32,6 +32,19 @@ function pick(paths) {
 
 const shownLinks = ref('queryless')
 
+const filterHint = computed(() => {
+  const f = info.value && info.value.filter
+  if (!f) return null
+  return {
+    active: (f.keywords || []).length > 0,
+    keywords: f.keywords || [],
+    eligible: f.eligible || 0,
+    kept: f.kept || 0,
+    dropped: f.dropped || 0,
+    sample: f.sample || [],
+  }
+})
+
 async function load() {
   loading.value = true
   try {
@@ -136,6 +149,12 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             <el-descriptions-item label="节点数">{{ info.meta.nodes || 0 }}</el-descriptions-item>
             <el-descriptions-item label="最近生成">{{ formatTs(info.meta.updated_at) }}</el-descriptions-item>
             <el-descriptions-item label="名称">{{ info.meta.name }}</el-descriptions-item>
+            <el-descriptions-item v-if="filterHint" label="关键词过滤">
+              <span v-if="!filterHint.active" class="np-muted">未设置（不过滤，合格节点全部下发）</span>
+              <span v-else :title="filterHint.sample.join('、')">
+                命中 <b>{{ filterHint.dropped }}</b> 个 / 合格 {{ filterHint.eligible }} 个，实际下发 {{ filterHint.kept }} 个
+              </span>
+            </el-descriptions-item>
           </el-descriptions>
           <div style="margin-top:14px;display:flex;gap:10px">
             <el-button type="primary" @click="rebuild"><el-icon><Refresh /></el-icon>立即重新生成</el-button>
