@@ -28,6 +28,50 @@ api = APIRouter(prefix="/api")
 protected = [Depends(auth.require_auth)]
 SCORE_WEIGHTS = {"available": 50, "publish": 40, "share": 5, "tag": 5}
 
+# 时段权重：傍晚到凌晨是实际使用高峰，评分按快照发生的时间加权
+# 17:00–01:00 占 50%，01:00–08:00 占 15%，08:00–17:00 占 35%
+TIME_BANDS = (((17, 24), 0.50), ((0, 1), 0.50), ((1, 8), 0.15), ((8, 17), 0.35))
+
+
+def _time_band(ts: str) -> tuple[float, int]:
+    """返回 (时段权重, 时段序号)；ts 解析失败按白天档处理。"""
+    try:
+        hour = datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S").hour
+    except (TypeError, ValueError):
+        return 0.35, 3
+    for idx, ((start, end), weight) in enumerate(TIME_BANDS):
+        if start <= hour < end:
+            return weight, idx
+    return 0.35, 3
+
+
+def _weighted_mean(samples: list[dict], key: str) -> float | None:
+    """按时段加权求均值：同一时段内各快照平分该时段的权重。
+
+    这样快照数量多的时段不会因为"点更多"而自动占更大比重，
+    缺数据的时段也不必补点——空时段直接缺席，剩余时段按自身权重归一化。
+    """
+    pairs = []
+    for item in samples:
+        value = item.get(key)
+        if value is None:
+            continue
+        weight, band = _time_band(item.get("ts") or "")
+        pairs.append((weight, band, float(value)))
+    if not pairs:
+        return None
+    band_counts: dict[int, int] = {}
+    for _, band, _ in pairs:
+        band_counts[band] = band_counts.get(band, 0) + 1
+    weighted = 0.0
+    total = 0.0
+    for weight, band, value in pairs:
+        w = weight / band_counts[band]
+        weighted += w * value
+        total += w
+    return weighted / total if total else None
+
+
 
 # ---------------------------------------------------------------------------- auth
 @api.post("/auth/login")
@@ -241,6 +285,7 @@ async def dashboard(days: int = 7):
                 if point.get("available_known", 1) else None,
                 "published": (counts.get("published_count") or 0) / pool,
                 "share": pool / point_total if point_total else 0,
+                "ts": point.get("ts") or "",
             })
     fetch_next: list[str] = []
     manual_only = 0
@@ -272,13 +317,17 @@ async def dashboard(days: int = 7):
         if airport["enabled"] and pool_count:
             # 综合评分：近 7 天可用率 50% + 下发率 40% + 池占比 5% + 标签合格率 5%
             if samples:
-                publish_rate = sum(item["published"] for item in samples) / len(samples)
-                share = sum(item["share"] for item in samples) / len(samples)
+                publish_rate = _weighted_mean(samples, "published")
+                share = _weighted_mean(samples, "share")
+                if publish_rate is None or share is None:
+                    publish_rate = payload["published_count"] / pool_count
+                    share = pool_count / nodes_total if nodes_total else 0
             else:
                 publish_rate = payload["published_count"] / pool_count
                 share = pool_count / nodes_total if nodes_total else 0
-            avail_samples = [item["available"] for item in samples if item["available"] is not None]
-            health = (sum(avail_samples) / len(avail_samples)) if avail_samples else avail_count / pool_count
+            health = _weighted_mean(samples, "available")
+            if health is None:
+                health = avail_count / pool_count
             tag_rate = tag_count / pool_count
             payload["available_rate"] = round(health * 100, 1)
             payload["publish_rate"] = round(publish_rate * 100, 1)

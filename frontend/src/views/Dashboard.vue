@@ -432,7 +432,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           </table>
         </div>
         <div v-if="data.airport_list?.length" class="np-score-foot">
-          <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 池占比 {{ scoreWeights.share }}% + 标签合格率 {{ scoreWeights.tag }}%；前 3 项取近 {{ data.score_window_days || 7 }} 天完整检测快照均值</span>
+          <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 池占比 {{ scoreWeights.share }}% + 标签合格率 {{ scoreWeights.tag }}%；前 3 项取近 {{ data.score_window_days || 7 }} 天完整快照的时段加权均值（17:00–01:00 权重 50%、01:00–08:00 15%、08:00–17:00 35%）</span>
           <span>标签合格率 = 近 7 天任一启用标签通过 / 缓存节点；暂停、中断和单节点测试不计入</span>
         </div>
         </div>
