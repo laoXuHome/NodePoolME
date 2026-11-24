@@ -188,7 +188,9 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 
           <div style="margin-top:14px;display:flex;gap:10px">
             <el-button type="primary" @click="rebuild"><el-icon><Refresh /></el-icon>立即重新生成</el-button>
-            <el-button @click="load">刷新列表</el-button>
+            <span class="np-muted" style="font-size:12px;align-self:center">
+              按当前已保存的配置重新下发，并同时刷新右侧两个清单（未保存的输入不参与）
+            </span>
           </div>
         </div>
       </el-col>
