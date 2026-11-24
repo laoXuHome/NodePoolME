@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import HeaderTools from './components/HeaderTools.vue'
+import BrandLogo from './components/BrandLogo.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { checkAuth, logout, state } from './api'
 import { ElMessageBox } from 'element-plus'
@@ -70,12 +71,10 @@ function onMenu(path) {
     <section class="np-workspace">
       <header class="header-bar">
         <div v-if="isMobile" class="np-mobile-brand">
-          <span class="brand-mark brand-mark-sm">NP</span>
-          <span>NodePoolME</span>
+          <BrandLogo :size="30" compact />
         </div>
         <div v-else class="np-brandline">
-          <span class="brand-mark brand-mark-sm">NP</span>
-          <span class="np-brandname">NodePoolME</span>
+          <BrandLogo :size="38" />
         </div>
         <nav v-if="!isMobile" class="np-tabsnav" aria-label="主导航">
           <button v-for="m in menus" :key="m.path" class="np-tabx"
