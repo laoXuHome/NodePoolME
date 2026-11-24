@@ -419,8 +419,10 @@ async def dashboard(days: int = 7):
         if plan_estimated and status == "normal":
             status = "reference"
         ok_days = len(score_days_set)
-        if maturity_days >= 1 and ok_days < eligibility.MIN_DAILY_SNAPSHOTS:
-            # 合格日不足 4 天：证据不够，不给评分
+        if maturity_days < 1:
+            status = "collecting"
+        elif ok_days <= 1:
+            # 只有 0–1 天有效数据：证据不够，不给评分
             status = "insufficient"
         elif status == "normal" and ok_days < score_days:
             status = "reference"

@@ -133,14 +133,30 @@ def _row(client):
     return client.get("/api/dashboard").json()["airport_list"][0]
 
 
-def test_insufficient_when_few_qualified_days():
-    # 只有 3 天、每天 6 份：日门槛过不了 4 天
-    _seed_history(3, [(9, 0), (9, 30), (13, 0), (13, 30), (18, 0), (21, 0)])
+def test_single_qualified_day_is_insufficient():
+    # 只有 1 天有效数据：不评分
+    _seed_history(1, [(9, 0), (9, 30), (13, 0), (13, 30), (18, 0), (21, 0)])
     with TestClient(app) as client:
         row = _row(client)
-    assert row["eligible_days"] <= 3
+    assert row["eligible_days"] <= 1
     assert row["data_status"] == "insufficient"
     assert row["score"] is None
+
+
+def test_two_or_more_qualified_days_get_scored():
+    # 有效天数 >1 即可参与评分，最多给到「参考」
+    airport_id = _seed_history(3, [(h, m) for h in range(24) for m in (0, 30)])
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for index in range(4):
+        db.execute("INSERT INTO nodes (airport_id, raw_name, protocol, server, port, fingerprint,"
+                   " params, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                   (airport_id, f"n{index}", "ss", f"1.2.3.{index}", 443, f"fp{index}",
+                    "{}", "available", stamp, stamp))
+    with TestClient(app) as client:
+        row = _row(client)
+    assert row["eligible_days"] >= 2
+    assert row["data_status"] in ("reference", "tentative")
+    assert row["score"] is not None
 
 
 def _seed_days(entries):
