@@ -47,10 +47,10 @@ def final_score(raw):
 
 
 def score_grade_of(value):
-    """按最终展示分数判定五级：优 ≥85、良 70–84、中 55–69、差 40–54、劣 <40。"""
+    """按最终展示分数判定五级，严格 20 分一档：优 80–100、良 60–79、中 40–59、差 20–39、劣 <20。"""
     value = float(value)
-    return ("优" if value >= 85 else "良" if value >= 70 else "中" if value >= 55
-            else "差" if value >= 40 else "劣")
+    return ("优" if value >= 80 else "良" if value >= 60 else "中" if value >= 40
+            else "差" if value >= 20 else "劣")
 DATA_STATUS_TEXT = {
     "ample": "充足", "normal": "正常", "reference": "参考", "rough": "大概",
     "insufficient": "数据不足", "unknown": "计划未知",

@@ -170,10 +170,10 @@ function scoreTone(row) {
   if (!row.enabled) return 'is-off'
   if (row.score === null || row.score === undefined) return 'is-empty'
   const shown = row.score_exact ?? row.score
-  if (shown >= 85) return 'is-good'
-  if (shown >= 70) return 'is-ok'
-  if (shown >= 55) return 'is-mid'
-  if (shown >= 40) return 'is-low'
+  if (shown >= 80) return 'is-good'
+  if (shown >= 60) return 'is-ok'
+  if (shown >= 40) return 'is-mid'
+  if (shown >= 20) return 'is-low'
   return 'is-bad'
 }
 function dayHint(row) {

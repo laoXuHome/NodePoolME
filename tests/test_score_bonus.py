@@ -32,8 +32,8 @@ def test_bonus_clamped(raw, expected):
 
 
 @pytest.mark.parametrize("shown,grade", [
-    (85, "优"), (100, "优"), (84.99, "良"), (70, "良"), (69.99, "中"),
-    (55, "中"), (54.99, "差"), (40, "差"), (39.99, "劣"), (0, "劣"),
+    (100, "优"), (80, "优"), (79.99, "良"), (60, "良"), (59.99, "中"),
+    (40, "中"), (39.99, "差"), (20, "差"), (19.99, "劣"), (0, "劣"),
 ])
 def test_grade_boundaries(shown, grade):
     assert score_grade_of(shown) == grade
