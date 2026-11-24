@@ -100,11 +100,11 @@ def test_match_distance_boundary():
     assert not sampler.match_points(points, outside)
 
 
-def test_short_interval_uses_quarter_period():
+def test_short_interval_uses_half_period():
     segs = sampler.build_segments([(T0 + timedelta(hours=8), 30)], T0 + timedelta(hours=8),
                                   T0 + timedelta(hours=9))
     points = sampler.generate_points(segs, [], T0 + timedelta(hours=9))
-    assert points[0].max_distance == timedelta(minutes=7.5)
+    assert points[0].max_distance == timedelta(minutes=15)
 
 
 def test_missing_hours_stay_missing():
@@ -211,3 +211,22 @@ def test_frequency_does_not_change_score():
     hourly, n_hour = score_for(60)
     assert n_half > n_hour
     assert abs(half_hour - hourly) < 1e-9
+
+
+def test_practical_drift_still_covers():
+    """批次"满间隔才开跑 + 自身耗时"会让真实节奏比计划晚几分钟，不能判成缺失。"""
+    end = T0 + timedelta(days=2)
+    segs = sampler.build_segments([(T0, 30)], T0, end)
+
+    def coverage(step_minutes):
+        snaps = [T0 + timedelta(minutes=5 + step_minutes * k)
+                 for k in range(int(2 * 1440 / step_minutes))]
+        points = sampler.generate_points(segs, snaps, end)
+        matched = sampler.match_points(points, snaps)
+        known = [p for p in points if p.known]
+        return len([m for m in matched if points[m[0]].known]) / len(known) * 100
+
+    assert coverage(30) == 100
+    assert coverage(36) >= 80      # 30 分钟计划、实际 36 分钟一轮：仍算正常覆盖
+    assert coverage(40) >= 70      # 更慢一点：掉到参考，但不至于判成数据不足
+    assert coverage(120) < 30      # 频率掉到 2 小时一次：覆盖率如实反映

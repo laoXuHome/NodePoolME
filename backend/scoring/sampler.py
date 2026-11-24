@@ -29,7 +29,14 @@ class SamplePoint:
 
     @property
     def max_distance(self) -> timedelta:
-        return timedelta(minutes=min(MAX_MATCH_MINUTES, self.interval_minutes / 4))
+        """容忍窗口：最多 15 分钟，且不超过半个检测周期。
+
+        真实批次是按"距上次检测满间隔才开跑"触发的，批次本身还要跑几分钟，
+        实际节奏会比计划晚一点并逐轮累积偏移；用 1/4 周期（30 分钟档只有 7.5 分钟）
+        会把"确实测过、只是晚了几分钟"的样本判成缺失，覆盖率被无谓压低。
+        半个周期既不会抢邻档的样本，也能吸收这种偏移。
+        """
+        return timedelta(minutes=min(MAX_MATCH_MINUTES, self.interval_minutes / 2))
 
 
 def build_segments(plan: list[tuple[datetime, int]], window_start: datetime,

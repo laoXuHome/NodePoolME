@@ -328,8 +328,11 @@ async def dashboard(days: int = 7):
         plan_estimated = _ensure_schedule_baseline(
             min(snapshot_stamps) if snapshot_stamps else None, interval)
     else:
-        first = db.row("SELECT source FROM schedule_history ORDER BY changed_at, id LIMIT 1")
-        plan_estimated = bool(first and (first.get("source") or "") == "baseline")
+        first = db.row("SELECT changed_at, source FROM schedule_history ORDER BY changed_at, id LIMIT 1")
+        baseline_stamp = _parse_local(first["changed_at"]) if first else None
+        # 基线早于窗口起点：整个窗口都在推定间隔之下，等基线滚出窗口后按真实记录算
+        plan_estimated = bool(first and (first.get("source") or "") == "baseline"
+                              and baseline_stamp and baseline_stamp > window_start)
     segments = sampler.build_segments(_schedule_plan(), window_start, local_now)
     sample_points = sampler.generate_points(segments, snapshot_stamps, local_now)
     matched = sampler.match_points(sample_points, snapshot_stamps)

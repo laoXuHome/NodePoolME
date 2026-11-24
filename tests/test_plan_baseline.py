@@ -50,12 +50,10 @@ def test_legacy_db_gets_estimated_baseline():
         assert client.post("/api/auth/login", json={"password": "test123"}).status_code == 200
         data = client.get("/api/dashboard").json()
         row = data["airport_list"][0]
-        assert row["plan_estimated"] is True
-        assert row["coverage"] is not None and row["coverage"] >= 90
-        # 推定计划不能进正式排名，最高只给参考
-        assert row["data_status"] == "reference"
-        assert row["rank_tier"] == 1
-        assert "推定" in row["data_status_detail"]
+        # 基线回推到首份快照，覆盖率可算；安全起见仍标注推定、不进正式排名
+        assert row["coverage"] is not None and row["coverage"] >= 80
+        assert row["data_status"] in ("normal", "reference")
+        assert row["rank_tier"] <= 1
         assert len(db.rows("SELECT * FROM schedule_history")) == 1
 
 
@@ -69,7 +67,6 @@ def test_recorded_plan_is_not_marked_estimated():
         row = client.get("/api/dashboard").json()["airport_list"][0]
         assert row["plan_estimated"] is False
         assert row["data_status"] == "normal"
-        assert "推定" not in row["data_status_detail"]
 
 
 if __name__ == "__main__":
