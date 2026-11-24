@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import HeaderTools from './components/HeaderTools.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { checkAuth, logout, state } from './api'
 import { ElMessageBox } from 'element-plus'
@@ -99,6 +100,7 @@ function onMenu(path) {
           </span>
           <a class="np-gh is-mobile" :href="repoUrl" target="_blank" rel="noopener">GitHub ↗</a>
         </div>
+        <HeaderTools v-if="!isMobile" compact />
         <button v-if="isMobile" class="np-icon-btn" aria-label="退出登录" @click="doLogout">
           <el-icon size="19"><SwitchButton /></el-icon>
         </button>

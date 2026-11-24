@@ -3,7 +3,6 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, formatTs, logLevelLabel, logSourceLabel } from '../api'
 import TrendChart from '../components/TrendChart.vue'
-import HeaderTools from '../components/HeaderTools.vue'
 
 const data = ref(null)
 // 趋势图配色：前 5 个与评分等级同色（紫/绿/蓝/橙/红），其后按色相差距大者补充
@@ -550,7 +549,6 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               {{ runtime.stop_requested ? '正在停止' : '停止检测' }}
             </el-button>
           </div>
-          <HeaderTools compact />
         </div>
 
         <div class="np-detect-rings">

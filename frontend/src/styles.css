@@ -298,7 +298,7 @@ a { color: var(--np-accent); }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 26px;
+  padding: 0 30px;
   min-height: 58px;
   background: rgba(255, 255, 255, .72);
   border-bottom: 1px solid var(--np-separator-soft);
@@ -1336,6 +1336,7 @@ tr.is-off .np-score-cell b { color: #b0b5bf; }
 /* 页头工具：放在检测任务卡右上角 */
 .np-detect-head { flex-wrap: wrap; row-gap: 8px; }
 .np-detect-head > .np-header-tools { margin-left: auto; }
+.header-bar > .np-header-tools { margin-left: auto; }
 .np-header-tools.is-compact { gap: 6px; }
 .np-header-tools.is-compact .np-ver { height: 24px; padding: 0 9px; }
 .np-header-tools.is-compact .np-mini-btn { height: 24px; padding: 0 9px; font-size: 10.5px; }
