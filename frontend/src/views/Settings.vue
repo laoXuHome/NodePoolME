@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, prettyBytes } from '../api'
 
@@ -11,6 +11,9 @@ const password = ref({ old_password: '', new_password: '' })
 const file = ref(null)
 const uploading = ref(false)
 const backupBusy = ref(false)
+const upgradeCmd = computed(() => (system.value && system.value.version
+  ? `sudo npup ${String(system.value.version).replace(/^v/i, '')}`
+  : ''))
 
 async function load() {
   loading.value = true
@@ -65,6 +68,15 @@ async function changePassword() {
     ElMessage.success('密码已修改')
     password.value = { old_password: '', new_password: '' }
   } catch (e) { ElMessage.error(e.message) }
+}
+
+async function copyCmd() {
+  try {
+    await navigator.clipboard.writeText(upgradeCmd.value)
+    ElMessage.success('升级命令已复制')
+  } catch {
+    ElMessage.warning('浏览器拒绝剪贴板访问，请手动复制')
+  }
 }
 
 async function backup() {
@@ -240,6 +252,13 @@ onMounted(load)
             <el-descriptions-item label="版本">
               {{ system.version }} ·
               <a href="https://github.com/laoXuHome/NodePoolME" target="_blank" rel="noopener">GitHub 仓库 ↗</a>
+            </el-descriptions-item>
+            <el-descriptions-item label="升级命令">
+              <div class="np-cmd-copy">
+                <span class="np-mono">{{ upgradeCmd }}</span>
+                <el-button size="small" link type="primary" @click="copyCmd">复制</el-button>
+              </div>
+              <div class="np-muted np-cmd-note">每次发版后把上方命令里的版本号换成新版本即可升级本机。</div>
             </el-descriptions-item>
             <el-descriptions-item label="检测引擎">{{ system.engine }}</el-descriptions-item>
             <el-descriptions-item label="调度器">{{ system.scheduler ? '运行中' : '已停止' }}</el-descriptions-item>
