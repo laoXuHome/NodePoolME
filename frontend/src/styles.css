@@ -1491,17 +1491,3 @@ tr.is-off .np-score-cell b { color: #b0b5bf; }
   font-size: 11.5px;
   font-weight: 600;
 }
-
-/* 运行信息：升级命令复制行 */
-.np-cmd-copy {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.np-cmd-copy .np-mono {
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: #f3f6fb;
-  font-size: 12.8px;
-}
-.np-cmd-note { margin-top: 4px; font-size: 11.5px; }
