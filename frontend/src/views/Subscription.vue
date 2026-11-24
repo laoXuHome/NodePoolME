@@ -5,11 +5,10 @@ import { api, formatTs } from '../api'
 
 const info = ref(null)
 const form = ref({ sub_name: '', sub_token: '', regenerate_token: false })
-const preview = ref('')
-const previewFmt = ref('clash')
 const loading = ref(false)
 const saving = ref(false)
 const isMobile = ref(false)
+const listTab = ref('published')
 let mq = null
 function syncMobile(e) { isMobile.value = e.matches }
 
@@ -42,8 +41,13 @@ const filterHint = computed(() => {
     kept: f.kept || 0,
     dropped: f.dropped || 0,
     sample: f.sample || [],
+    nodes: f.nodes || [],
+    filtered: f.filtered || [],
   }
 })
+
+const publishedNodes = computed(() => (filterHint.value ? filterHint.value.nodes : []))
+const filteredNodes = computed(() => (filterHint.value ? filterHint.value.filtered : []))
 
 async function load() {
   loading.value = true
@@ -87,12 +91,6 @@ async function rebuild() {
   } catch (e) { ElMessage.error(e.message) }
 }
 
-async function loadPreview() {
-  try {
-    preview.value = await api.get(`/api/subscription/preview?fmt=${previewFmt.value}`)
-  } catch (e) { ElMessage.error(e.message) }
-}
-
 async function copy(text) {
   try {
     await navigator.clipboard.writeText(text)
@@ -109,7 +107,6 @@ onMounted(async () => {
   isMobile.value = mq.matches
   mq.addEventListener('change', syncMobile)
   await load()
-  await loadPreview()
 })
 onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 </script>
@@ -118,57 +115,20 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">订阅输出</h2>
     <div class="np-page-desc">
-      系统只生成一个统一订阅 <span class="np-mono">/sub/all</span>，包含所有合格节点；访问需要 Token，内容不暴露机场原始 URL。
+      系统只生成一个统一订阅 <span class="np-mono">/sub/all</span>；访问需要 Token，内容不暴露机场原始 URL。下发关键词过滤是输出层的唯一手动口子。
     </div>
 
     <el-row :gutter="16">
-      <el-col :md="15" :xs="24">
-        <div class="np-card" style="padding:20px">
-          <div class="np-section-title">订阅地址</div>
-          <div v-if="info">
-            <el-radio-group v-model="shownLinks" size="small" style="margin-bottom:10px">
-              <el-radio-button value="queryless">无参数（反代推荐）</el-radio-button>
-              <el-radio-button value="query">带 format 参数</el-radio-button>
-            </el-radio-group>
-            <div class="link-row" v-for="(label, key) in { clash: 'Clash / Mihomo', singbox: 'sing-box', base64: '通用 Base64' }" :key="key">
-              <div class="link-label">{{ label }}</div>
-              <div class="link-control">
-                <el-input :model-value="prettyLink((shownLinks === 'queryless' ? querylessLinks : fullLinks)[key])" readonly size="small"
-                          :title="(shownLinks === 'queryless' ? querylessLinks : fullLinks)[key]"
-                          :type="isMobile ? 'textarea' : 'text'" :autosize="{ minRows: 1, maxRows: 2 }" />
-                <el-button class="link-copy" @click="copy((shownLinks === 'queryless' ? querylessLinks : fullLinks)[key])">复制</el-button>
-              </div>
-            </div>
-            <div class="np-muted" style="margin-top:10px">
-              反代转发会把 <span class="np-mono">&amp;</span> 转义坏，优先用「无参数」地址 <span class="np-mono">/sub/all/&lt;token&gt;/clash</span>；带 format 参数时按客户端 UA 自动选择。
-            </div>
-          </div>
-          <el-divider />
-          <div class="np-section-title">当前订阅状态</div>
-          <el-descriptions v-if="info" :column="isMobile ? 1 : 3" size="small" border>
-            <el-descriptions-item label="节点数">{{ info.meta.nodes || 0 }}</el-descriptions-item>
-            <el-descriptions-item label="最近生成">{{ formatTs(info.meta.updated_at) }}</el-descriptions-item>
-            <el-descriptions-item label="名称">{{ info.meta.name }}</el-descriptions-item>
-            <el-descriptions-item v-if="filterHint" label="关键词过滤">
-              <span v-if="!filterHint.active" class="np-muted">未设置（不过滤，合格节点全部下发）</span>
-              <span v-else :title="filterHint.sample.join('、')">
-                命中 <b>{{ filterHint.dropped }}</b> 个 / 合格 {{ filterHint.eligible }} 个，实际下发 {{ filterHint.kept }} 个
-              </span>
-            </el-descriptions-item>
-          </el-descriptions>
-          <div style="margin-top:14px;display:flex;gap:10px">
-            <el-button type="primary" @click="rebuild"><el-icon><Refresh /></el-icon>立即重新生成</el-button>
-            <el-button @click="loadPreview">刷新预览</el-button>
-          </div>
-        </div>
-
-        <div class="np-card" style="padding:20px;margin-top:16px">
+      <el-col :md="14" :xs="24">
+        <!-- 订阅地址 + 订阅输出设置（合并） -->
+        <div class="np-card" style="padding:20px" v-if="info">
           <div class="np-section-title">
-            订阅输出设置
+            订阅地址
             <div class="np-flex" />
             <el-button type="primary" size="small" :loading="saving" @click="save">保存</el-button>
           </div>
-          <el-form label-width="130px">
+
+          <el-form label-width="96px" size="default" class="np-sub-form">
             <el-form-item label="订阅名称">
               <el-input v-model="form.sub_name" maxlength="40" />
             </el-form-item>
@@ -176,32 +136,101 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
               <el-input v-model="form.sub_token" />
               <el-button link type="warning" style="margin-left:8px" @click="regen">重新生成</el-button>
             </el-form-item>
-            <el-form-item label="下发关键词过滤">
-              <el-input v-model="form.sub_filter_keywords" type="textarea" :rows="4" resize="vertical"
-                        class="np-filter-box"
-                        placeholder="留空 = 不做过滤，检测合格就正常下发&#10;每行一个关键词，命中即屏蔽（不区分大小写），例如：&#10;剩余流量&#10;官网&#10;过期&#10;某机场" />
-            </el-form-item>
           </el-form>
-          <div class="np-muted">
-            这是订阅输出这一层的唯一入口：只对<strong>已经检测筛选出来</strong>的合格节点再做一次屏蔽，命中机场名 / 节点名 / 服务器地址的节点不会出现在 <span class="np-mono">/sub/all</span> 里（三种格式与预览同步生效），手动追加节点同样拦截。<br />
-            过滤不影响检测与评分：机场的可用率、下发率、标签合格率、综合评分仍按未过滤的结果与快照计算；留空时与之前完全一致。保存后点「立即重新生成」或等下次定时下发生效。
+
+          <el-radio-group v-model="shownLinks" size="small" style="margin-bottom:10px;margin-top:4px">
+            <el-radio-button value="queryless">无参数（反代推荐）</el-radio-button>
+            <el-radio-button value="query">带 format 参数</el-radio-button>
+          </el-radio-group>
+          <div class="link-row" v-for="(label, key) in { clash: 'Clash / Mihomo', singbox: 'sing-box', base64: '通用 Base64' }" :key="key">
+            <div class="link-label">{{ label }}</div>
+            <div class="link-control">
+              <el-input :model-value="prettyLink((shownLinks === 'queryless' ? querylessLinks : fullLinks)[key])" readonly size="small"
+                        :title="(shownLinks === 'queryless' ? querylessLinks : fullLinks)[key]"
+                        :type="isMobile ? 'textarea' : 'text'" :autosize="{ minRows: 1, maxRows: 2 }" />
+              <el-button class="link-copy" @click="copy((shownLinks === 'queryless' ? querylessLinks : fullLinks)[key])">复制</el-button>
+            </div>
           </div>
-          <div class="np-muted">下发依据是「系统设置 → 延迟检测」里的双目标上限（Google / Wikipedia，可分别自定义链接与阈值）；节点标签只用于生成节点名代号，节点数不设上限。</div>
+          <div class="np-muted" style="margin-top:10px">
+            反代转发会把 <span class="np-mono">&amp;</span> 转义坏，优先用「无参数」地址 <span class="np-mono">/sub/all/&lt;token&gt;/clash</span>；带 format 参数时按客户端 UA 自动选择。
+          </div>
+        </div>
+
+        <!-- 当前订阅状态 + 关键词过滤（合并成一个小板块） -->
+        <div class="np-card" style="padding:20px;margin-top:16px">
+          <div class="np-section-title">当前订阅状态</div>
+          <el-descriptions v-if="info" :column="isMobile ? 1 : 3" size="small" border>
+            <el-descriptions-item label="节点数">{{ info.meta.nodes || 0 }}</el-descriptions-item>
+            <el-descriptions-item label="最近生成">{{ formatTs(info.meta.updated_at) }}</el-descriptions-item>
+            <el-descriptions-item label="名称">{{ info.meta.name }}</el-descriptions-item>
+            <el-descriptions-item v-if="filterHint" label="关键词过滤">
+              <span v-if="!filterHint.active" class="np-muted">未设置（不过滤，合格节点全部下发）</span>
+              <span v-else>
+                命中 <b>{{ filterHint.dropped }}</b> 个 / 合格 {{ filterHint.eligible }} 个，实际下发 {{ filterHint.kept }} 个
+              </span>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <div class="np-filter-row">
+            <div class="np-filter-head">
+              <b>下发关键词过滤</b>
+              <span class="np-muted">留空 = 不过滤；关键词之间用<strong>空格</strong>或<strong>逗号</strong>分隔，命中即屏蔽（不区分大小写）</span>
+            </div>
+            <el-input v-model="form.sub_filter_keywords" type="textarea" :rows="2" resize="none"
+                      class="np-filter-box np-filter-compact"
+                      placeholder="例如：剩余流量 官网，过期 某机场" />
+            <div class="np-filter-foot">
+              <span class="np-muted">命中机场名 / 节点名 / 服务器地址的合格节点不会进入订阅，也不影响机场检测与评分。保存后点「立即重新生成」或等下次定时下发生效。</span>
+              <div class="np-flex" />
+              <el-button size="small" :loading="saving" @click="save">保存过滤关键词</el-button>
+            </div>
+          </div>
+
+          <div style="margin-top:14px;display:flex;gap:10px">
+            <el-button type="primary" @click="rebuild"><el-icon><Refresh /></el-icon>立即重新生成</el-button>
+            <el-button @click="load">刷新列表</el-button>
+          </div>
         </div>
       </el-col>
 
-      <el-col :md="9" :xs="24">
+      <el-col :md="10" :xs="24">
+        <!-- 列表：实际下发节点 / 关键词过滤命中 -->
         <div class="np-card" style="padding:20px">
           <div class="np-section-title">
-            输出预览
+            节点清单
             <div class="np-flex" />
-            <el-select v-model="previewFmt" size="small" style="width:120px" @change="loadPreview">
-              <el-option label="Clash" value="clash" />
-              <el-option label="sing-box" value="singbox" />
-              <el-option label="Base64" value="base64" />
-            </el-select>
+            <el-radio-group v-model="listTab" size="small">
+              <el-radio-button value="published">实际下发 {{ publishedNodes.length }}</el-radio-button>
+              <el-radio-button value="filtered">被过滤 {{ filteredNodes.length }}</el-radio-button>
+            </el-radio-group>
           </div>
-          <div class="np-code">{{ preview }}</div>
+
+          <div v-if="listTab === 'published'">
+            <div class="np-node-list" v-if="publishedNodes.length">
+              <div class="np-node-item" v-for="(name, i) in publishedNodes" :key="'p' + i">
+                <span class="np-node-idx">{{ i + 1 }}</span>
+                <span class="np-node-name" :title="name">{{ name }}</span>
+              </div>
+            </div>
+            <div v-else class="np-empty">暂无已下发节点</div>
+          </div>
+
+          <div v-else>
+            <div class="np-node-list" v-if="filteredNodes.length">
+              <div class="np-node-item is-hit" v-for="(item, i) in filteredNodes" :key="'f' + i">
+                <span class="np-node-idx">{{ i + 1 }}</span>
+                <span class="np-node-name" :title="item.name">{{ item.name }}</span>
+                <span class="np-node-kw" :title="'命中关键词：' + item.keyword">{{ item.keyword }}</span>
+              </div>
+            </div>
+            <div v-else class="np-empty">
+              {{ filterHint && filterHint.active ? '当前没有节点命中关键词' : '未设置关键词过滤' }}
+            </div>
+          </div>
+
+          <div class="np-muted" style="margin-top:10px">
+            列表按实时检测结果与当前关键词计算：命中项显示触发的关键词，方便校正写法。
+          </div>
         </div>
       </el-col>
     </el-row>

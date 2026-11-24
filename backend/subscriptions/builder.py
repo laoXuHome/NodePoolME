@@ -2,6 +2,7 @@
 import base64
 import json
 import os
+import re
 from collections import Counter
 from datetime import datetime, timedelta
 
@@ -127,17 +128,18 @@ def latest_latency(batch_id: int | None = None) -> dict[int, dict]:
 
 
 def filter_keywords() -> list[str]:
-    """下发关键词过滤：每行一个关键词，# 开头为注释，逗号也视为分隔。
+    """下发关键词过滤：关键词之间用空格、逗号或换行分隔（# 开头为注释）。
 
     只作用于「订阅输出」，不参与机场评分（评分用的是未过滤的检测快照）。
     """
     raw = db.get("sub_filter_keywords") or ""
+    lines = [ln for ln in raw.splitlines() if not ln.strip().startswith("#")]
+    tokens = [t for t in re.split(r"[,，、;；\s]+", " ".join(lines)) if t]
     keys: list[str] = []
-    for piece in raw.replace("，", ",").splitlines():
-        for item in piece.split(","):
-            key = item.strip().lower()
-            if key and not key.startswith("#") and key not in keys:
-                keys.append(key)
+    for token in tokens:
+        key = token.strip().lower()
+        if key and not key.startswith("#") and key not in keys:
+            keys.append(key)
     return keys
 
 

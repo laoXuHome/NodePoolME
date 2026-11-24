@@ -888,6 +888,9 @@ async def subscription_info(request: Request):
         "kept": len(kept),
         "dropped": len(dropped),
         "sample": [d.get("name") for d in dropped[:5]],
+        # 订阅输出页的两个列表：实际下发节点 / 被关键词命中剔除的节点
+        "nodes": [n.get("display_name") for n in kept],
+        "filtered": [{"name": d.get("name"), "keyword": d.get("keyword")} for d in dropped],
     }
     return {
         "filter": filter_hint,

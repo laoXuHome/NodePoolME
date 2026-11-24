@@ -35,8 +35,8 @@ def _prepare(name: str = "kw-airport") -> tuple[int, int]:
 
 def test_filter_keywords_parsing():
     db.init_db()
-    db.set_setting("sub_filter_keywords", "  剩余流量\n# 注释\n官网, 过期，某机场\n\n剩余流量")
-    assert builder.filter_keywords() == ["剩余流量", "官网", "过期", "某机场"]
+    db.set_setting("sub_filter_keywords", "  剩余流量\n# 注释\n官网, 过期，某机场 试用 剩余流量")
+    assert builder.filter_keywords() == ["剩余流量", "官网", "过期", "某机场", "试用"]
     db.set_setting("sub_filter_keywords", "")
     assert builder.filter_keywords() == []
 
