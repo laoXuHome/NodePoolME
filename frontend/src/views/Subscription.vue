@@ -57,6 +57,7 @@ async function save() {
       sub_name: form.value.sub_name,
       sub_token: form.value.sub_token,
       regenerate_token: form.value.regenerate_token,
+      sub_filter_keywords: form.value.sub_filter_keywords || '',
     })
     ElMessage.success('订阅设置已保存')
     form.value.regenerate_token = false
@@ -156,7 +157,16 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
               <el-input v-model="form.sub_token" />
               <el-button link type="warning" style="margin-left:8px" @click="regen">重新生成</el-button>
             </el-form-item>
+            <el-form-item label="下发关键词过滤">
+              <el-input v-model="form.sub_filter_keywords" type="textarea" :rows="4" resize="vertical"
+                        class="np-filter-box"
+                        placeholder="留空 = 不做过滤，检测合格就正常下发&#10;每行一个关键词，命中即屏蔽（不区分大小写），例如：&#10;剩余流量&#10;官网&#10;过期&#10;某机场" />
+            </el-form-item>
           </el-form>
+          <div class="np-muted">
+            这是订阅输出这一层的唯一入口：只对<strong>已经检测筛选出来</strong>的合格节点再做一次屏蔽，命中机场名 / 节点名 / 服务器地址的节点不会出现在 <span class="np-mono">/sub/all</span> 里（三种格式与预览同步生效），手动追加节点同样拦截。<br />
+            过滤不影响检测与评分：机场的可用率、下发率、标签合格率、综合评分仍按未过滤的结果与快照计算；留空时与之前完全一致。保存后点「立即重新生成」或等下次定时下发生效。
+          </div>
           <div class="np-muted">下发依据是「系统设置 → 延迟检测」里的双目标上限（Google / Wikipedia，可分别自定义链接与阈值）；节点标签只用于生成节点名代号，节点数不设上限。</div>
         </div>
       </el-col>

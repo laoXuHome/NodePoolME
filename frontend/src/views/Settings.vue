@@ -11,8 +11,6 @@ const password = ref({ old_password: '', new_password: '' })
 const file = ref(null)
 const uploading = ref(false)
 const backupBusy = ref(false)
-const groups = ref([])
-const requiredTags = ref([])
 
 async function load() {
   loading.value = true
@@ -20,8 +18,6 @@ async function load() {
     const res = await api.get('/api/settings')
     form.value = res.settings
     system.value = res.system
-    requiredTags.value = String(res.settings.sub_required_tags || '').split(',').filter(Boolean)
-    groups.value = await api.get('/api/groups')
   } catch (e) { ElMessage.error(e.message) }
   finally { loading.value = false }
 }
@@ -53,8 +49,6 @@ async function save() {
       sub_publish_time: form.value.sub_publish_time,
       sub_publish_mode: form.value.sub_publish_mode,
       sub_publish_interval_minutes: Number(form.value.sub_publish_interval_minutes),
-      sub_required_tags: requiredTags.value,
-      sub_filter_keywords: form.value.sub_filter_keywords || ''
     })
     ElMessage.success('设置已保存')
     await load()
@@ -146,30 +140,11 @@ onMounted(load)
                 </el-form-item>
               </el-col>
             </el-row>
-            <el-form-item label="必带标签">
-              <el-checkbox-group v-model="requiredTags">
-                <el-checkbox v-for="g in groups.filter(x => x.enabled)" :key="g.ident" :value="g.ident">
-                  {{ g.ident }}
-                </el-checkbox>
-              </el-checkbox-group>
-            </el-form-item>
             <div class="np-muted">
               上面两个链接与两个上限都是自定义配置，可改成任意可访问的 URL / 阈值（清空链接则回退内置默认）。<br />
-              不勾选标签 = 只按延迟下发；勾选多个 = 必须同时命中全部勾选标签（AND）才下发。<br />
               两个链接各测 3 轮（交替执行，不并发），每个链接只要有一轮 ≤ 自己的上限即算达标；两个链接都达标才下发。
             </div>
             <div class="np-muted">每次检测都会对全部节点执行一次（无开关）；延迟不超过上限的节点才进入 <span class="np-mono">/sub/all</span>。节点标签（GPT/TG/YT 及自定义）只决定节点名里的代号，不决定是否下发。上限填 0 表示不限制。<br />检测超时为全局值：延迟探测与所有标签检测共用这一个超时。</div>
-            <el-divider />
-            <el-form-item label="下发关键词过滤">
-              <el-input v-model="form.sub_filter_keywords" type="textarea" :rows="4" resize="vertical"
-                        class="np-filter-box"
-                        placeholder="每行一个关键词，命中就不下发（不区分大小写）&#10;也可以写成 机场名/节点名 片段，例如：&#10;剩余流量&#10;官网&#10;过期&#10;某机场" />
-            </el-form-item>
-            <div class="np-muted">
-              匹配范围：机场名、节点名、服务器地址，命中任一关键词即从订阅输出中剔除（<span class="np-mono">/sub/all</span> 及订阅预览同步生效）。
-              保存后重新下发才生效。<br />
-              只影响<strong>订阅输出</strong>：机场的可用率、下发率、标签合格率与评分仍按未过滤的检测结果计算，跳过这些节点不会拉低机场评分。
-            </div>
             <el-divider />
             <el-form-item label="定时下发">
               <el-switch v-model="form.sub_publish_enabled" active-value="1" inactive-value="0" />

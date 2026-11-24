@@ -181,7 +181,6 @@ def collect_nodes(batch_id: int | None = None) -> tuple[list[dict], dict]:
     )
 
     latests = latest_latency(batch_id)
-    required_tags = [t for t in (db.get("sub_required_tags") or "").split(",") if t]
 
 
     selected: list[dict] = []
@@ -206,13 +205,6 @@ def collect_nodes(batch_id: int | None = None) -> tuple[list[dict], dict]:
         # Per-target ceilings are enforced inside latest_latency(); the node's latency is
         # the worse of the two passing targets, so no extra global cap check is applied.
         latency = probe["latency_ms"] or (node["latency"] or 0)
-        if required_tags:
-            node_idents = {g["ident"] for g in passed}
-            missing = [t for t in required_tags if t not in node_idents]
-            if missing:
-                skipped.setdefault("tag_filter", 0)
-                skipped["tag_filter"] += 1
-                continue
         # Names read as  机场⁃GPTᐧYTᐧTG⁃节点名  (the short ident, not the group's full name)
         idents = [g["ident"] for g in passed]
         display = (f"{airport['name']}{NAME_SEP}{TAG_SEP.join(idents)}{NAME_SEP}{node['raw_name']}"

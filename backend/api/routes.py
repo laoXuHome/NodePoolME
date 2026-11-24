@@ -649,7 +649,6 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
     ceiling = db.get_int("sub_max_latency", 1000)
     ceiling2 = db.get_int("sub_max_latency2", 1000)
     latency_labels = _latency_labels()
-    required_idents = [t for t in (db.get("sub_required_tags") or "").split(",") if t]
     idents = _node_names()
     items = []
     for node in nodes:
@@ -674,19 +673,15 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
         good = all(node["latency_targets"][t]["best"] is not None for t in ("G", "W"))
         latency = probe.get("fastest_ms") or probe.get("latency_ms") or (node["latency"] or 0)
         node["latency"] = latency
-        missing_tags = [t for t in required_idents if t not in passed_idents]
-        node["missing_tags"] = missing_tags
-        node["publishable"] = bool(good) and not missing_tags
+        node["publishable"] = bool(good)
         if node["publishable"]:
             node["publish_reason"] = "下发"
         elif not targets:
             node["publish_reason"] = "无可用延迟数据"
         elif node["latency_targets"]["G"]["best"] is None:
             node["publish_reason"] = f"{latency_labels['G']['name']} 未通过（上限 {ceiling}ms）"
-        elif node["latency_targets"]["W"]["best"] is None:
-            node["publish_reason"] = f"{latency_labels['W']['name']} 未通过（上限 {ceiling2}ms）"
         else:
-            node["publish_reason"] = f"缺少标签：{'、'.join(missing_tags)}"
+            node["publish_reason"] = f"{latency_labels['W']['name']} 未通过（上限 {ceiling2}ms）"
         node["results"] = {
             str(gid): {**res, "ident": groups.get(gid, {}).get("ident", "?")}
             for gid, res in per_group.items() if gid in groups
@@ -791,12 +786,8 @@ async def node_detail(node_id: int):
               "short": latency_labels["W"]["short"]},
     }
     node["latency"] = summary.get("fastest_ms") or summary.get("latency_ms") or (node["latency"] or 0)
-    required = [t for t in (db.get("sub_required_tags") or "").split(",") if t]
-    node_idents = set(_node_names().get(node_id, []))
-    missing = [t for t in required if t not in node_idents]
-    node["missing_tags"] = missing
     good = all(node["latency_targets"][t]["best"] is not None for t in ("G", "W"))
-    node["publishable"] = bool(good) and not missing
+    node["publishable"] = bool(good)
     if node["publishable"]:
         node["publish_reason"] = "下发"
     elif not summary.get("targets"):
@@ -891,6 +882,7 @@ async def subscription_info(request: Request):
         "settings": {
             "sub_name": db.get("sub_name"),
             "sub_token": token,
+            "sub_filter_keywords": db.get("sub_filter_keywords") or "",
             "latency_test_enabled": True,
             "latency_test_url": db.get("latency_test_url"),
             "latency_test_status": db.get("latency_test_status"),
@@ -920,6 +912,8 @@ async def update_subscription(payload: SubSettings):
         db.append_log("INFO", "订阅", "订阅令牌已重新生成")
     elif payload.sub_token:
         db.set_setting("sub_token", payload.sub_token.strip())
+    if "sub_filter_keywords" in payload.model_fields_set:
+        db.set_setting("sub_filter_keywords", (payload.sub_filter_keywords or "").strip())
     return {"ok": True}
 
 
@@ -954,7 +948,7 @@ SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "su
                 "latency_test_name2", "latency_test_status",
                 "latency_test_timeout", "sub_max_latency", "sub_max_latency2",
                 "sub_publish_enabled", "sub_publish_time", "sub_publish_mode",
-                "sub_publish_interval_minutes", "sub_required_tags", "sub_filter_keywords"]
+                "sub_publish_interval_minutes", "sub_filter_keywords"]
 
 
 @api.get("/settings", dependencies=protected)
@@ -979,14 +973,6 @@ async def get_settings():
 @api.patch("/settings", dependencies=protected)
 async def update_settings(payload: SettingsIn):
     data = payload.model_dump(exclude_unset=True)
-    if "sub_required_tags" in data:
-        wanted = data.pop("sub_required_tags") or []
-        enabled = db.rows("SELECT ident FROM test_groups WHERE enabled=1")
-        valid = {g["ident"] for g in enabled}
-        unknown = [t for t in wanted if t not in valid]
-        if unknown:
-            raise HTTPException(status_code=400, detail=f"未知或已停用的标签：{'、'.join(unknown)}")
-        data["sub_required_tags"] = ",".join(wanted)
     for key, value in data.items():
         if value is None:
             continue

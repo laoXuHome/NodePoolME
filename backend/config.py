@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NodePoolME"
-VERSION = "1.3.9"
+VERSION = "1.4.0"
 
 DATA_DIR = Path(os.getenv("NODEPOOL_DATA_DIR", "./data")).resolve()
 CONFIG_DIR = Path(os.getenv("NODEPOOL_CONFIG_DIR", str(DATA_DIR / "config"))).resolve()
@@ -88,7 +88,7 @@ DEFAULT_SETTINGS = {
     "sub_max_nodes": "0",
     "sub_min_groups": "1",
     "sub_include_unavailable": "0",
-    "sub_required_tags": "",
+    "sub_filter_keywords": "",
     "dispersion_mask": "24",
 }
 

@@ -52,7 +52,6 @@ def test_filters():
         client.post("/api/auth/login", json={"password": "test123"})
         ids, g1, g2, ap, ap2 = _seed()
         db.set_setting("sub_max_latency", 500)
-        db.set_setting("sub_required_tags", "G,TG")
 
         def names(**params):
             r = client.get("/api/nodes", params={k: v for k, v in params.items() if v not in (None, "")})
@@ -70,9 +69,9 @@ def test_filters():
         assert names(tags="G,TG") == ["hit-all"]
         assert names(passed="untagged") == []
         assert names(passed="qualified") == ["hit-all", "hit-one"]
-        # combined: publishable + airport + protocol
-        assert names(publishable="1", airport_id=ap) == ["hit-all"]
-        assert names(publishable="0") == ["hit-one"]
+        # combined: publishable + airport + protocol（必带标签已移除，下发只看双目标延迟）
+        assert names(publishable="1", airport_id=ap) == ["hit-all", "hit-one"]
+        assert names(publishable="0") == []
         assert names(publishable="1", protocol="ss") == ["hit-all"]
         # group_id also accepts the ident, and unknown groups must not crash
         assert names(group_id="TG", passed="1") == ["hit-all"]
