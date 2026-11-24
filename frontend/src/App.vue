@@ -74,7 +74,7 @@ function onMenu(path) {
           <BrandLogo :size="30" compact />
         </div>
         <div v-else class="np-brandline">
-          <BrandLogo :size="38" />
+          <BrandLogo :size="48" />
         </div>
         <nav v-if="!isMobile" class="np-tabsnav" aria-label="主导航">
           <button v-for="m in menus" :key="m.path" class="np-tabx"

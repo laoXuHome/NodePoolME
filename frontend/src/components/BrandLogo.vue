@@ -55,7 +55,7 @@ defineProps({
 </template>
 
 <style scoped>
-.np-brand { display: inline-flex; align-items: center; gap: 10px; flex: none; }
+.np-brand { display: inline-flex; align-items: center; gap: 12px; flex: none; }
 .np-mark {
   display: block;
   flex: none;
@@ -68,9 +68,9 @@ defineProps({
   letter-spacing: -.033em;
   white-space: nowrap;
 }
-.np-word-main { font-size: 15.5px; color: #0d1420; }
+.np-word-main { font-size: 19px; color: #0d1420; letter-spacing: -.035em; }
 .np-word-accent {
-  font-size: 16px;
+  font-size: 19.5px;
   font-weight: 800;
   color: #2c6aee;
   letter-spacing: -.01em;
