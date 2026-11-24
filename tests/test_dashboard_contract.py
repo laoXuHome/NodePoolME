@@ -109,6 +109,16 @@ def test_score_history_uses_only_complete_batches():
     assert len(builder.share_history(7)) == 4
 
 
+def test_dashboard_days_param_window():
+    """days 只影响曲线窗口：30 天请求不应报错，且历史点数不少于 7 天请求。"""
+    with TestClient(app) as client:
+        assert client.post("/api/auth/login", json={"password": "test123"}).status_code == 200
+        short = client.get("/api/dashboard?days=1").json()
+        long = client.get("/api/dashboard?days=30").json()
+    assert len(long["share_history"]) >= len(short["share_history"])
+    assert long["score_window_days"] == short["score_window_days"] == 7
+
+
 def test_share_history_keeps_backfilled_availability_unknown():
     from datetime import datetime, timedelta
 
@@ -131,5 +141,6 @@ if __name__ == "__main__":
     test_dashboard_has_latency_probe()
     test_share_history_uses_seven_day_window_and_sorted_time()
     test_score_history_uses_only_complete_batches()
+    test_dashboard_days_param_window()
     test_share_history_keeps_backfilled_availability_unknown()
     print("PASS dashboard contract")

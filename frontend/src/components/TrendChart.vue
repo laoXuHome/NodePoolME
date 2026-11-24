@@ -79,10 +79,13 @@ function countOf(point, id) {
   return Number(v) || 0
 }
 
+// 1d / 7d / 30d 三档窗口，供刻度与坐标轴共用
+const rangeDays = computed(() => (props.range === '30d' ? 30 : props.range === '7d' ? 7 : 1))
+
 const domain = computed(() => {
   const pts0 = plotted.value
   const end = (pts0.length && pointTime(pts0[pts0.length - 1])) || Date.now()
-  const days = props.range === '7d' ? 7 : 1
+  const days = rangeDays.value
   const floor = end - days * 86400000
   const pts = pts0
   if (!pts.length) return { start: floor, end }

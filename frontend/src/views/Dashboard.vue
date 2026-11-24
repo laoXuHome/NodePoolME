@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, formatTs, logLevelLabel, logSourceLabel } from '../api'
 import TrendChart from '../components/TrendChart.vue'
@@ -31,10 +31,12 @@ async function loadLogs() {
   }
 }
 
+const trendFetchDays = computed(() => trendRange.value === '30d' ? 30 : 7)
+
 async function load() {
   loading.value = true
   try {
-    data.value = await api.get('/api/dashboard')
+    data.value = await api.get(`/api/dashboard?days=${trendFetchDays.value}`)
     running.value = data.value.runtime.running
     rt.value = null
   } catch (err) {
@@ -204,6 +206,8 @@ const rankedAirports = computed(() => {
 })
 
 const trendRange = ref('1d')
+const trendDayCount = computed(() => trendRange.value === '30d' ? 30 : trendRange.value === '7d' ? 7 : 1)
+watch(trendRange, () => { if (data.value) load() })
 const allHistoryPoints = computed(() => Array.isArray(data.value?.share_history) ? data.value.share_history : [])
 function trendPointTime(point) {
   if (point?.live) return Date.now()
@@ -213,7 +217,7 @@ function trendPointTime(point) {
 const trendWindowPoints = computed(() => {
   const all = allHistoryPoints.value
   if (!all.length) return []
-  const days = trendRange.value === '7d' ? 7 : 1
+  const days = trendDayCount.value
   const cutoff = Date.now() - days * 86400000
   const rows = all.filter((point) => point.live || trendPointTime(point) >= cutoff)
   return rows.length ? rows : all.slice(-1)
@@ -227,9 +231,9 @@ const trendSampleText = computed(() => {
   const measured = Math.max(0, raw - (live ? 1 : 0))
   return live ? `${measured} 次检测 + 当前` : `${measured} 次检测`
 })
-const trendRangeText = computed(() => trendRange.value === '7d' ? '近 7 天' : '近 1 天')
+const trendRangeText = computed(() => `近 ${trendDayCount.value} 天`)
 function trendChartPoints(points, key, rows) {
-  if (trendRange.value !== '7d' || !points.length) return points
+  if (trendDayCount.value === 1 || !points.length) return points
   const first = points.findIndex((point) => rows?.some((row) => row.enabled && trendCount(point, row, key) > 0))
   return first > 0 ? points.slice(first) : points
 }
@@ -439,6 +443,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               <div class="np-trend-range" role="group" aria-label="趋势区间">
                 <button type="button" :class="{ 'is-active': trendRange === '1d' }" @click="trendRange = '1d'">近 1 天</button>
                 <button type="button" :class="{ 'is-active': trendRange === '7d' }" @click="trendRange = '7d'">近 7 天</button>
+                <button type="button" :class="{ 'is-active': trendRange === '30d' }" @click="trendRange = '30d'">近 30 天</button>
               </div>
             </div>
             <div v-for="chart in trendCharts" :key="chart.key" class="np-pool-chart">

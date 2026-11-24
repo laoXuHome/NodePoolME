@@ -2,6 +2,7 @@
 import asyncio
 import html
 import json
+import math
 import os
 import secrets
 import shutil
@@ -179,7 +180,9 @@ def _latency_labels() -> dict[str, dict]:
 
 
 @api.get("/dashboard", dependencies=protected)
-async def dashboard():
+async def dashboard(days: int = 7):
+    """days 控制趋势曲线的历史窗口（1/7/30），评分窗口固定 7 天不受影响。"""
+    history_days = days if days in (1, 7, 30) else 7
     airports = fetcher.all_airports()   # needs daily_time / interval_minutes for the next-run math
     # Only nodes from enabled airports belong to the pool
     pool = "SELECT COUNT(*) AS c FROM nodes n JOIN airports a ON a.id=n.airport_id WHERE a.enabled=1"
@@ -221,7 +224,10 @@ async def dashboard():
         )
     }
     builder.ensure_share_history(score_days)
-    history = builder.share_history(score_days)
+    history = builder.share_history(max(history_days, score_days))
+    if len(history) > 480:   # 30 天窗口可能上千个快照，抽稀到约 480 个点，末点保留
+        step = math.ceil(len(history) / 480)
+        history = [p for i, p in enumerate(history) if i % step == 0 or i == len(history) - 1]
     score_history = builder.share_history(score_days, complete_only=True)
     score_samples: dict[int, list[dict]] = {}
     for point in score_history:

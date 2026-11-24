@@ -790,7 +790,9 @@ async def job_maintenance() -> None:
     cutoff = (datetime.now() - timedelta(days=max(7, min(days, 365)))).strftime("%Y-%m-%d %H:%M:%S")
     db.execute("DELETE FROM results WHERE ts < ?", (cutoff,))
     db.execute("DELETE FROM latency_results WHERE ts < ?", (cutoff,))
-    db.execute("DELETE FROM share_history WHERE ts < ?", (cutoff,))
+    # 仪表盘提供「近 30 天」曲线，占比快照至少保留 30 天，不受历史保留天数影响
+    share_cutoff = (datetime.now() - timedelta(days=max(30, min(days, 365)))).strftime("%Y-%m-%d %H:%M:%S")
+    db.execute("DELETE FROM share_history WHERE ts < ?", (share_cutoff,))
     db.execute("DELETE FROM fetch_logs WHERE ts < ?", (cutoff,))
     db.execute("DELETE FROM batches WHERE started_at < ?", (cutoff,))
     # 节点被删除或从机场订阅里消失后，结果行会变成孤儿，一并清掉
