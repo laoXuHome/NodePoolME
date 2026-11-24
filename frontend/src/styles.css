@@ -784,15 +784,16 @@ a { color: var(--np-accent); }
 .np-score-head > div span { padding: 1px 6px; border-radius: 99px; background: #f2f4f8; color: var(--np-secondary); }
 .np-score-table-wrap { width: 100%; overflow-x: auto; }
 .np-score-table {
-  width: 100%; min-width: 500px; border-collapse: collapse; table-layout: fixed;
+  width: 100%; min-width: 496px; border-collapse: collapse; table-layout: fixed;
   font-variant-numeric: tabular-nums;
 }
-.np-score-col-rank { width: 24px; }
-.np-score-col-rate { width: 68px; }
-.np-score-col-score { width: 74px; }
+.np-score-col-rank { width: 20px; }
+.np-score-col-rate { width: 56px; }
+.np-score-col-score { width: 56px; }
+.np-score-col-status { width: 78px; }
 .np-score-table th {
-  padding: 5px 4px 7px; border-bottom: 1px solid var(--np-separator-soft);
-  font-size: 9.5px; line-height: 1.2; font-weight: 600; color: var(--np-tertiary); text-align: right;
+  padding: 5px 3px 7px; border-bottom: 1px solid var(--np-separator-soft);
+  font-size: 9px; line-height: 1.2; font-weight: 600; color: var(--np-tertiary); text-align: right;
   white-space: nowrap;
 }
 .np-score-table th.is-left { text-align: left; padding-left: 9px; }
@@ -800,10 +801,18 @@ a { color: var(--np-accent); }
   display: block; margin-top: 1px; font-style: normal; font-size: 8px; font-weight: 500; color: #b0b5bf;
 }
 .np-score-table th.is-score { color: var(--np-secondary); }
+.np-score-table th.is-status { color: var(--np-secondary); }
+.np-data-status { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; line-height: 1.15; }
+.np-data-status b { font-size: 9.5px; font-weight: 650; white-space: nowrap; }
+.np-data-status small { font-size: 8px; font-weight: 500; color: var(--np-tertiary); font-variant-numeric: tabular-nums; }
+.np-data-status.is-normal b { color: #16a34a; }
+.np-data-status.is-reference b, .np-data-status.is-tentative b { color: #2563eb; }
+.np-data-status.is-unknown b { color: #b07b1e; }
+.np-data-status.is-insufficient b, .np-data-status.is-collecting b { color: #c2410c; }
 .np-score-table tbody tr { border-bottom: 1px solid var(--np-separator-soft); }
 .np-score-table tbody tr:last-child { border-bottom: 0; }
 .np-score-table tbody tr.is-off { background: #fafbfc; }
-.np-score-table td { padding: 7px 4px; text-align: right; vertical-align: middle; }
+.np-score-table td { padding: 7px 3px; text-align: right; vertical-align: middle; }
 .np-score-rank { font-size: 9.5px; font-weight: 600; color: var(--np-tertiary); text-align: right; }
 .np-score-rank.is-off { color: #c7c7cc; font-weight: 500; }
 .np-score-airport { padding-left: 9px !important; text-align: left; overflow: hidden; }

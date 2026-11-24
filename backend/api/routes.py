@@ -21,12 +21,17 @@ from backend.models.schemas import (AirportIn, AirportPatch, GroupIn, GroupPatch
                                     NodeTestIn, PasswordIn, RunIn, SettingsIn, SubSettings)
 from backend.scheduler import manager
 from backend.services import fetcher
+from backend.scoring import sampler
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
 
 api = APIRouter(prefix="/api")
 protected = [Depends(auth.require_auth)]
 SCORE_WEIGHTS = {"available": 50, "publish": 40, "share": 5, "tag": 5}
+DATA_STATUS_TEXT = {
+    "normal": "正常", "reference": "参考", "tentative": "初步",
+    "collecting": "采集中", "insufficient": "数据不足", "unknown": "计划未知",
+}
 
 # 时段权重：傍晚到凌晨是实际使用高峰，评分按快照发生的时间加权
 # 17:00–01:00 占 50%，01:00–08:00 占 15%，08:00–17:00 占 35%
@@ -45,46 +50,47 @@ def _time_band(ts: str) -> tuple[float, int]:
     return 0.35, 3
 
 
-HOURLY_SNAPSHOT_CAP = 2   # 同一小时内最多留 2 份快照，防止一小时内反复检测刷高权重
+def _parse_local(ts) -> datetime | None:
+    try:
+        return datetime.strptime(str(ts)[:19], "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return None
 
 
-def _hour_key(ts: str) -> str:
-    return ts[:13]   # YYYY-MM-DD HH，按小时分桶
+def _schedule_plan() -> list[tuple[datetime, int]]:
+    """检测计划变更记录（changed_at, 间隔分钟）；旧库没有该表时返回空。"""
+    try:
+        rows = db.rows("SELECT changed_at, interval_minutes FROM schedule_history ORDER BY changed_at, id")
+    except Exception:
+        return []
+    plan = []
+    for row in rows:
+        stamp = _parse_local(row["changed_at"])
+        if stamp:
+            plan.append((stamp, int(row["interval_minutes"])))
+    return plan
 
 
 def _weighted_mean(samples: list[dict], key: str) -> float | None:
-    """按时段 + 小时两级的加权均值。
+    """时段加权均值：同一时段内的样本平分该时段权重。
 
-    1. 快照先按小时分桶，同一小时超过 cap 份时只保留最早与最晚两份
-       （一小时内连续点几次检测，不应该让这一小时替整个时段说话）。
-    2. 时段内每个"有数据的小时"平分该时段权重；同一小时内保留的快照再平分这一份。
-    3. 某档没有快照就整档缺席，不补 0，剩余档按自身权重重新归一。
+    采样点已经由"计划驱动 + 一对一匹配"保证了代表性，这里不再按检测次数加权；
+    某档没有样本就整档缺席、不补 0，剩余档按自身权重归一化。
     """
-    buckets: dict[tuple[int, str], list[tuple[float, str]]] = {}
+    buckets: dict[int, list[float]] = {}
     for item in samples:
         value = item.get(key)
         if value is None:
             continue
-        ts = item.get("ts") or ""
-        weight, band = _time_band(ts)
-        buckets.setdefault((band, _hour_key(ts)), []).append((float(value), ts))
-    kept: dict[int, list[tuple[str, list[float]]]] = {}
-    for (band, hour), rows in buckets.items():
-        rows.sort(key=lambda row: row[1])
-        values = [row[0] for row in rows]
-        if len(values) > HOURLY_SNAPSHOT_CAP:
-            values = [values[0], values[-1]]
-        kept.setdefault(band, []).append((hour, values))
+        _, band = _time_band(item.get("ts") or "")
+        buckets.setdefault(band, []).append(float(value))
     weighted = 0.0
     total = 0.0
-    for band, hours in kept.items():
-        band_weight = TIME_BANDS[band][1]
-        hour_weight = band_weight / len(hours)
-        for _, values in hours:
-            per = hour_weight / len(values)
-            for value in values:
-                weighted += per * value
-                total += per
+    for band, values in buckets.items():
+        band_weight = TIME_BANDS[band][1] / len(values)
+        for value in values:
+            weighted += band_weight * value
+            total += band_weight
     return weighted / total if total else None
 
 
@@ -288,9 +294,30 @@ async def dashboard(days: int = 7):
         step = math.ceil(len(history) / 480)
         history = [p for i, p in enumerate(history) if i % step == 0 or i == len(history) - 1]
     score_history = builder.share_history(score_days, complete_only=True)
-    score_samples: dict[int, list[dict]] = {}
+    snapshot_stamps: list[datetime] = []
+    snapshot_points: list[dict] = []
     for point in score_history:
+        stamp = _parse_local(point.get("ts"))
+        if stamp:
+            snapshot_stamps.append(stamp)
+            snapshot_points.append(point)
+    local_now = now.replace(tzinfo=None)
+    window_start = local_now - timedelta(days=score_days)
+    if snapshot_stamps:
+        window_start = max(window_start, min(snapshot_stamps))
+    segments = sampler.build_segments(_schedule_plan(), window_start, local_now)
+    sample_points = sampler.generate_points(segments, snapshot_stamps, local_now)
+    matched = sampler.match_points(sample_points, snapshot_stamps)
+    known_points = [point for point in sample_points if point.known]
+    matched_known = [pair for pair in matched if sample_points[pair[0]].known]
+    coverage = (len(matched_known) / len(known_points)) if known_points else None
+    plan_known = bool(segments) and all(segment.known for segment in segments)
+    # 只有"计划要求、又被真实快照匹配上"的采样点参与评分；缺失的点不补零、不去凑
+    score_samples: dict[int, list[dict]] = {}
+    for point_index, snapshot_index in matched_known:
+        point = snapshot_points[snapshot_index]
         point_total = point.get("total_nodes") or 0
+        stamp = sample_points[point_index].time.strftime("%Y-%m-%d %H:%M:%S")
         for airport_id, counts in (point.get("airports") or {}).items():
             pool = counts.get("pool_count") or 0
             if not pool:
@@ -300,7 +327,7 @@ async def dashboard(days: int = 7):
                 if point.get("available_known", 1) else None,
                 "published": (counts.get("published_count") or 0) / pool,
                 "share": pool / point_total if point_total else 0,
-                "ts": point.get("ts") or "",
+                "ts": stamp,
             })
     fetch_next: list[str] = []
     manual_only = 0
@@ -329,6 +356,16 @@ async def dashboard(days: int = 7):
         payload["tag_rate"] = round(tag_count / pool_count * 100, 1) if pool_count else 0.0
         samples = score_samples.get(airport["id"], [])
         payload["score_samples"] = len(samples)
+        created = _parse_local(airport.get("created_at")) or local_now
+        maturity_days = max(0.0, min((local_now - created).total_seconds() / 86400, score_days))
+        detail_coverage = coverage if plan_known else None
+        status = sampler.data_status(maturity_days, detail_coverage)
+        payload["coverage"] = round(detail_coverage * 100, 1) if detail_coverage is not None else None
+        payload["maturity_days"] = round(maturity_days, 1)
+        payload["data_status"] = status
+        payload["data_status_text"] = DATA_STATUS_TEXT.get(status, status)
+        payload["rank_tier"] = sampler.status_rank(status)
+        payload["sampled_points"] = len(known_points)
         if airport["enabled"] and pool_count:
             # 综合评分：近 7 天可用率 50% + 下发率 40% + 池占比 5% + 标签合格率 5%
             if samples:
@@ -353,16 +390,40 @@ async def dashboard(days: int = 7):
                 + SCORE_WEIGHTS["share"] / 100 * share
                 + SCORE_WEIGHTS["tag"] / 100 * tag_rate
             ))
-            payload["score"] = max(0, min(100, score))
-            payload["score_grade"] = ("优" if score >= 80 else "良" if score >= 60
-                                      else "中" if score >= 40 else "差" if score >= 20 else "危")
+            if status in ("insufficient", "collecting"):
+                # 数据不足只表示缺证据，不代表机场质量差：评分留空，不参与正式排名
+                payload["score"] = None
+                payload["score_grade"] = "—"
+            else:
+                payload["score"] = max(0, min(100, score))
+                payload["score_grade"] = ("优" if score >= 80 else "良" if score >= 60
+                                          else "中" if score >= 40 else "差" if score >= 20 else "危")
+            if status == "collecting":
+                payload["data_status_detail"] = ""
+            elif status in ("reference", "tentative", "unknown") and maturity_days < score_days - 0.01:
+                payload["data_status_detail"] = f"{maturity_days:.1f}/7 天"
+            elif payload["coverage"] is not None:
+                payload["data_status_detail"] = f"{payload['coverage']:.1f}%"
+            else:
+                payload["data_status_detail"] = ""
         else:
             payload["available_rate"] = None
             payload["publish_rate"] = None
             payload["share_rate"] = None
             payload["score"] = None
             payload["score_grade"] = "停用" if not airport["enabled"] else "空"
+            if status in ("reference", "tentative", "unknown") and maturity_days < score_days - 0.01:
+                payload["data_status_detail"] = f"{maturity_days:.1f}/7 天"
+            else:
+                payload["data_status_detail"] = (f"{payload['coverage']:.1f}%"
+                                                 if payload.get("coverage") is not None else "")
         airport_list.append(payload)
+    airport_list.sort(key=lambda item: (
+        0 if item.get("enabled") else 1,
+        int(item.get("rank_tier") or 0),
+        -float(item["score"]) if item.get("score") is not None else 0,
+        -(item.get("pool_count") or 0),
+    ))
     enabled_airports = [a for a in airports if a["enabled"]]
     fetch_ok = sum(1 for a in enabled_airports if a["last_status"] == "ok")
     fetch_err = sum(1 for a in enabled_airports if a["last_status"] == "error")
@@ -996,6 +1057,9 @@ async def update_settings(payload: SettingsIn):
         if key == "dispersion_mask" and value not in (8, 16, 24, 32):
             raise HTTPException(status_code=400, detail="相似节点分散粒度只能是 8、16、24 或 32")
         db.set_setting(key, value)
+    if "test_interval_minutes" in data:
+        # 间隔变化要留档：评分按"当时的计划"生成采样点，历史口径不追溯
+        db.record_schedule_plan(db.get_int("test_interval_minutes", 30), "settings")
     if "request_interval_min_ms" in data or "request_interval_max_ms" in data:
         if db.get_int("request_interval_max_ms") < db.get_int("request_interval_min_ms"):
             db.set_setting("request_interval_max_ms", db.get_int("request_interval_min_ms"))

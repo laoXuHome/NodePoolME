@@ -175,6 +175,15 @@ function scoreTone(row) {
   if (row.score >= 20) return 'is-low'
   return 'is-bad'
 }
+function statusHint(row) {
+  const cov = row.coverage
+  if (!row.enabled) return '机场未启用，不参与评分'
+  if (row.data_status === 'collecting') return '数据积累不足 24 小时，暂不评分'
+  if (row.data_status === 'insufficient') return `有效采样覆盖率 ${cov ?? '—'}%，缺少检测证据，不代表机场质量差`
+  if (row.data_status === 'unknown') return '检测计划历史不完整，覆盖率无法准确还原，不参与正式排名'
+  if (row.data_status === 'normal') return `采样覆盖率 ${cov}%，数据完整，参与正式排名`
+  return `采样覆盖率 ${cov}%，数据仅作参考，不参与正式排名`
+}
 function scoreHint(row) {
   const pool = row.pool_count || 0
   if (!row.enabled) return '机场未启用，不参与评分'
@@ -189,6 +198,7 @@ function scoreHint(row) {
 function scoreSampleText(row) {
   if (!row.enabled) return '未启用'
   if (!row.pool_count) return '空池'
+  if (row.sampled_points) return `${row.score_samples}/${row.sampled_points} 点命中`
   return row.score_samples ? `${row.score_samples} 个完整快照` : '按当前值'
 }
 function rateText(row, key) {
@@ -198,12 +208,16 @@ function rateText(row, key) {
 const rankedAirports = computed(() => {
   return [...(data.value?.airport_list || [])].sort((a, b) => {
     if (!!a.enabled !== !!b.enabled) return a.enabled ? -1 : 1
+    const ta = a.rank_tier ?? 0
+    const tb = b.rank_tier ?? 0
+    if (ta !== tb) return ta - tb
     const sa = Number.isFinite(a.score) ? a.score : -1
     const sb = Number.isFinite(b.score) ? b.score : -1
     if (sb !== sa) return sb - sa
     return (b.pool_count || 0) - (a.pool_count || 0)
   })
 })
+const statusTone = (row) => `is-${row.data_status || 'unknown'}`
 
 const trendRange = ref('1d')
 const trendDayCount = computed(() => trendRange.value === '30d' ? 30 : trendRange.value === '7d' ? 7 : 1)
@@ -382,6 +396,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               <col class="np-score-col-rate" />
               <col class="np-score-col-rate" />
               <col class="np-score-col-rate" />
+              <col class="np-score-col-status" />
               <col class="np-score-col-score" />
             </colgroup>
             <thead>
@@ -392,6 +407,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 <th>下发率 <i>{{ scoreWeights.publish }}%</i></th>
                 <th>池占比 <i>{{ scoreWeights.share }}%</i></th>
                 <th>标签合格率 <i>{{ scoreWeights.tag }}%</i></th>
+                <th class="is-status">数据状态</th>
                 <th class="is-score">评分</th>
               </tr>
             </thead>
@@ -408,19 +424,25 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 </td>
                 <td class="np-score-cell">
                   <b>{{ rateText(row, 'available_rate') }}</b>
-                  <small>{{ row.enabled ? '均值' : '—' }}</small>
+                  <small>{{ row.enabled ? '加权' : '—' }}</small>
                 </td>
                 <td class="np-score-cell">
                   <b>{{ rateText(row, 'publish_rate') }}</b>
-                  <small>{{ row.enabled ? '均值' : '—' }}</small>
+                  <small>{{ row.enabled ? '加权' : '—' }}</small>
                 </td>
                 <td class="np-score-cell">
                   <b>{{ rateText(row, 'share_rate') }}</b>
-                  <small>{{ row.enabled ? '均值' : '—' }}</small>
+                  <small>{{ row.enabled ? '加权' : '—' }}</small>
                 </td>
                 <td class="np-score-cell">
                   <b>{{ rateText(row, 'tag_rate') }}</b>
                   <small>{{ row.enabled ? `${row.tag_ok_count || 0}/${row.pool_count}` : '—' }}</small>
+                </td>
+                <td class="np-score-cell is-status" :title="statusHint(row)">
+                  <div class="np-data-status" :class="statusTone(row)">
+                    <b>{{ row.data_status_text || '—' }}</b>
+                    <small>{{ row.data_status_detail || '' }}</small>
+                  </div>
                 </td>
                 <td class="np-score-cell is-score" :title="scoreHint(row)">
                   <div class="np-pool-score" :class="scoreTone(row)">
@@ -432,8 +454,8 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           </table>
         </div>
         <div v-if="data.airport_list?.length" class="np-score-foot">
-          <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 池占比 {{ scoreWeights.share }}% + 标签合格率 {{ scoreWeights.tag }}%；前 3 项取近 {{ data.score_window_days || 7 }} 天完整快照的时段加权均值（17:00–01:00 权重 50%、01:00–08:00 15%、08:00–17:00 35%；每小时最多计 2 份快照）</span>
-          <span>标签合格率 = 近 7 天任一启用标签通过 / 缓存节点；暂停、中断和单节点测试不计入</span>
+          <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 池占比 {{ scoreWeights.share }}% + 标签合格率 {{ scoreWeights.tag }}%；前 3 项取近 {{ data.score_window_days || 7 }} 天里按检测计划生成、且被快照命中的采样点，再做时段加权（17:00–01:00 权重 50%、01:00–08:00 15%、08:00–17:00 35%）</span>
+          <span>覆盖率 = 有效采样点 / 计划采样点，只反映数据完整度，不参与评分；暂停、中断和单节点测试不计入</span>
         </div>
         </div>
 

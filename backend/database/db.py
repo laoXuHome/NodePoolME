@@ -147,6 +147,13 @@ CREATE TABLE IF NOT EXISTS share_history (
     available_known INTEGER NOT NULL DEFAULT 1,
     UNIQUE (ts, airport_id)
 );
+
+CREATE TABLE IF NOT EXISTS schedule_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    changed_at TEXT NOT NULL,
+    interval_minutes INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_share_history_ts ON share_history(ts);
 
 CREATE TABLE IF NOT EXISTS batches (
@@ -341,6 +348,18 @@ def set_setting(key: str, value: Any) -> None:
         (key, str(value)),
     )
     conn.commit()
+
+
+def record_schedule_plan(interval_minutes: int, source: str = "") -> None:
+    """记录检测计划变更；间隔没变就什么也不做，历史不会被当前配置覆盖。"""
+    interval = int(interval_minutes)
+    last = row("SELECT interval_minutes FROM schedule_history ORDER BY id DESC LIMIT 1")
+    if last and int(last["interval_minutes"]) == interval:
+        return
+    execute(
+        "INSERT INTO schedule_history (changed_at, interval_minutes, source) VALUES (?,?,?)",
+        (now(), interval, source),
+    )
 
 
 def rows(sql: str, params: Iterable = ()) -> list[dict]:

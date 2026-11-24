@@ -794,6 +794,9 @@ async def job_maintenance() -> None:
     share_cutoff = (datetime.now() - timedelta(days=max(30, min(days, 365)))).strftime("%Y-%m-%d %H:%M:%S")
     db.execute("DELETE FROM share_history WHERE ts < ?", (share_cutoff,))
     db.execute("DELETE FROM fetch_logs WHERE ts < ?", (cutoff,))
+    # 检测计划留档要覆盖评分窗口，保留期固定 180 天
+    db.execute("DELETE FROM schedule_history WHERE changed_at < ?",
+               ((datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d %H:%M:%S"),))
     db.execute("DELETE FROM batches WHERE started_at < ?", (cutoff,))
     # 节点被删除或从机场订阅里消失后，结果行会变成孤儿，一并清掉
     db.execute("DELETE FROM results WHERE node_id NOT IN (SELECT id FROM nodes)")
@@ -804,6 +807,7 @@ async def job_maintenance() -> None:
 def start_scheduler() -> None:
     if scheduler.running:
         return
+    db.record_schedule_plan(db.get_int("test_interval_minutes", 30), "boot")
     # With the startup test disabled, arm the first automatic cycle one full interval
     # after boot instead of letting job_cycle fire as soon as it sees last_cycle_at=None.
     state.auto_cycle_anchor = None

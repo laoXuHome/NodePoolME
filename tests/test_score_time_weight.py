@@ -1,4 +1,4 @@
-"""时段加权评分：傍晚–凌晨快照占主导，凌晨减重。"""
+"""时段加权：傍晚–凌晨样本占主导，凌晨减重；采样代表性由动态采样负责。"""
 import os
 import sys
 import tempfile
@@ -47,14 +47,6 @@ def test_missing_band_is_dropped_not_zeroed():
     assert daytime is not None and abs(daytime - 0.7) < 1e-9
 
 
-def test_hourly_cap_limits_burst_influence():
-    """一小时内连测 5 次只保留首末两份，不能靠"多测几次"把这一小时拉满。"""
-    burst = _samples([(20, 1.0)] * 5 + [(23, 0.0)])
-    mean = _weighted_mean(burst, "available")
-    # 20 点这一小时内部只剩首末（均为 1.0），与 23 点各占晚高峰一半
-    assert mean is not None and abs(mean - 0.5) < 1e-9
-
-
 def test_hours_within_band_share_weight_equally():
     # 晚高峰只有 19 点一份 1.0，凌晨档 03/05/07 三份 0.0
     rows = _samples([(19, 1.0), (3, 0.0), (5, 0.0), (7, 0.0)])
@@ -71,7 +63,6 @@ if __name__ == "__main__":
     test_time_band_mapping()
     test_band_shares_are_fixed_regardless_of_sample_count()
     test_missing_band_is_dropped_not_zeroed()
-    test_hourly_cap_limits_burst_influence()
     test_hours_within_band_share_weight_equally()
     test_unknown_availability_is_ignored()
     print("PASS score time weight")
