@@ -7,8 +7,13 @@ const props = defineProps({
   field: { type: String, required: true },
   range: { type: String, default: '1d' },
   title: { type: String, default: '' },
-  color: { type: Function, required: true },
+  palette: { type: Array, default: () => [] },
 })
+
+// 曲线配色跟末端数值排名走：第 1 名紫、第 2 名绿、第 3 名蓝、第 4 名橙、第 5 名红，
+// 机场超过 5 个时按补充色继续，取色相差距大的顺序。
+const FALLBACK_PALETTE = ['#8b5cf6', '#16a34a', '#2563eb', '#ea580c', '#dc2626',
+  '#0e9596', '#ca8a04', '#db2777', '#475569', '#65a30d', '#0891b2', '#b45309']
 
 const box = ref(null)
 const w = ref(560)
@@ -90,11 +95,18 @@ const domain = computed(() => {
 })
 
 const plotted = computed(() => props.points.filter((point) => !point.live))
-const series = computed(() => props.rows
-  .filter((row) => row && row.enabled)
-  .map((row) => ({ id: row.id, name: row.name || `#${row.id}`, color: props.color(row),
-    values: plotted.value.map((p) => countOf(p, row.id)) }))
-  .filter((s) => s.values.some((v) => v > 0)))
+const series = computed(() => {
+  const base = props.rows
+    .filter((row) => row && row.enabled)
+    .map((row) => ({ id: row.id, name: row.name || `#${row.id}`,
+      values: plotted.value.map((p) => countOf(p, row.id)) }))
+    .filter((s) => s.values.some((v) => v > 0))
+  const palette = props.palette?.length ? props.palette : FALLBACK_PALETTE
+  const lastOf = (s) => (s.values.length ? s.values[s.values.length - 1] : 0)
+  return [...base]
+    .sort((a, b) => lastOf(b) - lastOf(a) || a.id - b.id)
+    .map((s, i) => ({ ...s, color: palette[i % palette.length] }))
+})
 
 function niceStep(raw) {
   const n = Math.max(1, raw)

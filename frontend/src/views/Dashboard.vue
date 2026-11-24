@@ -5,7 +5,9 @@ import { api, formatTs, logLevelLabel, logSourceLabel } from '../api'
 import TrendChart from '../components/TrendChart.vue'
 
 const data = ref(null)
-const AIRPORT_COLORS = ['#2563eb', '#e8590c', '#15803d', '#8b5cf6', '#0e9596', '#e11d48', '#ca8a04', '#475569', '#4f46e5', '#65a30d', '#b45309', '#0891b2']
+// 趋势图配色：前 5 个与评分等级同色（紫/绿/蓝/橙/红），其后按色相差距大者补充
+const AIRPORT_COLORS = ['#8b5cf6', '#16a34a', '#2563eb', '#ea580c', '#dc2626',
+  '#0e9596', '#ca8a04', '#db2777', '#475569', '#65a30d', '#0891b2', '#b45309']
 const loading = ref(false)
 const running = ref(false)
 const logs = ref([])
@@ -306,12 +308,6 @@ function airportPublishRate(row) {
   if (!pool) return 0
   return Math.min(100, Math.round((row.published_count || 0) / pool * 100))
 }
-function airportColor(row) {
-  const rows = data.value?.airport_list || []
-  const index = rows.findIndex((item) => item.id === row.id)
-  if (!row.enabled) return '#c7c7cc'
-  return AIRPORT_COLORS[Math.max(0, index) % AIRPORT_COLORS.length]
-}
 function chartAmount(row, key) {
   return row.enabled ? (row[key] || 0) : 0
 }
@@ -505,7 +501,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 :field="chart.field"
                 :range="trendRange"
                 :title="chart.title"
-                :color="airportColor"
+                :palette="AIRPORT_COLORS"
               />
             </div>
             </div>
