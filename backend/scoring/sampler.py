@@ -165,5 +165,5 @@ def data_status(maturity_days: float, coverage: float | None) -> str:
 
 def status_rank(status: str) -> int:
     """正式排名 0、参考排名 1、不参与 2。"""
-    return {"normal": 0, "reference": 1, "unknown": 1,
-            "tentative": 1, "insufficient": 2, "collecting": 2}.get(status, 2)
+    return {"ample": 0, "normal": 0, "reference": 1, "rough": 1,
+            "unknown": 1, "insufficient": 2}.get(status, 2)

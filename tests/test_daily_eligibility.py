@@ -155,7 +155,7 @@ def test_two_or_more_qualified_days_get_scored():
     with TestClient(app) as client:
         row = _row(client)
     assert row["eligible_days"] >= 2
-    assert row["data_status"] in ("reference", "tentative")
+    assert row["data_status"] in ("reference", "rough")
     assert row["score"] is not None
 
 

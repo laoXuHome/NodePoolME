@@ -805,10 +805,14 @@ a { color: var(--np-accent); }
 .np-data-status { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; line-height: 1.15; }
 .np-data-status b { font-size: 9.5px; font-weight: 650; white-space: nowrap; }
 .np-data-status small { font-size: 8px; font-weight: 500; color: var(--np-tertiary); font-variant-numeric: tabular-nums; }
-.np-data-status.is-normal b { color: #16a34a; }
-.np-data-status.is-reference b, .np-data-status.is-tentative b { color: #2563eb; }
-.np-data-status.is-unknown b { color: #b07b1e; }
-.np-data-status.is-insufficient b, .np-data-status.is-collecting b { color: #c2410c; }
+/* 等级配色沿用趋势图末端标签的名次色：充足紫、正常绿、参考蓝、大概橙、数据不足红 */
+.np-data-status b { padding: 0 4px; border-radius: 4px; }
+.np-data-status.is-ample b { color: #8b5cf6; background: rgba(139, 92, 246, 0.10); }
+.np-data-status.is-normal b { color: #16a34a; background: rgba(22, 163, 74, 0.10); }
+.np-data-status.is-reference b, .np-data-status.is-tentative b { color: #2563eb; background: rgba(37, 99, 235, 0.10); }
+.np-data-status.is-rough b { color: #ea580c; background: rgba(234, 88, 12, 0.10); }
+.np-data-status.is-insufficient b, .np-data-status.is-collecting b { color: #dc2626; background: rgba(220, 38, 38, 0.10); }
+.np-data-status.is-unknown b { color: #b07b1e; background: rgba(176, 123, 30, 0.10); }
 .np-score-table tbody tr { border-bottom: 1px solid var(--np-separator-soft); }
 .np-score-table tbody tr:last-child { border-bottom: 0; }
 .np-score-table tbody tr.is-off { background: #fafbfc; }

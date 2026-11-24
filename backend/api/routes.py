@@ -29,8 +29,8 @@ api = APIRouter(prefix="/api")
 protected = [Depends(auth.require_auth)]
 SCORE_WEIGHTS = {"available": 50, "publish": 40, "share": 5, "tag": 5}
 DATA_STATUS_TEXT = {
-    "normal": "正常", "reference": "参考", "tentative": "初步",
-    "collecting": "采集中", "insufficient": "数据不足", "unknown": "计划未知",
+    "ample": "充足", "normal": "正常", "reference": "参考", "rough": "大概",
+    "insufficient": "数据不足", "unknown": "计划未知",
 }
 
 # 时段权重：傍晚到凌晨是实际使用高峰，评分按快照发生的时间加权
@@ -376,6 +376,16 @@ async def dashboard(days: int = 7):
                 "ts": stamp,
             })
     ok_days = len(score_days_set)
+    # 近 7 个自然日（含今天），分母固定 7；今天未走完时按已保留份数如实统计
+    window_dates = [(local_now.date() - timedelta(days=i)).strftime("%Y-%m-%d")
+                    for i in range(6, -1, -1)]
+    full_days, qualified_days = eligibility.day_ratios(selection.day_stats, window_dates)
+    maturity_value = eligibility.maturity_score(
+        full_days, qualified_days, coverage if plan_known else None)
+    maturity_status = ("insufficient" if qualified_days == 0
+                       else eligibility.maturity_grade(maturity_value))
+    if plan_estimated and maturity_status in ("ample", "normal"):
+        maturity_status = "reference"
     day_stats_payload = [
         {"date": item.date, "eligible": item.eligible,
          "kept": item.kept, "reason": item.reason}
@@ -394,8 +404,8 @@ async def dashboard(days: int = 7):
             else:
                 fetch_next.append(airport["next_run_at"])
         payload = _airport_payload(airport)
-        payload["eligible_days"] = ok_days
-        payload["dropped_days"] = len(selection.dropped_days)
+        payload["eligible_days"] = qualified_days
+        payload["dropped_days"] = max(0, 7 - qualified_days)
         payload["day_stats"] = day_stats_payload
         payload["excluded_points"] = excluded_points
         payload["next_run_at"] = airport["next_run_at"]
@@ -414,25 +424,17 @@ async def dashboard(days: int = 7):
         payload["score_samples"] = len(samples)
         created = _parse_local(airport.get("created_at")) or local_now
         maturity_days = max(0.0, min((local_now - created).total_seconds() / 86400, score_days))
-        detail_coverage = coverage if plan_known else None
-        status = sampler.data_status(maturity_days, detail_coverage)
-        if plan_estimated and status == "normal":
-            status = "reference"
-        ok_days = len(score_days_set)
-        if maturity_days < 1:
-            status = "collecting"
-        elif ok_days <= 1:
-            # 只有 0–1 天有效数据：证据不够，不给评分
-            status = "insufficient"
-        elif status == "normal" and ok_days < score_days:
-            status = "reference"
-        payload["coverage"] = round(detail_coverage * 100, 1) if detail_coverage is not None else None
+        payload["coverage"] = round(coverage * 100, 1) if (coverage is not None and plan_known) else None
         payload["maturity_days"] = round(maturity_days, 1)
-        payload["data_status"] = status
-        payload["data_status_text"] = DATA_STATUS_TEXT.get(status, status)
-        payload["rank_tier"] = sampler.status_rank(status)
+        payload["maturity_score"] = round(maturity_value, 1)
+        payload["full_days"] = full_days
+        payload["qualified_days"] = qualified_days
+        payload["data_status"] = maturity_status
+        payload["data_status_text"] = DATA_STATUS_TEXT.get(maturity_status, maturity_status)
+        payload["rank_tier"] = sampler.status_rank(maturity_status)
         payload["sampled_points"] = len(known_points)
         payload["plan_estimated"] = plan_estimated
+        detail = f"{maturity_value:.0f} 分" + ("（推定）" if plan_estimated else "")
         if airport["enabled"] and pool_count:
             # 综合评分：近 7 天可用率 50% + 下发率 40% + 池占比 5% + 标签合格率 5%
             if samples:
@@ -457,7 +459,7 @@ async def dashboard(days: int = 7):
                 + SCORE_WEIGHTS["share"] / 100 * share
                 + SCORE_WEIGHTS["tag"] / 100 * tag_rate
             ))
-            if status in ("insufficient", "collecting"):
+            if maturity_status == "insufficient":
                 # 数据不足只表示缺证据，不代表机场质量差：评分留空，不参与正式排名
                 payload["score"] = None
                 payload["score_grade"] = "—"
@@ -465,31 +467,14 @@ async def dashboard(days: int = 7):
                 payload["score"] = max(0, min(100, score))
                 payload["score_grade"] = ("优" if score >= 80 else "良" if score >= 60
                                           else "中" if score >= 40 else "差" if score >= 20 else "危")
-            if status == "collecting":
-                payload["data_status_detail"] = ""
-            elif status in ("reference", "tentative", "unknown") and maturity_days < score_days - 0.01:
-                payload["data_status_detail"] = f"{maturity_days:.1f}/7 天"
-            elif payload["coverage"] is not None:
-                payload["data_status_detail"] = (f"{payload['coverage']:.1f}%"
-                                                 + ("（推定）" if plan_estimated else "")
-                                                 + (f"，{ok_days}/{score_days} 天" if ok_days < score_days else ""))
-            else:
-                payload["data_status_detail"] = (f"{ok_days}/{score_days} 天" if ok_days < score_days else "")
+            payload["data_status_detail"] = detail
         else:
             payload["available_rate"] = None
             payload["publish_rate"] = None
             payload["share_rate"] = None
             payload["score"] = None
             payload["score_grade"] = "停用" if not airport["enabled"] else "空"
-            if status == "collecting":
-                payload["data_status_detail"] = ""
-            elif status in ("reference", "tentative", "unknown") and maturity_days < score_days - 0.01:
-                payload["data_status_detail"] = f"{maturity_days:.1f}/7 天"
-            elif payload.get("coverage") is not None:
-                payload["data_status_detail"] = (f"{payload['coverage']:.1f}%"
-                                                 + ("（推定）" if plan_estimated else ""))
-            else:
-                payload["data_status_detail"] = ""
+            payload["data_status_detail"] = detail
         airport_list.append(payload)
     airport_list.sort(key=lambda item: (
         0 if item.get("enabled") else 1,

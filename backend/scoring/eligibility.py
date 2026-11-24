@@ -16,6 +16,16 @@ from datetime import datetime, timedelta
 from . import sampler
 
 MIN_DAILY_SNAPSHOTS = 4
+FULL_DAY_SNAPSHOTS = 12
+MATURITY_WINDOW_DAYS = 7
+MATURITY_WEIGHTS = {"full": 0.50, "qualified": 0.25, "coverage": 0.25}
+MATURITY_GRADES = (
+    (90.0, "ample"),
+    (75.0, "normal"),
+    (60.0, "reference"),
+    (40.0, "rough"),
+    (-1.0, "insufficient"),
+)
 DENSITY_LIMIT = 2
 DENSITY_WINDOW = timedelta(minutes=60)
 _DAY_FMT = "%Y-%m-%d"
@@ -227,3 +237,38 @@ def select_snapshots(stamps: list[datetime], points: list[sampler.SamplePoint],
     return Selection(kept=sorted(kept), day_stats=stats,
                      dropped_days=[d.date for d in stats if d.reason],
                      excluded_ranges=excluded_ranges)
+
+
+def day_ratios(day_stats, window_dates: list[str]) -> tuple[int, int]:
+    """近 7 个自然日里：完整数据日（≥12 份）与合格日（≥4 份）的数量。"""
+    by_date = {stat.date: stat for stat in day_stats}
+    full = 0
+    qualified = 0
+    for date in window_dates:
+        stat = by_date.get(date)
+        if not stat or stat.reason is not None:
+            continue
+        qualified += 1
+        if stat.kept >= FULL_DAY_SNAPSHOTS:
+            full += 1
+    return full, qualified
+
+
+def maturity_score(full_days: int, qualified_days: int, coverage: float | None) -> float:
+    """成熟度得分 = 完整数据日占比 50% + 合格天数占比 25% + 覆盖率 25%。
+
+    分母固定 7 天；coverage 为 0–1 的比例，未知按 0 处理。
+    """
+    full_rate = full_days / MATURITY_WINDOW_DAYS * 100
+    qualified_rate = qualified_days / MATURITY_WINDOW_DAYS * 100
+    coverage_rate = (coverage or 0.0) * 100
+    return (full_rate * MATURITY_WEIGHTS["full"]
+            + qualified_rate * MATURITY_WEIGHTS["qualified"]
+            + coverage_rate * MATURITY_WEIGHTS["coverage"])
+
+
+def maturity_grade(score: float) -> str:
+    for threshold, grade in MATURITY_GRADES:
+        if score >= threshold:
+            return grade
+    return "insufficient"

@@ -58,7 +58,7 @@ def test_seven_days_drift_keeps_coverage():
     with TestClient(app) as client:
         row = _dashboard(client)
     assert row["coverage"] >= 80          # 83.3%，仍属正常覆盖
-    assert row["data_status"] == "normal"
+    assert row["data_status"] in ("ample", "normal")
     assert row["rank_tier"] == 0
     assert 330 <= row["sampled_points"] <= 338   # 7 天 × 30 分钟（窗口边界 ±2）
     assert 265 <= row["score_samples"] <= 285   # ≈83%，一份快照只用一次（窗口边界浮动）

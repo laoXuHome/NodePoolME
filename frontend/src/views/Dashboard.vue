@@ -176,20 +176,14 @@ function scoreTone(row) {
   return 'is-bad'
 }
 function dayHint(row) {
-  const ok = row.eligible_days
-  const drop = row.dropped_days
-  if (!ok && !drop) return ''
-  return `有效日期 ${ok} 天${drop ? `，淘汰 ${drop} 天（不足 4 份或 60 分钟内超过 2 份）` : ''}`
+  if (row.maturity_score === undefined || row.maturity_score === null) return ''
+  return `成熟度 ${row.maturity_score} 分：完整数据日 ${row.full_days}/7（≥12 份）、合格 ${row.qualified_days}/7（≥4 份）、覆盖率 ${row.coverage ?? '—'}%`
 }
 function statusHint(row) {
-  const cov = row.coverage
   const days = dayHint(row)
   if (!row.enabled) return '机场未启用，不参与评分'
-  if (row.data_status === 'collecting') return '数据积累不足 24 小时，暂不评分'
-  if (row.data_status === 'insufficient') return `有效采样覆盖率 ${cov ?? '—'}%，缺少检测证据，不代表机场质量差${days ? '；' + days : ''}`
-  if (row.data_status === 'unknown') return '检测计划历史不完整，覆盖率无法准确还原，不参与正式排名'
-  if (row.data_status === 'normal') return `采样覆盖率 ${cov}%，数据完整，参与正式排名${days ? '；' + days : ''}`
-  return `采样覆盖率 ${cov}%，数据仅作参考，不参与正式排名${days ? '；' + days : ''}`
+  if (row.data_status === 'insufficient') return `数据成熟度不足，节点评分留空${days ? '；' + days : ''}`
+  return `${days}。成熟度只说明这份 7 天评分的可信度，不参与节点评分计算`
 }
 function scoreHint(row) {
   const pool = row.pool_count || 0
@@ -414,7 +408,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 <th>下发率 <i>{{ scoreWeights.publish }}%</i></th>
                 <th>池占比 <i>{{ scoreWeights.share }}%</i></th>
                 <th>标签合格率 <i>{{ scoreWeights.tag }}%</i></th>
-                <th class="is-status">数据状态</th>
+                <th class="is-status">数据成熟度</th>
                 <th class="is-score">评分</th>
               </tr>
             </thead>
