@@ -41,7 +41,7 @@ jobs:
           python tests/test_group_global.py
           python tests/test_publish_latency_only.py
           python tests/test_node_filters.py
-          python tests/test_required_tags.py
+          python tests/test_publish_keyword_filter.py
           python tests/test_latency_dual.py
           python tests/test_latency_names.py
           python tests/test_name_separators.py
