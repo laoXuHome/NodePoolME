@@ -66,6 +66,7 @@ onBeforeUnmount(() => {
 })
 
 const PAD = { l: 34, r: 3, t: 12, b: 22 }
+const LABEL_H = 19
 const plotW = computed(() => Math.max(80, w.value - PAD.l - PAD.r))
 const plotH = computed(() => Math.max(50, h.value - PAD.t - PAD.b))
 
@@ -231,9 +232,9 @@ const labels = computed(() => {
     }
   })
   items.sort((a, b) => a.dotY - b.dotY || a.id - b.id)
-  const top = PAD.t + 4
-  const bottom = PAD.t + plotH.value - 7
-  const gap = 18
+  const top = PAD.t + LABEL_H / 2
+  const bottom = Math.max(top, h.value - LABEL_H / 2)
+  const gap = Math.min(22, (bottom - top) / Math.max(1, items.length - 1))
   // 单列贴线尾；末端数值过近的一组上下居中均分，其余按线尾 Y 精确落位
   let ys = items.map(it => Math.max(top, Math.min(bottom, it.dotY)))
   const runs = []
@@ -337,9 +338,9 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
       <div class="np-tc-legend">
         <div v-for="l in labels" :key="l.id" class="np-tc-lab" 
              :title="`${l.name} · ${l.pct}% · ${l.value} 节点`"
-             :style="{ top: `${(l.y - 6.5) * uiScale}px`, background: l.color }">
+             :style="{ top: `calc(${(l.y / h) * 100}% - ${(LABEL_H / 2) * uiScale}px)`, background: l.color }">
           <em>{{ l.name }}</em>
-          <b>{{ l.pct }}%</b>
+          <b>{{ l.pct }}<i>%</i></b>
           <small>{{ l.value }}</small>
         </div>
       </div>
@@ -363,29 +364,49 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 .np-tc-dot { stroke: #fff; stroke-width: 1; }
 .np-tc-cross { stroke: #c3cbd6; stroke-width: 1; }
 .np-tc-hdot { stroke: #fff; stroke-width: 1; }
-.np-tc-legend { position: relative; flex: none; width: calc(76px * var(--tcs, 1)); align-self: stretch; }
+.np-tc-legend { position: relative; flex: none; width: calc(84px * var(--tcs, 1)); align-self: stretch; }
 .np-tc-lab {
   position: absolute;
   left: 0;
   right: 0;
   justify-content: flex-start;
-  height: calc(15px * var(--tcs, 1));
+  height: calc(19px * var(--tcs, 1));
   display: inline-flex;
   align-items: center;
   gap: calc(4px * var(--tcs, 1));
-  padding: 0 calc(5px * var(--tcs, 1));
-  border-radius: calc(4px * var(--tcs, 1));
+  padding: 0 calc(5.5px * var(--tcs, 1));
+  border-radius: calc(4.5px * var(--tcs, 1));
   color: #fff;
-  font-size: calc(10.5px * var(--tcs, 1));
-  font-weight: 580;
+  font-size: calc(9.8px * var(--tcs, 1));
+  font-weight: 600;
   line-height: 1;
   letter-spacing: -.1px;
   white-space: nowrap;
   box-shadow: 0 0 0 1px #fff, 0 1px 2px rgba(20, 30, 50, .08);
 }
-.np-tc-lab em { flex: 1 1 auto; font-style: normal; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.np-tc-lab b { flex: none; margin-left: auto; font-weight: 500; opacity: .86; font-variant-numeric: tabular-nums; }
-.np-tc-lab small { font-weight: 700; font-variant-numeric: tabular-nums; }
+.np-tc-lab em { flex: 1 1 auto; font-style: normal; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .95; }
+.np-tc-lab b {
+  flex: none; margin-left: auto;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: calc(7.8px * var(--tcs, 1));
+  font-weight: 700;
+  line-height: 1;
+  opacity: .96;
+  font-variant-numeric: tabular-nums;
+  align-self: flex-start;
+  margin-top: calc(5px * var(--tcs, 1));
+}
+.np-tc-lab b i { font-style: normal; font-size: calc(7px * var(--tcs, 1)); opacity: .85; }
+.np-tc-lab small {
+  flex: none;
+  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Arial Narrow", Arial, sans-serif;
+  font-size: calc(14.5px * var(--tcs, 1));
+  font-weight: 850;
+  letter-spacing: calc(-.6px * var(--tcs, 1));
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
 .np-tc-leader { stroke-width: .9; opacity: .8; }
 .np-tc-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #9aa1ab; }
 .np-tc-tip { position: absolute; z-index: 3; min-width: calc(148px * var(--tcs, 1)); padding: calc(6px * var(--tcs, 1)) calc(8px * var(--tcs, 1)); border-radius: calc(8px * var(--tcs, 1)); background: rgba(255, 255, 255, .97); box-shadow: 0 6px 20px rgba(20, 30, 50, .16); border: 1px solid #e6eaf0; pointer-events: none; }
@@ -401,6 +422,7 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 @media (max-width: 760px) {
   .np-tc-legend { width: calc(56px * var(--tcs, 1)); }
   .np-tc-lab { font-size: calc(8.5px * var(--tcs, 1)); gap: calc(2px * var(--tcs, 1)); padding: 0 calc(3px * var(--tcs, 1)); }
-  .np-tc-lab em { max-width: calc(24px * var(--tcs, 1)); }
+  .np-tc-lab small { font-size: calc(13px * var(--tcs, 1)); letter-spacing: calc(-.5px * var(--tcs, 1)); }
+  .np-tc-lab b { font-size: calc(7px * var(--tcs, 1)); margin-top: calc(4px * var(--tcs, 1)); }
 }
 </style>
