@@ -67,31 +67,23 @@ function onMenu(path) {
   <router-view v-else-if="isLogin" />
 
   <div v-else-if="authed" class="np-shell">
-    <aside v-if="!isMobile" class="layout-sidebar">
-      <div class="brand">
-        <div class="brand-row">
-          <span class="brand-mark">NP</span>
-          <div>
-            <div class="name">NodePoolME</div>
-            <div class="sub">MULTI-AIRPORT NODE POOL</div>
-          </div>
-        </div>
-      </div>
-      <el-menu :default-active="route.path" @select="onMenu">
-        <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
-          <el-icon><component :is="m.icon" /></el-icon>
-          <span>{{ m.label }}</span>
-        </el-menu-item>
-      </el-menu>
-    </aside>
-
     <section class="np-workspace">
       <header class="header-bar">
         <div v-if="isMobile" class="np-mobile-brand">
           <span class="brand-mark brand-mark-sm">NP</span>
           <span>NodePoolME</span>
         </div>
-        <span v-else class="title">{{ title }}</span>
+        <div v-else class="np-brandline">
+          <span class="brand-mark brand-mark-sm">NP</span>
+          <span class="np-brandname">NodePoolME</span>
+        </div>
+        <nav v-if="!isMobile" class="np-tabsnav" aria-label="主导航">
+          <button v-for="m in menus" :key="m.path" class="np-tabx"
+                  :class="{ active: route.path === m.path }" @click="onMenu(m.path)">
+            <el-icon><component :is="m.icon" /></el-icon>
+            <span>{{ m.label }}</span>
+          </button>
+        </nav>
         <div class="np-flex" />
         <div v-if="isMobile" class="np-mobile-tools">
           <span class="np-ver is-mobile" :title="verTitle">

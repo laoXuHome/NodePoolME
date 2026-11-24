@@ -1343,3 +1343,55 @@ tr.is-off .np-score-cell b { color: #b0b5bf; }
 .np-header-tools.is-compact .np-gh { height: 24px; padding: 0 9px; font-size: 10.5px; }
 .np-quit { height: 24px; padding: 0 8px; border: 0; background: none; color: #2f6bdd; font-size: 10.5px; cursor: pointer; border-radius: 6px; }
 .np-quit:hover { background: #eef3ff; }
+
+/* ------------------------------------------------ 顶栏浏览器标签式导航 */
+.np-brandline { display: flex; align-items: center; gap: 8px; margin-right: 6px; flex: none; }
+.np-brandname { font-size: 14px; font-weight: 700; letter-spacing: -.02em; color: var(--np-text); }
+.np-tabsnav {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 100%;
+  margin-left: 6px;
+  padding-top: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.np-tabsnav::-webkit-scrollbar { display: none; }
+.np-tabx {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  margin-bottom: -1px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 10px 10px 0 0;
+  background: rgba(15, 23, 42, .045);
+  color: #5f6672;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .16s ease, color .16s ease, border-color .16s ease;
+}
+.np-tabx .el-icon { font-size: 15px; }
+.np-tabx:hover { background: rgba(15, 23, 42, .08); color: #2b3140; }
+.np-tabx.active {
+  background: #fff;
+  border-color: var(--np-separator-soft);
+  border-bottom: 2px solid var(--np-accent);
+  color: #0b0f16;
+  font-weight: 650;
+  box-shadow: 0 1px 0 #fff;
+}
+.np-tabx.active .el-icon { color: var(--np-accent); }
+@media (max-width: 1180px) {
+  .np-tabx { padding: 0 10px; font-size: 12px; }
+  .np-brandname { display: none; }
+}
