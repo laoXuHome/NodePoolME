@@ -350,6 +350,32 @@ def set_setting(key: str, value: Any) -> None:
     conn.commit()
 
 
+def bootstrap_schedule_plan(interval_minutes: int) -> None:
+    """首次启动且没有任何计划记录时补基线。
+
+    有历史快照就从最早那份快照起算（不是伪造：只是把"有数据以来按当前间隔检测"
+    当作推定计划，调用方会给这类记录打上参考标记）；否则从此刻起算。
+    """
+    earliest = None
+    try:
+        earliest = (row("SELECT MIN(ts) AS ts FROM share_history") or {}).get("ts")
+    except Exception:
+        earliest = None
+    existing = rows("SELECT id, changed_at, source FROM schedule_history ORDER BY id")
+    if existing:
+        # v1.5.4 首次升级时只写了一条启动记录，可把它回推到首份快照并标为推定
+        if len(existing) == 1 and (existing[0]["source"] or "") == "boot" and earliest \
+                and (existing[0]["changed_at"] or "") > earliest:
+            execute("UPDATE schedule_history SET changed_at=?, source='baseline' WHERE id=?",
+                    (earliest, existing[0]["id"]))
+        return
+    stamp = earliest or now()
+    execute(
+        "INSERT INTO schedule_history (changed_at, interval_minutes, source) VALUES (?,?,?)",
+        (stamp, int(interval_minutes), "baseline"),
+    )
+
+
 def record_schedule_plan(interval_minutes: int, source: str = "") -> None:
     """记录检测计划变更；间隔没变就什么也不做，历史不会被当前配置覆盖。"""
     interval = int(interval_minutes)

@@ -807,6 +807,7 @@ async def job_maintenance() -> None:
 def start_scheduler() -> None:
     if scheduler.running:
         return
+    db.bootstrap_schedule_plan(db.get_int("test_interval_minutes", 30))
     db.record_schedule_plan(db.get_int("test_interval_minutes", 30), "boot")
     # With the startup test disabled, arm the first automatic cycle one full interval
     # after boot instead of letting job_cycle fire as soon as it sees last_cycle_at=None.

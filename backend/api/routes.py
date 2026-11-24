@@ -57,6 +57,22 @@ def _parse_local(ts) -> datetime | None:
         return None
 
 
+def _ensure_schedule_baseline(earliest_ts: datetime | None, interval: int) -> bool:
+    """旧版本升级上来时没有任何计划记录：补一条以首份快照为起点的基线。
+
+    这条记录只是"从有数据那一刻起，按当前间隔"的推定，不是伪造采样点——
+    历史真实间隔无从查证，所以调用方会把这类推定标记为参考、不参与正式排名。
+    """
+    if db.row("SELECT id FROM schedule_history LIMIT 1"):
+        return False
+    stamp = earliest_ts or datetime.now()
+    db.execute(
+        "INSERT INTO schedule_history (changed_at, interval_minutes, source) VALUES (?,?,?)",
+        (stamp.strftime("%Y-%m-%d %H:%M:%S"), int(interval), "baseline"),
+    )
+    return True
+
+
 def _schedule_plan() -> list[tuple[datetime, int]]:
     """检测计划变更记录（changed_at, 间隔分钟）；旧库没有该表时返回空。"""
     try:
@@ -305,6 +321,15 @@ async def dashboard(days: int = 7):
     window_start = local_now - timedelta(days=score_days)
     if snapshot_stamps:
         window_start = max(window_start, min(snapshot_stamps))
+    plan_estimated = False
+    if not _schedule_plan():
+        # 升级上来的库：以首份快照为起点补一条推定基线，覆盖率才不会整周空白
+        interval = db.get_int("test_interval_minutes", 30)
+        plan_estimated = _ensure_schedule_baseline(
+            min(snapshot_stamps) if snapshot_stamps else None, interval)
+    else:
+        first = db.row("SELECT source FROM schedule_history ORDER BY changed_at, id LIMIT 1")
+        plan_estimated = bool(first and (first.get("source") or "") == "baseline")
     segments = sampler.build_segments(_schedule_plan(), window_start, local_now)
     sample_points = sampler.generate_points(segments, snapshot_stamps, local_now)
     matched = sampler.match_points(sample_points, snapshot_stamps)
@@ -360,12 +385,15 @@ async def dashboard(days: int = 7):
         maturity_days = max(0.0, min((local_now - created).total_seconds() / 86400, score_days))
         detail_coverage = coverage if plan_known else None
         status = sampler.data_status(maturity_days, detail_coverage)
+        if plan_estimated and status == "normal":
+            status = "reference"
         payload["coverage"] = round(detail_coverage * 100, 1) if detail_coverage is not None else None
         payload["maturity_days"] = round(maturity_days, 1)
         payload["data_status"] = status
         payload["data_status_text"] = DATA_STATUS_TEXT.get(status, status)
         payload["rank_tier"] = sampler.status_rank(status)
         payload["sampled_points"] = len(known_points)
+        payload["plan_estimated"] = plan_estimated
         if airport["enabled"] and pool_count:
             # 综合评分：近 7 天可用率 50% + 下发率 40% + 池占比 5% + 标签合格率 5%
             if samples:
@@ -403,7 +431,8 @@ async def dashboard(days: int = 7):
             elif status in ("reference", "tentative", "unknown") and maturity_days < score_days - 0.01:
                 payload["data_status_detail"] = f"{maturity_days:.1f}/7 天"
             elif payload["coverage"] is not None:
-                payload["data_status_detail"] = f"{payload['coverage']:.1f}%"
+                payload["data_status_detail"] = (f"{payload['coverage']:.1f}%"
+                                                 + ("（推定）" if plan_estimated else ""))
             else:
                 payload["data_status_detail"] = ""
         else:
@@ -412,11 +441,15 @@ async def dashboard(days: int = 7):
             payload["share_rate"] = None
             payload["score"] = None
             payload["score_grade"] = "停用" if not airport["enabled"] else "空"
-            if status in ("reference", "tentative", "unknown") and maturity_days < score_days - 0.01:
+            if status == "collecting":
+                payload["data_status_detail"] = ""
+            elif status in ("reference", "tentative", "unknown") and maturity_days < score_days - 0.01:
                 payload["data_status_detail"] = f"{maturity_days:.1f}/7 天"
-            else:
+            elif payload.get("coverage") is not None:
                 payload["data_status_detail"] = (f"{payload['coverage']:.1f}%"
-                                                 if payload.get("coverage") is not None else "")
+                                                 + ("（推定）" if plan_estimated else ""))
+            else:
+                payload["data_status_detail"] = ""
         airport_list.append(payload)
     airport_list.sort(key=lambda item: (
         0 if item.get("enabled") else 1,
