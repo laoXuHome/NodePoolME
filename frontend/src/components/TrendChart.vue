@@ -352,14 +352,39 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 .np-tc { flex: 1; width: 100%; display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
 .np-tc-head { flex: none; display: flex; align-items: baseline; justify-content: space-between; gap: calc(10px * var(--tcs, 1)); padding: 0 calc(2px * var(--tcs, 1)) calc(4px * var(--tcs, 1)); }
 .np-tc-title { font-size: calc(12.5px * var(--tcs, 1)); font-weight: 650; color: var(--np-text, #1c1c1e); white-space: nowrap; }
-.np-tc-live { padding: calc(1px * var(--tcs, 1)) calc(6px * var(--tcs, 1)); border-radius: calc(5px * var(--tcs, 1)); background: #eef3ff; color: #2f6bdd; font-style: normal; font-size: calc(10px * var(--tcs, 1)); line-height: 1.45; }
+.np-tc-live {
+  padding: calc(1.5px * var(--tcs, 1)) calc(7px * var(--tcs, 1));
+  border-radius: calc(5px * var(--tcs, 1));
+  background: #eef3ff; color: #2f6bdd;
+  font-style: normal;
+  font-size: calc(10.8px * var(--tcs, 1));
+  font-weight: 750;
+  font-family: "Arial Narrow", Arial, sans-serif;
+  letter-spacing: calc(-.2px * var(--tcs, 1));
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
 .np-tc-body { flex: 1; display: flex; gap: 0; min-height: 0; min-width: 0; }
 .np-tc-plot { position: relative; flex: 1; min-width: 0; min-height: 0; }
 .np-tc-svg { display: block; width: 100%; height: 100%; }
 .np-tc-grid { stroke: #e9eef5; stroke-width: 1; }
 .np-tc-axis { stroke: #dcE2EA; stroke-width: 1; }
-.np-tc-tick { fill: #9aa1ab; font-size: 9.5px; font-variant-numeric: tabular-nums; }
-.np-tc-axis-text { fill: #8d939d; font-size: 9.5px; font-variant-numeric: tabular-nums; }
+.np-tc-tick {
+  fill: #7f8794;
+  font-family: "Arial Narrow", Arial, sans-serif;
+  font-size: 10.2px;
+  font-weight: 750;
+  letter-spacing: -.2px;
+  font-variant-numeric: tabular-nums;
+}
+.np-tc-axis-text {
+  fill: #7f8794;
+  font-family: "Arial Narrow", Arial, sans-serif;
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: -.2px;
+  font-variant-numeric: tabular-nums;
+}
 .np-tc-line { fill: none; stroke-width: 1.7; stroke-linecap: round; }
 .np-tc-dot { stroke: #fff; stroke-width: 1; }
 .np-tc-cross { stroke: #c3cbd6; stroke-width: 1; }
