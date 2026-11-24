@@ -364,7 +364,7 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 .np-tc-dot { stroke: #fff; stroke-width: 1; }
 .np-tc-cross { stroke: #c3cbd6; stroke-width: 1; }
 .np-tc-hdot { stroke: #fff; stroke-width: 1; }
-.np-tc-legend { position: relative; flex: none; width: calc(76px * var(--tcs, 1)); align-self: stretch; }
+.np-tc-legend { position: relative; flex: none; width: calc(100px * var(--tcs, 1)); align-self: stretch; }
 .np-tc-lab {
   position: absolute;
   left: 0;
@@ -385,8 +385,8 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
   box-shadow: 0 0 0 1px #fff, 0 1px 2px rgba(20, 30, 50, .08);
 }
 .np-tc-lab em { flex: 1 1 auto; font-style: normal; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.np-tc-lab b { flex: none; margin-left: auto; font-weight: 500; opacity: .86; font-variant-numeric: tabular-nums; }
-.np-tc-lab small { font-weight: 700; font-variant-numeric: tabular-nums; }
+.np-tc-lab b { flex: 0 0 calc(26px * var(--tcs, 1)); margin-left: calc(2px * var(--tcs, 1)); text-align: right; font-weight: 500; opacity: .86; font-variant-numeric: tabular-nums; }
+.np-tc-lab small { flex: 0 0 calc(15px * var(--tcs, 1)); text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 .np-tc-leader { stroke-width: .9; opacity: .8; }
 .np-tc-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #9aa1ab; }
 .np-tc-tip { position: absolute; z-index: 3; min-width: calc(148px * var(--tcs, 1)); padding: calc(6px * var(--tcs, 1)) calc(8px * var(--tcs, 1)); border-radius: calc(8px * var(--tcs, 1)); background: rgba(255, 255, 255, .97); box-shadow: 0 6px 20px rgba(20, 30, 50, .16); border: 1px solid #e6eaf0; pointer-events: none; }
@@ -400,8 +400,10 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 .np-tc-tip-total { margin-top: calc(4px * var(--tcs, 1)); padding-top: calc(3px * var(--tcs, 1)); border-top: 1px solid #eceff4; font-size: calc(10px * var(--tcs, 1)); color: #8d939d; }
 .np-tc-tip-total b { color: #2f3540; font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) {
-  .np-tc-legend { width: calc(56px * var(--tcs, 1)); }
+  .np-tc-legend { width: calc(72px * var(--tcs, 1)); }
   .np-tc-lab { font-size: calc(8.5px * var(--tcs, 1)); gap: calc(2px * var(--tcs, 1)); padding: 0 calc(3px * var(--tcs, 1)); }
-  .np-tc-lab em { max-width: calc(24px * var(--tcs, 1)); }
+  .np-tc-lab em { max-width: calc(22px * var(--tcs, 1)); }
+  .np-tc-lab b { flex: 0 0 calc(19px * var(--tcs, 1)); margin-left: calc(1px * var(--tcs, 1)); }
+  .np-tc-lab small { flex: 0 0 calc(12px * var(--tcs, 1)); }
 }
 </style>
