@@ -45,32 +45,47 @@ def _time_band(ts: str) -> tuple[float, int]:
     return 0.35, 3
 
 
-def _weighted_mean(samples: list[dict], key: str) -> float | None:
-    """按时段加权求均值：同一时段内各快照平分该时段的权重。
+HOURLY_SNAPSHOT_CAP = 2   # 同一小时内最多留 2 份快照，防止一小时内反复检测刷高权重
 
-    这样快照数量多的时段不会因为"点更多"而自动占更大比重，
-    缺数据的时段也不必补点——空时段直接缺席，剩余时段按自身权重归一化。
+
+def _hour_key(ts: str) -> str:
+    return ts[:13]   # YYYY-MM-DD HH，按小时分桶
+
+
+def _weighted_mean(samples: list[dict], key: str) -> float | None:
+    """按时段 + 小时两级的加权均值。
+
+    1. 快照先按小时分桶，同一小时超过 cap 份时只保留最早与最晚两份
+       （一小时内连续点几次检测，不应该让这一小时替整个时段说话）。
+    2. 时段内每个"有数据的小时"平分该时段权重；同一小时内保留的快照再平分这一份。
+    3. 某档没有快照就整档缺席，不补 0，剩余档按自身权重重新归一。
     """
-    pairs = []
+    buckets: dict[tuple[int, str], list[tuple[float, str]]] = {}
     for item in samples:
         value = item.get(key)
         if value is None:
             continue
-        weight, band = _time_band(item.get("ts") or "")
-        pairs.append((weight, band, float(value)))
-    if not pairs:
-        return None
-    band_counts: dict[int, int] = {}
-    for _, band, _ in pairs:
-        band_counts[band] = band_counts.get(band, 0) + 1
+        ts = item.get("ts") or ""
+        weight, band = _time_band(ts)
+        buckets.setdefault((band, _hour_key(ts)), []).append((float(value), ts))
+    kept: dict[int, list[tuple[str, list[float]]]] = {}
+    for (band, hour), rows in buckets.items():
+        rows.sort(key=lambda row: row[1])
+        values = [row[0] for row in rows]
+        if len(values) > HOURLY_SNAPSHOT_CAP:
+            values = [values[0], values[-1]]
+        kept.setdefault(band, []).append((hour, values))
     weighted = 0.0
     total = 0.0
-    for weight, band, value in pairs:
-        w = weight / band_counts[band]
-        weighted += w * value
-        total += w
+    for band, hours in kept.items():
+        band_weight = TIME_BANDS[band][1]
+        hour_weight = band_weight / len(hours)
+        for _, values in hours:
+            per = hour_weight / len(values)
+            for value in values:
+                weighted += per * value
+                total += per
     return weighted / total if total else None
-
 
 
 # ---------------------------------------------------------------------------- auth
