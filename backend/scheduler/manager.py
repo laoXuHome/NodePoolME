@@ -160,10 +160,6 @@ def disperse(nodes: list[dict], mask: int) -> list[dict]:
     return out
 
 
-def _semaphore_map_factory():
-    return {}
-
-
 # ---------------------------------------------------------------------------- latency probe
 LATENCY_ROUNDS = 3
 
@@ -793,8 +789,13 @@ async def job_maintenance() -> None:
     days = db.get_int("history_days", 30)
     cutoff = (datetime.now() - timedelta(days=max(7, min(days, 365)))).strftime("%Y-%m-%d %H:%M:%S")
     db.execute("DELETE FROM results WHERE ts < ?", (cutoff,))
+    db.execute("DELETE FROM latency_results WHERE ts < ?", (cutoff,))
+    db.execute("DELETE FROM share_history WHERE ts < ?", (cutoff,))
     db.execute("DELETE FROM fetch_logs WHERE ts < ?", (cutoff,))
     db.execute("DELETE FROM batches WHERE started_at < ?", (cutoff,))
+    # 节点被删除或从机场订阅里消失后，结果行会变成孤儿，一并清掉
+    db.execute("DELETE FROM results WHERE node_id NOT IN (SELECT id FROM nodes)")
+    db.execute("DELETE FROM latency_results WHERE node_id NOT IN (SELECT id FROM nodes)")
     db.append_log("INFO", "维护", f"已清理 {cutoff} 之前的历史记录")
 
 
@@ -822,5 +823,3 @@ def stop_scheduler() -> None:
         scheduler.shutdown(wait=False)
 
 
-def reschedule_group(group_id: int | None = None) -> None:  # kept for API symmetry
-    return None

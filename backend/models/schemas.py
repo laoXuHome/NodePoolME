@@ -63,10 +63,6 @@ class SubSettings(BaseModel):
     sub_name: Optional[str] = None
     sub_token: Optional[str] = None
     regenerate_token: bool = False
-    sub_publish_enabled: Optional[bool] = None
-    sub_publish_time: Optional[str] = Field(default=None, pattern=r"^[0-2][0-9]:[0-5][0-9]$")
-    sub_publish_mode: Optional[str] = Field(default=None, pattern=r"^(time|interval)$")
-    sub_publish_interval_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
     sub_filter_keywords: Optional[str] = Field(default=None, max_length=4000)
 
 
@@ -95,7 +91,6 @@ class SettingsIn(BaseModel):
     sub_publish_time: Optional[str] = Field(default=None, pattern=r"^[0-2][0-9]:[0-5][0-9]$")
     sub_publish_mode: Optional[str] = Field(default=None, pattern=r"^(time|interval)$")
     sub_publish_interval_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
-    sub_filter_keywords: Optional[str] = Field(default=None, max_length=4000)
 
 
 class RunIn(BaseModel):

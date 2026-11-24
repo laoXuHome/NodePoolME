@@ -71,7 +71,6 @@ const plotW = computed(() => Math.max(80, w.value - PAD.l - PAD.r))
 const plotH = computed(() => Math.max(50, h.value - PAD.t - PAD.b))
 
 function pointTime(point) {
-  if (point?.live) return Date.now()
   const t = new Date(String(point?.ts || '').replace(' ', 'T')).getTime()
   return Number.isNaN(t) ? 0 : t
 }
@@ -212,7 +211,7 @@ const lastTotal = computed(() => {
 })
 
 // 末端标签：按每条曲线的最后一个数值定位，纵向贴住线尾；数值相同就落在同一条高度上，
-// 太近时按最小间距微调，并画一小段引导线指回数据点。
+// 太近时按最小间距自上而下均匀铺开。
 const labels = computed(() => {
   if (!plotted.value.length) return []
   const last = lastIndex.value
@@ -258,7 +257,7 @@ const labels = computed(() => {
   if (ys[ys.length - 1] > bottom) ys = ys.map(y => y - (ys[ys.length - 1] - bottom))
   for (let i = ys.length - 1; i > 0; i--) if (ys[i] - ys[i - 1] < gap) ys[i - 1] = ys[i] - gap
   if (ys[0] < top) ys = ys.map(y => y + (top - ys[0]))
-  items.forEach((it, i) => { it.y = ys[i]; it.shifted = Math.abs(ys[i] - it.dotY) > 1 })
+  items.forEach((it, i) => { it.y = ys[i] })
   return items
 })
 const hover = ref(null)
@@ -317,8 +316,6 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
             <circle v-for="(d, i) in hover.dots" :key="`hd-${i}`" :cx="d.cx" :cy="d.cy" r="2.4"
                     :fill="d.color" class="np-tc-hdot" />
           </g>
-          <line v-for="l in labels.filter((i) => i.shifted)" :key="`ld-${l.id}`"
-                :x1="l.dotX" :x2="l.dotX + 7" :y1="l.dotY" :y2="l.y" :stroke="l.color" class="np-tc-leader" />
           <text v-for="t in xTicks" :key="`tx-${t.x}`" class="np-tc-axis-text"
                 :x="t.x" :y="h - 6" :text-anchor="t.anchor">{{ t.text }}</text>
         </svg>
@@ -387,7 +384,6 @@ const hoverTotal = computed(() => hover.value ? hover.value.values.reduce((a, b)
 .np-tc-lab em { flex: 1 1 auto; font-style: normal; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-tc-lab b { flex: 0 0 calc(22px * var(--tcs, 1)); margin-left: calc(1px * var(--tcs, 1)); text-align: right; font-weight: 500; opacity: .86; font-variant-numeric: tabular-nums; }
 .np-tc-lab small { flex: 0 0 calc(15px * var(--tcs, 1)); margin-left: calc(0px * var(--tcs, 1)); text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
-.np-tc-leader { stroke-width: .9; opacity: .8; }
 .np-tc-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #9aa1ab; }
 .np-tc-tip { position: absolute; z-index: 3; min-width: calc(148px * var(--tcs, 1)); padding: calc(6px * var(--tcs, 1)) calc(8px * var(--tcs, 1)); border-radius: calc(8px * var(--tcs, 1)); background: rgba(255, 255, 255, .97); box-shadow: 0 6px 20px rgba(20, 30, 50, .16); border: 1px solid #e6eaf0; pointer-events: none; }
 .np-tc-tip-time { display: block; font-size: calc(10px * var(--tcs, 1)); font-weight: 650; color: #6b7280; margin-bottom: 3px; }

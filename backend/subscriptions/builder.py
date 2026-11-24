@@ -186,8 +186,7 @@ def collect_nodes(batch_id: int | None = None) -> tuple[list[dict], dict]:
 
 
     selected: list[dict] = []
-    skipped = {"no_result": 0, "failed_groups": 0, "slow": 0, "unavailable": 0,
-               "bad_airport": 0, "latency_fail": 0}
+    skipped = {"no_result": 0, "bad_airport": 0, "latency_fail": 0}
     for node in nodes:
         airport = airports.get(node["airport_id"])
         if not airport:

@@ -324,11 +324,6 @@ def normalize_node(node: dict) -> dict:
     return node
 
 
-def proxied(node: dict) -> bool:
-    """Nodes reachable only through a proxy are all of them; kept for future direct checks."""
-    return node.get("protocol") not in ("direct",)
-
-
 def jitter_ms() -> float:
     lo = db.get_int("request_interval_min_ms", 200)
     hi = db.get_int("request_interval_max_ms", 800)

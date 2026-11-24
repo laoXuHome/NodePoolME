@@ -168,15 +168,6 @@ CREATE TABLE IF NOT EXISTS logs (
     source TEXT NOT NULL,
     message TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    status TEXT NOT NULL,
-    started_at TEXT,
-    finished_at TEXT,
-    detail TEXT
-);
 """
 
 
@@ -253,13 +244,9 @@ def init_db() -> None:
     if not get("sub_token"):
         set_setting("sub_token", secrets.token_urlsafe(24))
     # Migration: old rows may store Python bool repr ("True"/"False") instead of 1/0
-    for key in ("sub_publish_enabled", "sub_include_unavailable", "latency_test_enabled"):
-        value = get(key)
-        if value in ("True", "False"):
-            set_setting(key, "1" if value == "True" else "0")
-    # The latency probe is the publish gate and always runs: force it on for old databases
-    if get("latency_test_enabled") != "1":
-        set_setting("latency_test_enabled", "1")
+    value = get("sub_publish_enabled")
+    if value in ("True", "False"):
+        set_setting("sub_publish_enabled", "1" if value == "True" else "0")
     # Migration: dual-target latency gate (Google + Wikipedia)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(latency_results)").fetchall()}
     if "target" not in cols:
@@ -329,7 +316,6 @@ def init_db() -> None:
     conn.commit()
     # Anything left mid-flight from a previous run must not be treated as live
     conn.execute("UPDATE batches SET status='aborted', finished_at=? WHERE status='running'", (now(),))
-    conn.execute("UPDATE tasks SET status='aborted', finished_at=? WHERE status='running'", (now(),))
     conn.commit()
 
 
@@ -341,13 +327,6 @@ def get(key: str, default: str | None = None) -> str | None:
 def get_int(key: str, default: int = 0) -> int:
     try:
         return int(float(get(key, str(default)) or default))
-    except (TypeError, ValueError):
-        return default
-
-
-def get_float(key: str, default: float = 0.0) -> float:
-    try:
-        return float(get(key, str(default)) or default)
     except (TypeError, ValueError):
         return default
 

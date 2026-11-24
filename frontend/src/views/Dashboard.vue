@@ -283,16 +283,6 @@ const runTone = computed(() => {
   if (!r?.running) return 'done'
   return r.stop_requested ? 'failed' : 'running'
 })
-const cyclePct = computed(() => {
-  const r = runtime.value
-  if (!r || !r.total) return 0
-  return Math.round((r.done || 0) / r.total * 100)
-})
-const batchPct = computed(() => {
-  const b = data.value?.batch
-  if (!b?.target_count) return 0
-  return Math.max(0, Math.min(100, Math.round((b.processed_count || 0) / b.target_count * 100)))
-})
 const batchDuration = computed(() => {
   const b = data.value?.batch
   if (!b?.started_at) return '—'
@@ -306,27 +296,8 @@ const batchRemaining = computed(() => {
   if (!b) return 0
   return Math.max(0, (b.target_count || 0) - (b.processed_count || 0))
 })
-const batchTone = computed(() => {
-  const s = data.value?.batch?.status
-  if (s === 'complete') return 'done'
-  if (s === 'running') return 'running'
-  return s ? 'failed' : 'idle'
-})
-function airportNodeShare(row) {
-  const total = data.value?.nodes_total || 0
-  if (!total) return 0
-  return Math.min(100, Math.round((row.pool_count || 0) / total * 100))
-}
-function airportPublishRate(row) {
-  const pool = row.pool_count || 0
-  if (!pool) return 0
-  return Math.min(100, Math.round((row.published_count || 0) / pool * 100))
-}
 function chartAmount(row, key) {
   return row.enabled ? (row[key] || 0) : 0
-}
-function chartTotal(rows, key) {
-  return (rows || []).reduce((sum, row) => sum + chartAmount(row, key), 0)
 }
 function rankRows(rows, key) {
   return [...(rows || [])].sort((a, b) => {
@@ -336,53 +307,15 @@ function rankRows(rows, key) {
     return (b.pool_count || 0) - (a.pool_count || 0)
   })
 }
-function airportClock(ts) {
-  if (!ts) return '—'
-  const d = new Date(String(ts).replace(' ', 'T'))
-  if (Number.isNaN(d.getTime())) return shortTs(ts)
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-  const diff = Math.round((day - today) / 86400000)
-  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  if (diff === 0) return hm
-  if (diff === 1) return `明天 ${hm}`
-  if (diff === -1) return `昨天 ${hm}`
-  return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${hm}`
-}
 function airportStateText(row) {
   if (!row.enabled) return '未启用'
   if (row.last_status === 'ok') return '正常'
   if (row.last_status === 'error') return '失败'
   return '未拉取'
 }
-const subText = computed(() => {
-  const ps = data.value?.publish_schedule
-  const p = data.value?.publish
-  if (!ps) return '—'
-  if (!ps.enabled) return '未启用'
-  if (ps.mode === 'interval') return `每 ${ps.interval_minutes} 分钟`
-  return `每天 ${ps.time}`
-})
 function shortTs(ts) {
   if (!ts) return '—'
   return String(ts).replace(/^\d{4}-/, '').replace('T', ' ').slice(0, 11)
-}
-const nextAutoText = computed(() => {
-  const ps = data.value?.publish_schedule
-  if (!ps || !ps.enabled) return '未启用'
-  if (ps.next_at) return shortTs(ps.next_at)
-  return ps.mode === 'interval' ? `每 ${ps.interval_minutes} 分钟（等待对齐）` : `每天 ${ps.time}（等待对齐）`
-})
-
-function roundDone(name) {
-  const item = (runtime.value?.group_progress || []).find((g) => g.name === name)
-  return item ? `${item.done}/${item.total}` : '—'
-}
-function roundPercent(name) {
-  const item = (runtime.value?.group_progress || []).find((g) => g.name === name)
-  if (!item || !item.total) return 0
-  return Math.round(item.done / item.total * 100)
 }
 
 onMounted(() => {

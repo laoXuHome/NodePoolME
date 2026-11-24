@@ -493,13 +493,6 @@ def airport_by_id(airport_id: int) -> dict | None:
     return db.row("SELECT * FROM airports WHERE id=?", (airport_id,))
 
 
-def parse_interval(value) -> int:
-    try:
-        return max(1, int(float(value)))
-    except (TypeError, ValueError):
-        return 60
-
-
 def next_run_at(airport: dict, now: datetime | None = None) -> datetime | None:
     """When this airport will fetch next on its own; None = manual only."""
     now = now or datetime.now().astimezone()

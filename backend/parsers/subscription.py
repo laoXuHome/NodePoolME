@@ -373,11 +373,6 @@ PARSERS = {
 }
 
 
-def parse_wireguard(link: str) -> dict | None:
-    """WireGuard links need a full key pair; accepted only via Clash YAML for now."""
-    return None
-
-
 def parse_link(link: str) -> dict | None:
     link = link.strip()
     if not link or link.startswith("#") or link.startswith("//"):

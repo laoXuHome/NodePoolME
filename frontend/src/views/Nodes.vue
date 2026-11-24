@@ -99,11 +99,9 @@ const hasActiveFilters = computed(() => Object.entries(filters.value).some(([k, 
   return Array.isArray(v) ? v.length > 0 : v !== '' && v !== null
 }))
 
-function latencyText(n) { return n ? `${n} ms` : '—' }
 function targetName(target) { return latencyLabels.value[target]?.name || target }
 function targetShort(target) { return latencyLabels.value[target]?.short || target }
 function shortTs(ts) { const full = formatTs(ts); return full === '—' ? full : full.slice(5, 16) }
-function latencyType(n) { if (!n) return 'info'; if (n < 200) return 'success'; if (n < 500) return 'warning'; return 'danger' }
 function latencyValue(row, target) {
   return row?.latency_targets?.[target]?.min ?? row?.latency_targets?.[target]?.best ?? null
 }

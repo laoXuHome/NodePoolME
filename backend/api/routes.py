@@ -186,12 +186,7 @@ async def dashboard():
     nodes_total = db.row(pool)["c"]
     unavailable = db.row(pool + " AND n.status='unavailable'")["c"]
     available = db.row(pool + " AND n.status='available'")["c"]
-    selected, stats = builder.collect_nodes()
-    ceiling = db.get_int("sub_max_latency", 1000)
-    ceiling2 = db.get_int("sub_max_latency2", 1000)
-    latency_labels = _latency_labels()
-    latests = builder.latest_latency()
-    probe_passed = sum(1 for p in latests.values() if p["ok"])
+    selected, _ = builder.collect_nodes()
     last_batch = db.row("SELECT * FROM batches ORDER BY id DESC LIMIT 1")
     logs = db.rows("SELECT * FROM logs ORDER BY id DESC LIMIT 12")
     published_by_airport = {}
@@ -269,7 +264,7 @@ async def dashboard():
         samples = score_samples.get(airport["id"], [])
         payload["score_samples"] = len(samples)
         if airport["enabled"] and pool_count:
-            # 综合评分：近 7 天可用率 45% + 下发率 45% + 池占比 5% + 标签合格率 5%
+            # 综合评分：近 7 天可用率 50% + 下发率 40% + 池占比 5% + 标签合格率 5%
             if samples:
                 publish_rate = sum(item["published"] for item in samples) / len(samples)
                 share = sum(item["share"] for item in samples) / len(samples)
@@ -326,22 +321,6 @@ async def dashboard():
         "cells": len(group_rows) and nodes_total * group_total or 0,
         "passed": sum(g["passed"] for g in group_rows if g["enabled"]),
     }
-    history.append({
-        "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
-        "live": True,
-        "available_known": 1,
-        "total_nodes": nodes_total,
-        "total_published": len(selected),
-        "total_available": available,
-        "airports": {
-            str(row["id"]): {
-                "pool_count": row["pool_count"],
-                "published_count": row["published_count"],
-                "available_count": row["available_count"],
-            }
-            for row in airport_list
-        },
-    })
     publish_block = {
         "last_batch_at": last_publish["finished_at"] if last_publish else (last_batch["finished_at"] if last_batch else None),
         "last_auto": db.get("sub_last_auto_publish"),
@@ -350,8 +329,6 @@ async def dashboard():
         "updated_at": builder.meta().get("updated_at"),
     }
     return {
-        "airports": len(airports),
-        "airports_enabled": sum(1 for a in airports if a["enabled"]),
         "nodes_total": nodes_total,
         "nodes_available": available,
         "nodes_unavailable": unavailable,
@@ -360,24 +337,10 @@ async def dashboard():
         "share_history": history,
         "score_window_days": score_days,
         "score_weights": SCORE_WEIGHTS,
-        "groups": _group_stats(),
         "airport_list": airport_list,
         "batch": last_batch,
         "runtime": manager.state.as_dict(),
-        "subscription": builder.meta(),
         "logs": logs,
-        "stats": stats,
-        "latency_probe": {
-            "enabled": True,
-            "url": db.get("latency_test_url"),
-            "url2": db.get("latency_test_url2"),
-            "status": db.get("latency_test_status"),
-            "ceiling": ceiling,
-            "ceiling2": ceiling2,
-            "names": latency_labels,
-            "rounds": 2,
-            "passed": probe_passed,
-        },
         "fetch": fetch_block,
         "group_summary": group_block,
         "publish": publish_block,
@@ -504,11 +467,6 @@ async def delete_airport(airport_id: int):
     db.append_log("WARN", "机场", f"删除机场 {airport['name']}，移除 {affected} 个缓存节点")
     return {"ok": True, "removed_nodes": affected,
             "note": "机场及其缓存节点、拉取记录已删除；检测历史保留"}
-
-
-@api.get("/airport-filter-defaults", dependencies=protected)
-async def airport_filter_defaults():
-    return {"keywords": list(config.DEFAULT_FILTER_KEYWORDS)}
 
 
 @api.get("/airports/{airport_id}/filter", dependencies=protected)
@@ -686,7 +644,6 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
             str(gid): {**res, "ident": groups.get(gid, {}).get("ident", "?")}
             for gid, res in per_group.items() if gid in groups
         }
-        node["passed_count"] = len(passed_idents)
         node["passed_idents_count"] = len(passed_idents)
         items.append(node)
 
@@ -857,14 +814,6 @@ async def stop_cycle():
     return res
 
 
-@api.get("/batches", dependencies=protected)
-async def batches(limit: int = 20):
-    rows = db.rows("SELECT * FROM batches ORDER BY id DESC LIMIT ?", (min(limit, 100),))
-    for row in rows:
-        row["groups"] = db.loads(row["groups"], [])
-    return rows
-
-
 @api.get("/runtime", dependencies=protected)
 async def runtime():
     return manager.state.as_dict()
@@ -898,9 +847,6 @@ async def subscription_info(request: Request):
             "sub_name": db.get("sub_name"),
             "sub_token": token,
             "sub_filter_keywords": db.get("sub_filter_keywords") or "",
-            "latency_test_enabled": True,
-            "latency_test_url": db.get("latency_test_url"),
-            "latency_test_status": db.get("latency_test_status"),
         },
         "meta": builder.meta(),
         "links": {
@@ -926,7 +872,9 @@ async def update_subscription(payload: SubSettings):
         db.set_setting("sub_token", secrets.token_urlsafe(24))
         db.append_log("INFO", "订阅", "订阅令牌已重新生成")
     elif payload.sub_token:
-        db.set_setting("sub_token", payload.sub_token.strip())
+        token = payload.sub_token.strip()
+        if token:
+            db.set_setting("sub_token", token)
     if "sub_filter_keywords" in payload.model_fields_set:
         db.set_setting("sub_filter_keywords", (payload.sub_filter_keywords or "").strip())
     return {"ok": True}
@@ -938,32 +886,16 @@ async def rebuild_subscription():
     return meta
 
 
-@api.get("/subscription/preview", dependencies=protected)
-async def preview_subscription(fmt: str = "clash"):
-    nodes, stats = builder.collect_nodes()
-    nodes, dropped = builder.apply_name_filter(nodes)
-    sub_name = db.get("sub_name", "NodePool Unified")
-    if fmt == "clash":
-        content = builder.build_clash(nodes, sub_name)
-    elif fmt == "singbox":
-        content = builder.build_singbox(nodes, sub_name)
-    else:
-        content = builder.build_base64(nodes)
-    return PlainTextResponse(content, media_type="text/plain; charset=utf-8",
-                             headers={"X-Nodepool-Nodes": str(len(nodes)),
-                                      "X-Nodepool-Filtered": str(len(dropped))})
-
-
 # ---------------------------------------------------------------------------- settings
 SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "subnet_concurrency",
                 "request_interval_min_ms", "request_interval_max_ms", "test_timeout",
                 "test_interval_minutes", "test_on_start", "fail_threshold", "history_days",
                 "dispersion_mask",
-                "sub_name", "latency_test_url", "latency_test_url2", "latency_test_name",
+                "latency_test_url", "latency_test_url2", "latency_test_name",
                 "latency_test_name2", "latency_test_status",
                 "latency_test_timeout", "sub_max_latency", "sub_max_latency2",
                 "sub_publish_enabled", "sub_publish_time", "sub_publish_mode",
-                "sub_publish_interval_minutes", "sub_filter_keywords"]
+                "sub_publish_interval_minutes"]
 
 
 @api.get("/settings", dependencies=protected)

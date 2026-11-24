@@ -1,4 +1,4 @@
-"""Contract test: dashboard payload must always carry latency_probe (the UI dereferences it)."""
+"""Contract test: the dashboard payload keeps the fields the UI actually reads."""
 import os
 import sys
 import tempfile
@@ -24,9 +24,7 @@ def test_dashboard_has_latency_probe():
         res = client.get("/api/dashboard")
         assert res.status_code == 200, res.text[:500]
         data = res.json()
-        probe = data.get("latency_probe")
-        assert isinstance(probe, dict), data.keys()
-        assert {"enabled", "url", "status", "ceiling", "passed"} <= set(probe)
+        assert "latency_probe" not in data, data.keys()
         assert isinstance(data["nodes_qualified"], int)
         runtime = data["runtime"]
         for key in ("group_progress", "block_index", "blocks", "block_size"):

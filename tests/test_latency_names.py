@@ -37,13 +37,9 @@ def test_names_are_dynamic():
         # internal target keys stay stable so history keeps working after a rename
         assert [p["ident"] for p in probes] == ["G", "W"]
 
-        dash = client.get("/api/dashboard").json()
-        assert dash["latency_probe"]["names"]["G"]["short"] == "谷"
-        assert dash["latency_probe"]["names"]["W"]["name"] == "维基百科"
-
         nodes = client.get("/api/nodes").json()
-        assert nodes["latency_labels"] == dash["latency_probe"]["names"]
-        assert nodes["latency_labels"]["G"]["name"] == "谷歌"
+        assert nodes["latency_labels"]["G"] == {"name": "谷歌", "short": "谷"}
+        assert nodes["latency_labels"]["W"]["name"] == "维基百科"
 
         # empty name falls back to the built-in label instead of producing an empty chip
         client.patch("/api/settings", json={"latency_test_name": "", "latency_test_name2": ""})

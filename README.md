@@ -378,10 +378,8 @@ python tests/test_engine_live.py    # 需要 /tmp/mihomo 内核，验证真实 H
 | GET/POST/PATCH/DELETE | `/api/groups[/{id}]` | 节点标签管理 |
 | POST | `/api/run` | 手动触发批次（可指定组） |
 | POST | `/api/run/pause` `/resume` `/stop` | 暂停 / 继续 / 停止当前批次（停止后按进度下发） |
-| GET | `/api/batches` `/api/runtime` | 批次历史 / 实时状态 |
 | GET/PATCH | `/api/subscription` | 订阅设置与链接 |
 | POST | `/api/subscription/rebuild` | 立即重新生成 |
-| GET | `/api/subscription/preview?fmt=` | 预览输出 |
 | GET/PATCH | `/api/settings` | 调度参数 |
 | GET | `/api/logs` | 系统日志 |
 | GET | `/api/system/update?force=` | 比对 GitHub Releases 最新版本与离线包（结果缓存 10 分钟） |
