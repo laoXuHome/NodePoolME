@@ -10,7 +10,7 @@ const groups = ref([])
 const enabledGroups = computed(() => (groups.value || []).filter(g => g && g.enabled))
 const airports = ref([])
 const filters = ref({ q: '', airport_id: null, protocol: '', region: '', status: '',
-                     group_id: null, tags: [], passed: '', publishable: '',
+                     group_id: null, tags: [], speed: [], passed: '', publishable: '',
                      sort: 'latency', limit: 50 })
 const page = ref(1)
 const detail = ref(null)
@@ -62,7 +62,7 @@ function search() {
 }
 function reset() {
   filters.value = { q: '', airport_id: null, protocol: '', region: '', status: '',
-                     group_id: null, tags: [], passed: '', publishable: '',
+                     group_id: null, tags: [], speed: [], passed: '', publishable: '',
                      sort: 'latency', limit: 50 }
   page.value = 1
   load()
@@ -122,6 +122,17 @@ const hasActiveFilters = computed(() => Object.entries(filters.value).some(([k, 
 function targetName(target) { return latencyLabels.value[target]?.name || target }
 function targetShort(target) { return latencyLabels.value[target]?.short || target }
 function shortTs(ts) { const full = formatTs(ts); return full === '—' ? full : full.slice(5, 16) }
+const SPEED_FILTER_OPTIONS = [
+  { value: 'excellent', label: '优' },
+  { value: 'good', label: '良' },
+  { value: 'medium', label: '中' },
+  { value: 'poor', label: '差' },
+  { value: 'danger', label: '危' },
+  { value: 'pending', label: '待测速' },
+  { value: 'excluded', label: '已排除' },
+  { value: 'error', label: '异常' },
+  { value: 'source_failed', label: '全源失败' }
+]
 const SPEED_META = {
   excellent: { label: '优', emoji: '🟣', color: '#8B5CF6' },
   good: { label: '良', emoji: '🟢', color: '#16A34A' },
@@ -239,6 +250,10 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
       </el-select>
       <el-select v-model="filters.tags" placeholder="标签（须同时命中）" multiple collapse-tags clearable style="width:190px" @change="search">
         <el-option v-for="g in enabledGroups" :key="g.ident" :label="g.ident" :value="g.ident" />
+      </el-select>
+      <el-select v-model="filters.speed" placeholder="下载速度（可多选）" multiple collapse-tags clearable
+                 style="width:170px" @change="search">
+        <el-option v-for="opt in SPEED_FILTER_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
       </el-select>
       <el-select v-model="filters.publishable" placeholder="下发结果" clearable style="width:130px" @change="search">
         <el-option label="仅下发节点" value="1" />

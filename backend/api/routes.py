@@ -818,6 +818,7 @@ def _node_names() -> dict[int, str]:
 async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str | None = None,
                      region: str | None = None, status: str | None = None,
                      group_id: str | None = None, tags: str | None = None,
+                     speed: str | None = None,
                      passed: str | None = None, publishable: str | None = None,
                      limit: int = 200, offset: int = 0, sort: str = "latency"):
     nodes = db.rows(
@@ -841,12 +842,12 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
                    f"{builder.TAG_SEP.join(passed_idents)}{builder.NAME_SEP}{node['raw_name']}"
                    if passed_idents
                    else f"{node['airport_name']}{builder.NAME_SEP}未通过{builder.NAME_SEP}{node['raw_name']}")
-        speed = speeds.get(node["id"]) or {}
+        speed_state = speeds.get(node["id"]) or {}
         node["display_name"] = speedtest.apply_speed_prefix(
-            display, speed.get("marker") or speedtest.PENDING_PREFIX)
-        if speed:
-            speed["multi_mbps"] = speed.get("mbps")
-        node["speed"] = speed
+            display, speed_state.get("marker") or speedtest.PENDING_PREFIX)
+        if speed_state:
+            speed_state["multi_mbps"] = speed_state.get("mbps")
+        node["speed"] = speed_state
         probe = latests.get(node["id"]) or {}
         targets = probe.get("targets") or {}
         node["latency_targets"] = {
@@ -879,6 +880,12 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
 
     hit_mode = (passed or "").strip().lower() in ("0", "no", "fail", "miss", "missed")
     tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
+    speed_tags: set[str] = set()
+    if speed not in (None, ""):
+        try:
+            speed_tags = builder.parse_speed_filter_tags(speed)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     # group_id accepts either the numeric id or the ident (e.g. "GPT")
     group_key: str | None = None
     if group_id not in (None, "", "0"):
@@ -918,6 +925,8 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
             # Tags are always a positive AND filter: every selected tag must be present.
             if not all(t in node_idents for t in tag_list):
                 return False
+        if speed_tags and builder.speed_tag(node["speed"]) not in speed_tags:
+            return False
         if passed == "qualified" and not node["passed_idents_count"]:
             return False
         if passed == "untagged" and node["passed_idents_count"]:

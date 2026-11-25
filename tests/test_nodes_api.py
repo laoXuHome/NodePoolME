@@ -66,6 +66,24 @@ def test_filters_and_reasons():
         hit = client.get(f"/api/nodes?group_id={group_id}").json()
         assert hit["total"] == 1 and hit["items"][0]["raw_name"] == "快", hit
 
+        # 缓存池按测速标签筛选：多选为并集，未测速节点归 pending。
+        for fp, mb in (("fp-fast", 10.0), ("fp-slow", 0.1)):
+            db.execute(
+                "INSERT INTO speed_runs (node_id,started_at,finished_at,status,confidence,"
+                "mb_per_s,bytes_total,sources_total,sources_ok,trigger) "
+                "VALUES (?,?,?,'ok','normal',?,0,1,1,'manual')",
+                (ids[fp], db.now(), db.now(), mb))
+        excellent = client.get("/api/nodes?speed=excellent").json()
+        assert excellent["total"] == 1 and excellent["items"][0]["raw_name"] == "快", excellent
+        danger = client.get("/api/nodes?speed=danger").json()
+        assert danger["total"] == 1 and danger["items"][0]["raw_name"] == "慢", danger
+        pending = client.get("/api/nodes?speed=pending").json()
+        assert pending["total"] == 1 and pending["items"][0]["raw_name"] == "未测", pending
+        union = client.get("/api/nodes?speed=excellent,danger").json()
+        assert union["total"] == 2, union
+        bad = client.get("/api/nodes?speed=foo")
+        assert bad.status_code == 400 and "测速标签无效" in bad.json()["detail"], bad.text
+
 
 if __name__ == "__main__":
     test_filters_and_reasons()

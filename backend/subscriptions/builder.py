@@ -188,7 +188,8 @@ def speed_filter_tags() -> list[str]:
     return [t for t in SPEED_FILTER_ORDER if t in tags]
 
 
-def _speed_tag(state: dict) -> str | None:
+def speed_tag(state: dict) -> str | None:
+    """把测速状态归一为固定标签；待测速与过期都归 pending。"""
     status = state.get("status")
     if status == "ok":
         grade = state.get("grade")
@@ -209,7 +210,7 @@ def apply_speed_filter(nodes: list[dict]) -> tuple[list[dict], list[dict]]:
     dropped: list[dict] = []
     for node in nodes:
         state = node.get("speed") or {}
-        tag = _speed_tag(state)
+        tag = speed_tag(state)
         if tag in tags:
             dropped.append({
                 "id": node.get("id"), "name": node.get("display_name"),
