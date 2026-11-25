@@ -829,7 +829,7 @@ def speed_map() -> dict[int, dict]:
         if excluded.get(node["airport_id"]):
             out[node_id] = {
                 "status": "excluded", "marker": "●", "label": "机场已排除测速",
-                "grade": None, "grade_label": "", "emoji": "●", "color": "#9CA3AF",
+                "grade": None, "grade_label": "", "emoji": "●", "color": "#D1D5DB",
                 "mb_per_s": None, "mbps": None,
             }
             continue
@@ -858,7 +858,7 @@ def speed_map() -> dict[int, dict]:
             base = {
                 "status": "stale", "marker": PENDING_MARKER,
                 "label": f"测速结果已过期（{round(age or 0, 1)} 天前）",
-                "grade": None, "grade_label": "", "emoji": "", "color": "#D1D5DB",
+                "grade": None, "grade_label": "", "emoji": "", "color": "#9CA3AF",
                 "mb_per_s": run.get("mb_per_s"), "mbps": run.get("multi_mbps"),
                 "finished_at": run.get("finished_at"), "age_days": round(age or 0, 2),
                 "sources_ok": run.get("sources_ok"), "sources_total": run.get("sources_total"),
@@ -877,7 +877,7 @@ def speed_map() -> dict[int, dict]:
         else:
             base = {"status": "pending", "marker": PENDING_MARKER,
                     "label": "尚未取得有效测速结果", "grade": None,
-                    "grade_label": "", "emoji": "", "color": "#D1D5DB",
+                    "grade_label": "", "emoji": "", "color": "#9CA3AF",
                     "mb_per_s": None, "mbps": None}
         base["last_run_status"] = last_status
         base["last_message"] = last_run.get("message")

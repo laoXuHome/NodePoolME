@@ -56,7 +56,7 @@ def test_speed_tag_prefix_is_idempotent_and_exclusion_wins():
     db.execute("UPDATE airports SET speed_excluded=1 WHERE id=?", (airport_id,))
     state = speedtest.speed_map()[node_id]
     assert state["status"] == "excluded" and state["marker"] == "●"
-    assert state["color"] == "#9CA3AF"
+    assert state["color"] == "#D1D5DB"
     assert speedtest.apply_speed_prefix("🟢测速机场·香港01", state["marker"]) == "●测速机场·香港01"
 
 
