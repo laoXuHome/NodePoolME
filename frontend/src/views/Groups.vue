@@ -309,81 +309,55 @@ onUnmounted(() => {
         </span>
       </div>
 
-      <el-form label-width="138px" size="default" class="speed-form">
-        <div class="speed-subhead">计划与流量</div>
-        <el-row :gutter="14">
-          <el-col :xs="24" :sm="12">
+      <el-form label-width="102px" size="small" class="speed-form">
+        <div class="speed-subhead">
+          计划与流量
+          <span class="speed-subhead-note">北京时间 · 频率 1 = 每天，2 = 隔 2 天</span>
+        </div>
+        <el-row :gutter="12">
+          <el-col :xs="24" :sm="12" :md="6">
             <el-form-item label="启用下载测速">
               <el-switch v-model="speedForm.speed_enabled" active-value="1" inactive-value="0" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="12">
+          <el-col :xs="24" :sm="12" :md="6">
             <el-form-item label="定时测速">
               <el-switch v-model="speedForm.speed_schedule_enabled" active-value="1" inactive-value="0" />
             </el-form-item>
           </el-col>
-        </el-row>
-        <el-row :gutter="14">
-          <el-col :xs="24" :sm="12">
-            <el-form-item label="开始时间（北京时间）">
-              <el-time-picker v-model="speedForm.speed_window_start" format="HH:mm"
-                              value-format="HH:mm" placeholder="18:00" style="width:100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12">
-            <el-form-item label="结束时间（北京时间）">
-              <el-time-picker v-model="speedForm.speed_window_end" format="HH:mm"
-                              value-format="HH:mm" placeholder="23:30" style="width:100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="14">
-          <el-col :xs="24" :sm="8">
+          <el-col :xs="24" :sm="12" :md="6">
             <el-form-item label="执行频率">
               <el-input-number v-model="speedForm.speed_schedule_every_days" :min="1" :max="30"
                                style="width:100%" />
-              <div class="speed-field-hint">1 = 每天一次，2 = 每隔 2 天</div>
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="8">
-            <el-form-item label="单节点流量上限 (MB)">
+          <el-col :xs="24" :sm="12" :md="6">
+            <el-form-item label="流量上限 MB">
               <el-input-number v-model="speedForm.speed_traffic_limit_mb" :min="1" :max="1024"
                                :step="10" style="width:100%" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="8">
-            <el-form-item label="结果有效期 (天)">
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :xs="24" :sm="12" :md="6">
+            <el-form-item label="开始时间">
+              <el-time-picker v-model="speedForm.speed_window_start" format="HH:mm"
+                              value-format="HH:mm" placeholder="18:00" style="width:100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :md="6">
+            <el-form-item label="结束时间">
+              <el-time-picker v-model="speedForm.speed_window_end" format="HH:mm"
+                              value-format="HH:mm" placeholder="23:30" style="width:100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :md="6">
+            <el-form-item label="有效期 天">
               <el-input-number v-model="speedForm.speed_result_ttl_days" :min="1" :max="30"
                                style="width:100%" />
             </el-form-item>
           </el-col>
-        </el-row>
-
-        <div class="speed-subhead">测速参数</div>
-        <el-row :gutter="14">
-          <el-col :xs="24" :sm="8">
-            <el-form-item label="并发连接"><el-input-number v-model="speedForm.speed_connections" :min="1" :max="8" style="width:100%" /></el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="8">
-            <el-form-item label="预热 (秒)"><el-input-number v-model="speedForm.speed_warmup_seconds" :min="0" :max="5" :step="0.5" style="width:100%" /></el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="8">
-            <el-form-item label="采样 (秒)"><el-input-number v-model="speedForm.speed_sample_seconds" :min="3" :max="30" style="width:100%" /></el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="14">
-          <el-col :xs="24" :sm="8">
-            <el-form-item label="连接超时 (秒)"><el-input-number v-model="speedForm.speed_connect_timeout" :min="3" :max="30" style="width:100%" /></el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="8">
-            <el-form-item label="整轮超时 (秒)"><el-input-number v-model="speedForm.speed_total_timeout" :min="8" :max="60" style="width:100%" /></el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="8">
-            <el-form-item label="失败重试"><el-input-number v-model="speedForm.speed_retry" :min="0" :max="2" style="width:100%" /></el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="14">
-          <el-col :span="24">
+          <el-col :xs="24" :sm="12" :md="6">
             <el-form-item label="全局并发">
               <el-tag effect="plain" type="info">沿用系统设置 · {{ speedForm.global_concurrency || '—' }}</el-tag>
             </el-form-item>
@@ -391,10 +365,35 @@ onUnmounted(() => {
         </el-row>
 
         <div class="speed-subhead">
-          速度等级阈值（MB/s）
-          <span class="speed-subhead-note">256 KB/s = 0.25 MB/s</span>
+          测速参数
+          <span class="speed-subhead-note">连接与采样单位：秒</span>
         </div>
-        <el-row :gutter="14">
+        <el-row :gutter="12">
+          <el-col :xs="24" :sm="12" :md="4">
+            <el-form-item label="并发连接"><el-input-number v-model="speedForm.speed_connections" :min="1" :max="8" style="width:100%" /></el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :md="4">
+            <el-form-item label="预热（秒）"><el-input-number v-model="speedForm.speed_warmup_seconds" :min="0" :max="5" :step="0.5" style="width:100%" /></el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :md="4">
+            <el-form-item label="采样（秒）"><el-input-number v-model="speedForm.speed_sample_seconds" :min="3" :max="30" style="width:100%" /></el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :md="4">
+            <el-form-item label="连接超时"><el-input-number v-model="speedForm.speed_connect_timeout" :min="3" :max="30" style="width:100%" /></el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :md="4">
+            <el-form-item label="整轮超时"><el-input-number v-model="speedForm.speed_total_timeout" :min="8" :max="60" style="width:100%" /></el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :md="4">
+            <el-form-item label="失败重试"><el-input-number v-model="speedForm.speed_retry" :min="0" :max="2" style="width:100%" /></el-form-item>
+          </el-col>
+        </el-row>
+
+        <div class="speed-subhead">
+          速度等级阈值（MB/s）
+          <span class="speed-subhead-note">危 = 低于「差」阈值，无需单独设置</span>
+        </div>
+        <el-row :gutter="12">
           <el-col v-for="g in THRESHOLD_ROWS" :key="g.key" :xs="12" :sm="6">
             <el-form-item :label="g.emoji + ' ' + g.label">
               <el-input-number v-model="speedForm['speed_grade_' + g.key]" :min="0.01" :max="1024"
@@ -402,7 +401,6 @@ onUnmounted(() => {
             </el-form-item>
           </el-col>
         </el-row>
-        <div class="speed-field-hint" style="margin:-4px 0 10px 138px">🔴 危 = 低于「差」阈值，无需单独设置。</div>
       </el-form>
 
       <div class="speed-legend">
@@ -423,7 +421,7 @@ onUnmounted(() => {
             机场测速范围
             <span class="np-muted">排除后不创建任务、不消耗流量，显示 ⚪</span>
           </div>
-          <el-table :data="speedAirports" size="small" max-height="220">
+          <el-table :data="speedAirports" size="small">
             <el-table-column prop="name" label="机场" min-width="180" />
             <el-table-column label="节点" width="90">
               <template #default="{ row }">
@@ -450,7 +448,7 @@ onUnmounted(() => {
             </div>
             <el-button size="small" :loading="speedChecking" @click="checkSpeedSources">测试源健康检测</el-button>
           </div>
-          <el-table :data="speedSources" size="small" max-height="220">
+          <el-table :data="speedSources" size="small">
             <el-table-column prop="name" label="测速源" min-width="150" />
             <el-table-column prop="region" label="地区" width="86" />
             <el-table-column label="健康" width="80">
@@ -555,16 +553,16 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .speed-desc {
-  margin: 4px 0 14px;
-  line-height: 1.7;
+  margin: 2px 0 10px;
+  line-height: 1.55;
 }
 .speed-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-  padding: 12px 14px;
-  margin-bottom: 8px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   background: #f8fafc;
@@ -577,15 +575,23 @@ onUnmounted(() => {
 .speed-note {
   font-size: 12px;
   color: #64748b;
-  margin: 0 2px 14px;
+  margin: 0 2px 8px;
+}
+.speed-form :deep(.el-form-item) {
+  margin-bottom: 4px;
+}
+.speed-form :deep(.el-form-item__label) {
+  font-size: 12px;
+  line-height: 30px;
+  padding-right: 8px;
 }
 .speed-subhead {
   font-size: 13px;
   font-weight: 600;
   color: #334155;
-  padding: 12px 0 8px;
+  padding: 8px 0 4px;
   border-top: 1px dashed #e2e8f0;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 .speed-form > .speed-subhead:first-child {
   border-top: 0;
@@ -607,13 +613,13 @@ onUnmounted(() => {
 .speed-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 18px;
+  gap: 6px 14px;
   font-size: 12px;
   color: #475569;
-  padding: 10px 12px;
+  padding: 6px 10px;
   background: #f8fafc;
   border-radius: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 .speed-tables {
   display: grid;
