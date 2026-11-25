@@ -101,6 +101,7 @@ async function refreshSpeedStatus(silent = false) {
 }
 
 function speedNumber(key) { return Number(speedForm.value[key]) }
+function shortTs(ts) { const full = formatTs(ts); return full === '—' ? full : full.slice(5, 16) }
 
 async function saveSpeed() {
   speedSaving.value = true
@@ -213,75 +214,81 @@ onUnmounted(() => {
       <br />标签不提供单独运行，所有启用标签随全局检测一起执行。
     </div>
 
-    <div class="np-toolbar">
-      <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新增节点标签</el-button>
-      <el-button @click="load"><el-icon><Refresh /></el-icon>刷新</el-button>
-      <div class="np-flex" />
-      <span class="np-muted">顺序决定节点名中间段的排列：{{ items.filter(i => i.enabled).map(i => i.ident).join('ᐧ') || '（无启用标签）' }}</span>
-    </div>
+    <div class="np-quad">
+      <div class="np-card np-quad-cell np-tags-cell">
+        <div class="np-toolbar np-quad-toolbar">
+          <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新增节点标签</el-button>
+          <el-button @click="load"><el-icon><Refresh /></el-icon>刷新</el-button>
+          <div class="np-flex" />
+          <span class="np-muted">节点名顺序：{{ items.filter(i => i.enabled).map(i => i.ident).join('ᐧ') || '（无启用标签）' }}</span>
+        </div>
 
-    <div v-if="isMobile" class="np-mobile-list">
-      <div v-for="row in items" :key="row.id" class="np-mobile-card">
-        <div class="np-mobile-card-head">
-          <el-switch :model-value="row.enabled" size="small" @change="(v) => toggle(row, v)" />
-          <div class="np-mobile-title">
-            {{ row.name }}
-            <div class="np-mobile-sub">
-              <el-tag effect="plain" size="small">{{ row.ident }}</el-tag>
-              <span style="margin-left:6px">{{ row.method }}</span>
+        <div v-if="isMobile" class="np-mobile-list np-quad-mobile">
+          <div v-for="row in items" :key="row.id" class="np-mobile-card">
+            <div class="np-mobile-card-head">
+              <el-switch :model-value="row.enabled" size="small" @change="(v) => toggle(row, v)" />
+              <div class="np-mobile-title">
+                {{ row.name }}
+                <div class="np-mobile-sub">
+                  <el-tag effect="plain" size="small">{{ row.ident }}</el-tag>
+                  <span style="margin-left:6px">{{ row.method }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="np-mobile-meta">
+              <span class="np-mono" style="max-width:100%;overflow:hidden;text-overflow:ellipsis">{{ row.url }}</span>
+              <span>状态 {{ row.expect_status }}</span>
+              <span v-if="row.expect_body">包含 {{ row.expect_body }}</span>
+              <span v-if="row.max_latency">≤ {{ row.max_latency }}ms</span>
+            </div>
+            <div class="np-mobile-actions">
+              <span class="np-muted">通过 {{ row.passed }} · {{ formatTs(row.last_run_at) }}</span>
+              <div class="np-flex" />
+              <el-button link size="small" @click="openEdit(row)">编辑</el-button>
+              <el-button link type="danger" size="small" :disabled="row.is_default" @click="remove(row)">删除</el-button>
             </div>
           </div>
+          <div v-if="!items.length" class="np-empty">暂无节点标签</div>
         </div>
-        <div class="np-mobile-meta">
-          <span class="np-mono" style="max-width:100%;overflow:hidden;text-overflow:ellipsis">{{ row.url }}</span>
-          <span>状态 {{ row.expect_status }}</span>
-          <span v-if="row.expect_body">包含 {{ row.expect_body }}</span>
-          <span v-if="row.max_latency">≤ {{ row.max_latency }}ms</span>
-        </div>
-        <div class="np-mobile-actions">
-          <span class="np-muted">通过 {{ row.passed }} · {{ formatTs(row.last_run_at) }}</span>
-          <div class="np-flex" />
-          <el-button link size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button link type="danger" size="small" :disabled="row.is_default" @click="remove(row)">删除</el-button>
+
+        <div v-if="!isMobile">
+          <el-table :data="items" size="small" class="np-tag-table">
+            <el-table-column label="启用" width="50" align="center">
+              <template #default="{ row }">
+                <el-switch :model-value="row.enabled" size="small" @change="(v) => toggle(row, v)" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="name" label="名称" min-width="82" show-overflow-tooltip />
+            <el-table-column label="标识" width="52" align="center">
+              <template #default="{ row }"><el-tag effect="plain" size="small">{{ row.ident }}</el-tag></template>
+            </el-table-column>
+            <el-table-column label="检测目标" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">
+                <div class="np-mono np-tag-url"
+                     :title="row.url + ' · ' + row.method + ' ' + row.expect_status + (row.expect_body ? ' · 包含 ' + row.expect_body : '') + (row.max_latency ? ' · ≤' + row.max_latency + 'ms' : '')">
+                  {{ row.url }}
+                </div>
+                <div class="np-muted np-tag-rule">
+                  {{ row.method }} · {{ row.expect_status }}
+                  <span v-if="row.max_latency"> · ≤{{ row.max_latency }}ms</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="passed" label="通过" width="46" align="center" />
+            <el-table-column label="最近" width="84">
+              <template #default="{ row }">{{ shortTs(row.last_run_at) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="82" align="center">
+              <template #default="{ row }">
+                <el-button link size="small" @click="openEdit(row)">编辑</el-button>
+                <el-button link size="small" type="danger" :disabled="row.is_default" @click="remove(row)">删</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
         </div>
       </div>
-      <div v-if="!items.length" class="np-empty">暂无节点标签</div>
-    </div>
 
-    <div v-if="!isMobile" class="np-card">
-      <el-table :data="items">
-        <el-table-column label="启用" width="64" align="center">
-          <template #default="{ row }">
-            <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="name" label="名称（内部）" width="120" />
-        <el-table-column label="标识" width="100">
-          <template #default="{ row }"><el-tag effect="plain" size="small">{{ row.ident }}</el-tag></template>
-        </el-table-column>
-        <el-table-column prop="url" label="检测 URL" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="method" label="方法" width="70" />
-        <el-table-column label="成功条件" min-width="160">
-          <template #default="{ row }">
-            <div class="np-mono">状态: {{ row.expect_status }}</div>
-            <div class="np-mono" v-if="row.expect_body">包含: {{ row.expect_body }}</div>
-            <div class="np-mono" v-if="row.max_latency">延迟 ≤ {{ row.max_latency }}ms</div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="passed" label="通过" width="60" />
-        <el-table-column label="最近运行" width="150">
-          <template #default="{ row }">{{ formatTs(row.last_run_at) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="120">
-          <template #default="{ row }">
-            <el-button link @click="openEdit(row)">编辑</el-button>
-            <el-button link type="danger" :disabled="row.is_default" @click="remove(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
-
-    <div class="np-card speed-panel" style="padding:20px;margin-top:16px">
+      <div class="np-card np-quad-cell speed-panel" style="padding:18px">
       <div class="np-section-title">
         下载测速
         <el-tag size="small" effect="plain" type="info" style="margin-left:10px">独立模块 · 不参与评分</el-tag>
@@ -427,8 +434,9 @@ onUnmounted(() => {
           </span>
         </div>
       </el-form>
+      </div>
 
-      <div class="speed-tables">
+      <div class="np-card np-quad-cell speed-panel" style="padding:18px">
         <div class="speed-table-block">
           <div class="speed-table-head">
             机场测速范围
@@ -444,15 +452,17 @@ onUnmounted(() => {
                 </span>
               </template>
             </el-table-column>
-            <el-table-column prop="name" label="机场" min-width="180" />
-            <el-table-column label="节点" width="90">
+            <el-table-column prop="name" label="机场" min-width="120" show-overflow-tooltip />
+            <el-table-column label="节点" width="70" align="right">
               <template #default="{ row }">
                 <span class="np-muted">{{ speedNodes.filter(n => n.airport === row.name).length }}</span>
               </template>
             </el-table-column>
           </el-table>
         </div>
+      </div>
 
+      <div class="np-card np-quad-cell speed-panel" style="padding:18px">
         <div class="speed-table-block">
           <div class="speed-table-head">
             <div class="speed-table-title">
@@ -722,12 +732,24 @@ onUnmounted(() => {
   border-radius: 8px;
   margin-bottom: 8px;
 }
-.speed-tables {
+.np-quad {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
 }
+.np-quad-cell { min-width: 0; }
+.np-tags-cell { padding: 16px; }
+.np-quad-toolbar { margin: 0 0 10px; }
+.np-tag-url {
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.np-tag-rule { font-size: 10.5px; line-height: 1.45; white-space: nowrap; }
+.np-tag-table .cell { padding: 0 6px; }
 .speed-table-block {
   min-width: 0;
 }
@@ -756,7 +778,7 @@ onUnmounted(() => {
   margin-left: auto;
 }
 @media (max-width: 1100px) {
-  .speed-tables { grid-template-columns: 1fr; }
+  .np-quad { grid-template-columns: 1fr; }
 }
 @media (max-width: 768px) {
   .speed-queue-strip { width: 100%; margin: 4px 0; }
