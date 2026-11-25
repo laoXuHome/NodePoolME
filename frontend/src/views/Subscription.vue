@@ -30,6 +30,21 @@ function pick(paths) {
 }
 
 const shownLinks = ref('queryless')
+const speedFormat = ref('clash')
+const speedLevels = ref(['excellent', 'good'])
+const SPEED_OPTIONS = [
+  { value: 'excellent', label: '🟣 优', desc: '≥ 5 MB/s' },
+  { value: 'good', label: '🟢 良', desc: '≥ 2 MB/s' },
+  { value: 'medium', label: '🔵 中', desc: '≥ 1 MB/s' },
+  { value: 'poor', label: '🟠 差', desc: '≥ 256 KB/s' },
+  { value: 'danger', label: '🔴 危', desc: '< 256 KB/s' }
+]
+const speedFilterLink = computed(() => {
+  if (!info.value || !speedLevels.value.length) return ''
+  const token = info.value.settings?.sub_token || ''
+  const query = speedLevels.value.map(v => encodeURIComponent(v)).join(',')
+  return `${info.value.base_url}/sub/all/${token}/${speedFormat.value}?speed=${query}`
+})
 
 const LOON_REASON = {
   protocol: '协议不支持',
@@ -173,6 +188,38 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
           </div>
           <div class="np-muted" style="margin-top:10px">
             反代转发会把 <span class="np-mono">&amp;</span> 转义坏，优先用「无参数」地址 <span class="np-mono">/sub/all/&lt;token&gt;/clash</span>；带 format 参数时按客户端 UA 自动选择。
+          </div>
+        </div>
+
+        <!-- 客户端独立速度筛选 -->
+        <div class="np-card" style="padding:20px;margin-top:16px" v-if="info">
+          <div class="np-section-title">
+            客户端速度筛选
+            <div class="np-flex" />
+            <el-select v-model="speedFormat" size="small" style="width:150px">
+              <el-option label="Clash / Mihomo" value="clash" />
+              <el-option label="sing-box" value="singbox" />
+              <el-option label="通用 Base64" value="base64" />
+              <el-option label="Loon" value="loon" />
+            </el-select>
+          </div>
+          <div class="np-muted" style="margin-bottom:10px">
+            每个客户端使用自己的筛选 URL，互不影响。只输出“最近一次有效测速”命中等级的节点；待测速、机场排除、测速异常和全部源失败不会被归入任何等级。
+          </div>
+          <div class="speed-filter-grid" style="display:flex;flex-wrap:wrap;gap:6px 18px">
+            <el-checkbox-group v-model="speedLevels">
+              <el-checkbox v-for="opt in SPEED_OPTIONS" :key="opt.value" :value="opt.value">
+                {{ opt.label }} <span class="np-muted">{{ opt.desc }}</span>
+              </el-checkbox>
+            </el-checkbox-group>
+          </div>
+          <div class="link-row" style="margin-top:8px">
+            <div class="link-label">筛选地址</div>
+            <div class="link-control">
+              <el-input :model-value="prettyLink(speedFilterLink)" readonly size="small"
+                        :type="isMobile ? 'textarea' : 'text'" :autosize="{ minRows: 1, maxRows: 2 }" />
+              <el-button class="link-copy" :disabled="!speedFilterLink" @click="copy(speedFilterLink)">复制</el-button>
+            </div>
           </div>
         </div>
 

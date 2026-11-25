@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NodePoolME"
-VERSION = "1.6.8"
+VERSION = "1.7.0"
 
 DATA_DIR = Path(os.getenv("NODEPOOL_DATA_DIR", "./data")).resolve()
 CONFIG_DIR = Path(os.getenv("NODEPOOL_CONFIG_DIR", str(DATA_DIR / "config"))).resolve()
@@ -111,13 +111,26 @@ DEFAULT_SETTINGS = {
     "speed_primary_sources": "3",
     "speed_connections": "4",
     "speed_warmup_seconds": "2",
-    "speed_sample_seconds": "12",
-    "speed_connect_timeout": "10",
+    "speed_sample_seconds": "10",
+    "speed_connect_timeout": "8",
     "speed_total_timeout": "20",
     "speed_retry": "1",
-    "speed_auto_enabled": "0",
-    "speed_auto_interval_minutes": "180",
-    "speed_auto_nodes": "3",
+    # 定时测速：北京时间晚高峰窗口内随机分散，每天或每隔 N 天一次
+    "speed_schedule_enabled": "1",
+    "speed_timezone": "Asia/Shanghai",
+    "speed_window_start": "18:00",
+    "speed_window_end": "23:30",
+    "speed_schedule_every_days": "1",
+    "speed_schedule_last_date": "",
+    # 单节点单轮总下载流量上限（所有测速源累计）
+    "speed_traffic_limit_mb": "50",
+    # 最新有效结果保留时长；过期只显示待测速，不判故障、不补测
+    "speed_result_ttl_days": "3",
+    # 五级速度阈值，单位 MB/s（256 KB/s = 0.25 MB/s）
+    "speed_grade_excellent": "5",
+    "speed_grade_good": "2",
+    "speed_grade_medium": "1",
+    "speed_grade_poor": "0.25",
 }
 
 for _d in (DATA_DIR, CONFIG_DIR, LOG_DIR, BACKUP_DIR, SUB_DIR):

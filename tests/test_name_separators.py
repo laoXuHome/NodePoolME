@@ -1,4 +1,4 @@
-"""Node names use ⁃ (U+2043) outside and ᐧ (U+1427) between tag idents."""
+"""Node names use · (U+00B7) outside and ᐧ (U+1427) between tag idents."""
 import os
 import sys
 import tempfile
@@ -17,7 +17,7 @@ from backend.subscriptions import builder  # noqa: E402
 
 def test_separators():
     db.init_db()
-    assert builder.NAME_SEP == "\u2043" and builder.TAG_SEP == "\u1427"
+    assert builder.NAME_SEP == "\u00b7" and builder.TAG_SEP == "\u1427"
     ap = db.execute("INSERT INTO airports (name,url,interval_minutes,created_at,updated_at,enabled) "
                     "VALUES ('星链','http://x',30,datetime('now'),datetime('now'),1)")
     node = db.execute(
@@ -35,7 +35,7 @@ def test_separators():
 
     nodes, _ = builder.collect_nodes()
     assert len(nodes) == 1
-    assert nodes[0]["display_name"] == "星链⁃GᐧTGᐧY⁃香港01", nodes[0]["display_name"]
+    assert nodes[0]["display_name"] == "待测速星链·GᐧTGᐧY·香港01", nodes[0]["display_name"]
 
 
 if __name__ == "__main__":

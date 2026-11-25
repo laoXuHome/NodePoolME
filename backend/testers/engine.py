@@ -21,6 +21,11 @@ from backend import config
 from backend.database import db
 from backend.parsers import subscription as parser
 
+# One process-wide Mihomo core means detection and download-speed tests must not
+# rewrite the config while the other is downloading. Detection and speed batches
+# hold this lock; single-node helpers use the same lock.
+operation_lock = asyncio.Lock()
+
 
 @dataclass
 class Outcome:

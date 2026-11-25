@@ -52,6 +52,7 @@ jobs:
           python tests/test_error_messages_cn.py
           python tests/test_traffic_info.py
           python tests/test_no_node_dedupe.py
+          python -m pytest -q
 
   build:
     needs: test

@@ -12,6 +12,7 @@ import yaml
 from backend import config
 from backend.database import db
 from backend.parsers import subscription as parser
+from backend.testers import speedtest
 
 
 def _fmt_ts() -> str:
@@ -49,7 +50,7 @@ def latest_results(batch_id: int | None = None) -> dict[int, dict[int, dict]]:
     return out
 
 
-NAME_SEP = "⁃"   # outer separator: 机场⁃标签⁃节点名
+NAME_SEP = "·"   # outer separator: 机场·标签·节点名
 TAG_SEP = "ᐧ"    # inner separator between tag idents
 
 
@@ -184,6 +185,7 @@ def collect_nodes(batch_id: int | None = None) -> tuple[list[dict], dict]:
     )
 
     latests = latest_latency(batch_id)
+    speed_states = speedtest.speed_map()
 
 
     selected: list[dict] = []
@@ -207,12 +209,14 @@ def collect_nodes(batch_id: int | None = None) -> tuple[list[dict], dict]:
         # Per-target ceilings are enforced inside latest_latency(); the node's latency is
         # the worse of the two passing targets, so no extra global cap check is applied.
         latency = probe["latency_ms"] or (node["latency"] or 0)
-        # Names read as  机场⁃GPTᐧYTᐧTG⁃节点名  (the short ident, not the group's full name)
+        # Names read as  机场·GPTᐧYTᐧTG·节点名  (the short ident, not the group's full name)
         idents = [g["ident"] for g in passed]
         display = (f"{airport['name']}{NAME_SEP}{TAG_SEP.join(idents)}{NAME_SEP}{node['raw_name']}"
                    if idents else f"{airport['name']}{NAME_SEP}{node['raw_name']}")
+        state = speed_states.get(node["id"]) or {}
+        display = speedtest.apply_speed_prefix(display, state.get("marker") or speedtest.PENDING_PREFIX)
         selected.append({**node, "display_name": display, "passed": passed,
-                         "latency": latency, "params": db.loads(node["params"], {})})
+                         "speed": state, "latency": latency, "params": db.loads(node["params"], {})})
 
     selected.sort(key=lambda n: (n["latency"] if n["latency"] else 99999, n["id"]))
     # Names must stay unique inside a client profile
@@ -654,7 +658,7 @@ FORMATS = {"clash": ("sub_all.yaml", build_clash),
 
 
 
-def _snapshot_entry(node_id: int, name: str) -> dict | None:
+def _snapshot_entry(node_id: int, name: str, state: dict | None = None) -> dict | None:
     """Rebuild one previously published node from the DB, keeping its published name."""
     row = db.row(
         """SELECT n.id, n.airport_id, n.raw_name, n.protocol, n.server, n.port, n.params,
@@ -666,7 +670,10 @@ def _snapshot_entry(node_id: int, name: str) -> dict | None:
     if not row:
         return None
     row["params"] = db.loads(row.get("params"), {})
-    row["display_name"] = name
+    state = state if state is not None else (speedtest.speed_map().get(node_id) or {})
+    row["display_name"] = speedtest.apply_speed_prefix(
+        name, state.get("marker") or speedtest.PENDING_PREFIX)
+    row["speed"] = state
     row["passed"] = []
     return row
 
@@ -848,18 +855,65 @@ def meta() -> dict:
     return {"name": db.get("sub_name"), "nodes": 0, "updated_at": None, "formats": list(FORMATS)}
 
 
-def read(fmt: str = "clash") -> tuple[str, str]:
-    filename, _ = FORMATS.get(fmt, FORMATS["clash"])
+SPEED_LEVEL_ALIASES = {
+    "excellent": "excellent", "优": "excellent", "🟣": "excellent", "purple": "excellent",
+    "good": "good", "良": "good", "🟢": "good", "green": "good",
+    "medium": "medium", "中": "medium", "🔵": "medium", "blue": "medium",
+    "poor": "poor", "差": "poor", "🟠": "poor", "orange": "poor",
+    "danger": "danger", "危": "danger", "🔴": "danger", "red": "danger",
+}
+
+
+def parse_speed_levels(value: str | None) -> set[str] | None:
+    if value is None or not str(value).strip():
+        return None
+    tokens = [t.strip().lower() for t in re.split(r"[,\s，]+", str(value)) if t.strip()]
+    levels = {SPEED_LEVEL_ALIASES[t] for t in tokens if t in SPEED_LEVEL_ALIASES}
+    if not levels:
+        raise ValueError("speed 参数无效；可用 excellent,good,medium,poor,danger")
+    return levels
+
+
+def filter_speed_nodes(nodes: list[dict], levels: set[str]) -> list[dict]:
+    """Only nodes with a fresh, real grade are filterable; excluded/pending/error are not."""
+    return [n for n in nodes
+            if (n.get("speed") or {}).get("status") == "ok"
+            and (n.get("speed") or {}).get("grade") in levels]
+
+
+def read(fmt: str = "clash", speed_levels: set[str] | None = None) -> tuple[str, str]:
+    filename, builder_fn = FORMATS.get(fmt, FORMATS["clash"])
     path = config.SUB_DIR / filename
-    if not path.exists() and fmt == "loon":
-        # Upgrade path: older installs have no sub_all.loon.txt yet. Rebuild it from the
-        # published manifest instead of returning 404 to Loon on the first refresh.
-        previous = meta()
-        names = {int(x["id"]): x["name"] for x in (previous.get("node_names") or [])}
-        ids = previous.get("node_ids") or []
-        nodes = [n for n in (_snapshot_entry(int(i), names.get(int(i), "")) for i in ids) if n]
-        if not nodes:
-            nodes = _live_snapshot()
+    previous = meta()
+    names = {int(x["id"]): x["name"] for x in (previous.get("node_names") or [])}
+    ids = previous.get("node_ids") or []
+    states = speedtest.speed_map()
+    nodes = [n for n in (_snapshot_entry(int(i), names.get(int(i), ""), states.get(int(i)))
+                         for i in ids) if n]
+    if speed_levels is not None:
+        # A speed filter is always applied to the published manifest. No manifest
+        # (or no match at all) means a legitimately empty client profile, never the
+        # stale full file.
+        nodes = filter_speed_nodes(nodes, speed_levels)
+        sub_name = previous.get("name") or db.get("sub_name", "NodePool Unified") or "NodePool Unified"
+        content = (builder_fn(nodes, sub_name) if fmt in ("clash", "singbox")
+                   else builder_fn(nodes))
+        validate(fmt, content, nodes)
+        return fmt, content
+    if ids:
+        sub_name = previous.get("name") or db.get("sub_name", "NodePool Unified") or "NodePool Unified"
+        content = (builder_fn(nodes, sub_name) if fmt in ("clash", "singbox")
+                   else builder_fn(nodes))
+        try:
+            validate(fmt, content, nodes)
+            return fmt, content
+        except Exception:
+            # Fall back to the last published file if a hand-edited node cannot be rendered.
+            if not path.exists():
+                raise
+    elif fmt == "loon" and not path.exists():
+        # Upgrade path: older installs have no manifest; use the live snapshot.
+        nodes = _live_snapshot()
         content = build_loon(nodes)
         try:
             tmp = config.SUB_DIR / ".sub_all.loon.txt.tmp"

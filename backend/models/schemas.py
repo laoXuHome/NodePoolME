@@ -98,6 +98,17 @@ class SettingsIn(BaseModel):
     speed_connect_timeout: Optional[float] = Field(default=None, ge=3, le=30)
     speed_total_timeout: Optional[float] = Field(default=None, ge=8, le=60)
     speed_retry: Optional[int] = Field(default=None, ge=0, le=2)
+    speed_schedule_enabled: Optional[bool] = None
+    speed_timezone: Optional[str] = Field(default=None, max_length=64)
+    speed_window_start: Optional[str] = Field(default=None, pattern=r"^[0-2][0-9]:[0-5][0-9]$")
+    speed_window_end: Optional[str] = Field(default=None, pattern=r"^[0-2][0-9]:[0-5][0-9]$")
+    speed_schedule_every_days: Optional[int] = Field(default=None, ge=1, le=30)
+    speed_traffic_limit_mb: Optional[int] = Field(default=None, ge=1, le=1024)
+    speed_result_ttl_days: Optional[int] = Field(default=None, ge=1, le=30)
+    speed_grade_excellent: Optional[float] = Field(default=None, gt=0, le=1024)
+    speed_grade_good: Optional[float] = Field(default=None, gt=0, le=1024)
+    speed_grade_medium: Optional[float] = Field(default=None, gt=0, le=1024)
+    speed_grade_poor: Optional[float] = Field(default=None, gt=0, le=1024)
     speed_auto_enabled: Optional[bool] = None
     speed_auto_interval_minutes: Optional[int] = Field(default=None, ge=15, le=1440)
     speed_auto_nodes: Optional[int] = Field(default=None, ge=1, le=20)

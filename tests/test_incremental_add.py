@@ -64,7 +64,7 @@ def test_incremental_add():
     assert set(added["node_ids"]) == {ids["a"], ids["b"], ids["c"]}
 
     clash = builder.read("clash")[1]
-    assert "机场A⁃a" in clash and "机场A⁃b" in clash and "机场A⁃c" in clash
+    assert "机场A·a" in clash and "机场A·b" in clash and "机场A·c" in clash
     assert db.get("sub_last_generated_at") == stamp  # date displays stay put
 
     again = builder.add_published_node(ids["c"])

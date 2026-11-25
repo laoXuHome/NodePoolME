@@ -224,10 +224,19 @@ CREATE TABLE IF NOT EXISTS speed_runs (
     node_id INTEGER NOT NULL,
     started_at TEXT NOT NULL,
     finished_at TEXT,
-    status TEXT NOT NULL DEFAULT 'running',   -- ok / partial / failed / source_unavailable / node_error / engine_error
+    status TEXT NOT NULL DEFAULT 'running',   -- ok / partial / failed / source_unavailable / node_error / engine_error / canceled
     confidence TEXT NOT NULL DEFAULT 'none',  -- normal / low / none
-    multi_mbps REAL,
-    single_mbps REAL,
+    multi_mbps REAL,                          -- 多连接合并速率，Mbit/s（保留兼容）
+    single_mbps REAL,                         -- 单连接中位速率，Mbit/s（保留兼容）
+    mb_per_s REAL,                            -- 下载速度，MB/s（评级与展示口径）
+    single_mb_per_s REAL,                     -- 单连接中位速度，MB/s
+    bytes_total INTEGER NOT NULL DEFAULT 0,   -- 本轮实际下载字节数
+    download_seconds REAL,                    -- 有效下载采样耗时
+    connect_ms INTEGER,                       -- 有效测速源连接耗时中位数
+    airport_name TEXT,
+    trigger TEXT,                             -- schedule / manual / all / new
+    grade TEXT,                               -- excellent / good / medium / poor / danger
+    traffic_limit_bytes INTEGER NOT NULL DEFAULT 0,
     sources_total INTEGER NOT NULL DEFAULT 0,
     sources_ok INTEGER NOT NULL DEFAULT 0,
     error_type TEXT,
@@ -319,9 +328,26 @@ def init_db() -> None:
         ("traffic_total", "INTEGER NOT NULL DEFAULT 0"),
         ("traffic_expire", "INTEGER NOT NULL DEFAULT 0"),
         ("traffic_updated_at", "TEXT"),
+        ("speed_excluded", "INTEGER NOT NULL DEFAULT 0"),
     ):
         if column not in airport_cols:
             conn.execute(f"ALTER TABLE airports ADD COLUMN {column} {ddl}")
+            conn.commit()
+    # Migration: v1.7 speed runs keep MB/s, byte totals, trigger and grade.
+    speed_cols = {r["name"] for r in conn.execute("PRAGMA table_info(speed_runs)").fetchall()}
+    for column, ddl in (
+        ("mb_per_s", "REAL"),
+        ("single_mb_per_s", "REAL"),
+        ("bytes_total", "INTEGER NOT NULL DEFAULT 0"),
+        ("download_seconds", "REAL"),
+        ("connect_ms", "INTEGER"),
+        ("airport_name", "TEXT"),
+        ("trigger", "TEXT"),
+        ("grade", "TEXT"),
+        ("traffic_limit_bytes", "INTEGER NOT NULL DEFAULT 0"),
+    ):
+        if column not in speed_cols:
+            conn.execute(f"ALTER TABLE speed_runs ADD COLUMN {column} {ddl}")
             conn.commit()
     # Migration: first upgrade to the latency-probe model gets a 500 ms publish ceiling
     if get("latency_test_url") is None:
@@ -331,6 +357,14 @@ def init_db() -> None:
             continue
         if get(key) is None:
             set_setting(key, value)
+    # Migration: v1.7 speed defaults changed from 12s/10s to 10s/8s. Only touch
+    # values that are still exactly the old defaults, so custom settings survive.
+    if get("speed_v17_defaults") != "1":
+        if get("speed_sample_seconds") in ("12", "12.0"):
+            set_setting("speed_sample_seconds", "10")
+        if get("speed_connect_timeout") in ("10", "10.0"):
+            set_setting("speed_connect_timeout", "8")
+        set_setting("speed_v17_defaults", "1")
     import secrets
 
     if not get("sub_token"):

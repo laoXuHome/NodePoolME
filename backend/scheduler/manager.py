@@ -443,7 +443,7 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
     if not nodes:
         return {"ok": False, "error": "缓存池为空，请先添加机场并拉取订阅"}
 
-    async with state.cycle_lock:
+    async with state.cycle_lock, engine_mod.operation_lock:
         state.running = True
         state.paused = False
         state.stop_requested = False
@@ -582,37 +582,39 @@ async def test_single_node(node_id: int, group_ids: list[int] | None = None,
             groups = [g for g in groups if g["id"] in group_ids]
         if not groups:
             return {"ok": False, "error": "没有启用的节点标签"}
-    await engine_mod.engine_manager.prepare([node])
-    probes = latency_probes() if mode != "tags" else []
-    latency = None
-    if probes:
-        per_probe = {}
-        targets = {}
-        for _round in range(LATENCY_ROUNDS):
+    async with engine_mod.operation_lock:
+        await engine_mod.engine_manager.prepare([node])
+        probes = latency_probes() if mode != "tags" else []
+        latency = None
+        if probes:
+            per_probe = {}
+            targets = {}
+            for _round in range(LATENCY_ROUNDS):
+                for probe in probes:
+                    outcome = await engine_mod.engine_manager.test(node, probe)
+                    _record_latency(node, probe, None, outcome)
+                    per_probe.setdefault(probe["ident"], []).append(outcome)
+                    await asyncio.sleep(engine_mod.jitter_ms())
             for probe in probes:
-                outcome = await engine_mod.engine_manager.test(node, probe)
-                _record_latency(node, probe, None, outcome)
-                per_probe.setdefault(probe["ident"], []).append(outcome)
-                await asyncio.sleep(engine_mod.jitter_ms())
-        for probe in probes:
-            targets[probe["ident"]] = {
-                "best": _best_latency(probe, per_probe.get(probe["ident"], [])),
-                "cap": probe["max_latency"],
-                "url": probe["url"],
-            }
-        passed = _apply_latency_gate(node, probes, per_probe)
-        best_values = [t["best"] for t in targets.values() if t["best"] is not None]
-        latency = {"ok": passed, "targets": targets,
-                   "latency_ms": max(best_values) if best_values else None}
-    results = []
-    for group in groups:
-        outcome = await engine_mod.engine_manager.test(node, group)
-        _record(node, group, None, outcome)
-        results.append({"group": group["name"], "ok": outcome.ok, "latency_ms": outcome.latency_ms,
-                        "error_type": outcome.error_type, "message": outcome.message})
-        await asyncio.sleep(engine_mod.jitter_ms())
-    return {"ok": True, "node_id": node_id, "mode": mode,
-            "latency": latency, "results": results}
+                targets[probe["ident"]] = {
+                    "best": _best_latency(probe, per_probe.get(probe["ident"], [])),
+                    "cap": probe["max_latency"],
+                    "url": probe["url"],
+                }
+            passed = _apply_latency_gate(node, probes, per_probe)
+            best_values = [t["best"] for t in targets.values() if t["best"] is not None]
+            latency = {"ok": passed, "targets": targets,
+                       "latency_ms": max(best_values) if best_values else None}
+        results = []
+        for group in groups:
+            outcome = await engine_mod.engine_manager.test(node, group)
+            _record(node, group, None, outcome)
+            results.append({"group": group["name"], "ok": outcome.ok,
+                            "latency_ms": outcome.latency_ms,
+                            "error_type": outcome.error_type, "message": outcome.message})
+            await asyncio.sleep(engine_mod.jitter_ms())
+        return {"ok": True, "node_id": node_id, "mode": mode,
+                "latency": latency, "results": results}
 
 
 async def fetch_now(airport_id: int, trigger: str = "manual") -> dict:

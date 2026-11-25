@@ -81,10 +81,14 @@ async function testSpeed() {
   testing.value = 'speed'
   try {
     const res = await api.post('/api/speed/test', { node_id: detail.value.id })
-    if (res.status === 'ok' || res.status === 'partial') {
-      ElMessage.success(`下载测速完成：${res.multi_mbps ?? '—'} Mbps（${res.sources_ok}/${res.sources_total} 个源有效）`)
+    if (res.status === 'queued') {
+      ElMessage.info(res.message || '已进入测速队列')
+    } else if (res.status === 'ok' || res.status === 'partial') {
+      ElMessage.success(`下载测速完成：${res.mb_per_s ?? '—'} MB/s${res.grade ? `（${SPEED_META[res.grade]?.label || res.grade}）` : ''}，${res.sources_ok}/${res.sources_total} 个源有效`)
+    } else if (res.status === 'excluded') {
+      ElMessage.info('该机场已排除测速')
     } else if (res.status === 'source_unavailable') {
-      ElMessage.warning('本轮没有可用测速源，未判定节点下载速度')
+      ElMessage.warning('本轮所有可用测速源均失败，未判定节点下载速度')
     } else {
       ElMessage.error(res.message || '下载测速失败')
     }
@@ -118,30 +122,49 @@ const hasActiveFilters = computed(() => Object.entries(filters.value).some(([k, 
 function targetName(target) { return latencyLabels.value[target]?.name || target }
 function targetShort(target) { return latencyLabels.value[target]?.short || target }
 function shortTs(ts) { const full = formatTs(ts); return full === '—' ? full : full.slice(5, 16) }
+const SPEED_META = {
+  excellent: { label: '优', emoji: '🟣', color: '#8B5CF6' },
+  good: { label: '良', emoji: '🟢', color: '#16A34A' },
+  medium: { label: '中', emoji: '🔵', color: '#2563EB' },
+  poor: { label: '差', emoji: '🟠', color: '#EA580C' },
+  danger: { label: '危', emoji: '🔴', color: '#DC2626' }
+}
 function speedText(row) {
   const s = row?.speed
-  if (!s) return '—'
-  if (s.status === 'ok' || s.status === 'partial') {
-    return s.multi_mbps == null ? '无数据' : `${s.multi_mbps} Mbps`
+  if (!s) return '待测速'
+  if (s.status === 'excluded') return '⚪ 排除'
+  if (s.status === 'ok') {
+    return s.mb_per_s == null ? '无数据' : `${s.emoji} ${Number(s.mb_per_s).toFixed(2)} MB/s`
   }
-  if (s.status === 'source_unavailable') return '测速源不可用'
-  if (s.status === 'node_error') return '节点连接失败'
-  if (s.status === 'engine_error') return '引擎不可用'
-  return '测速失败'
+  if (s.status === 'stale') return '待测速'
+  if (s.status === 'source_failed') return '🚫 全源失败'
+  if (s.status === 'error') return '⚠️ 异常'
+  return '待测速'
 }
 function speedSub(row) {
   const s = row?.speed
   if (!s) return '尚未测速'
-  if (s.status === 'ok') return `${s.sources_ok}/${s.sources_total} 源 · 正常`
-  if (s.status === 'partial') return `${s.sources_ok}/${s.sources_total} 源 · 低可信`
-  return s.sources_total ? `${s.sources_ok}/${s.sources_total} 源` : '未执行'
+  if (s.status === 'excluded') return '机场主动排除测速'
+  if (s.status === 'ok') return `${s.grade_label || ''} · ${s.sources_ok ?? '—'}/${s.sources_total ?? '—'} 源`
+  if (s.status === 'stale') return s.label || '测速结果已过期'
+  return s.label || '尚未取得有效测速结果'
 }
 function speedType(row) {
   const s = row?.speed
   if (!s) return 'info'
-  if (s.status === 'ok') return 'success'
-  if (s.status === 'partial') return 'warning'
-  return 'danger'
+  if (s.status === 'ok') {
+    return ['excellent', 'good'].includes(s.grade) ? 'success' : (s.grade === 'medium' ? 'warning' : 'danger')
+  }
+  if (s.status === 'excluded') return 'info'
+  return s.status === 'stale' ? 'info' : 'warning'
+}
+function speedColor(row) {
+  return SPEED_META[row?.speed?.grade]?.color || '#64748b'
+}
+function fmtTraffic(bytes) {
+  if (bytes == null) return '—'
+  const mb = Number(bytes) / 1024 / 1024
+  return mb >= 100 ? `${mb.toFixed(0)} MB` : `${mb.toFixed(1)} MB`
 }
 function latencyValue(row, target) {
   return row?.latency_targets?.[target]?.min ?? row?.latency_targets?.[target]?.best ?? null
@@ -325,12 +348,12 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="下载速度" width="120">
+        <el-table-column label="下载速度" width="132">
           <template #default="{ row }">
             <el-tooltip :content="speedSub(row)" placement="top">
-              <el-tag size="small" effect="plain" :type="speedType(row)">
+              <span class="np-speed-chip" :style="{ color: speedColor(row), borderColor: speedColor(row) + '55' }">
                 {{ speedText(row) }}
-              </el-tag>
+              </span>
             </el-tooltip>
           </template>
         </el-table-column>
@@ -427,7 +450,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <el-table-column label="时间" :width="isMobile ? 104 : 160">
           <template #default="{ row }">{{ isMobile ? shortTs(row.started_at) : row.started_at }}</template>
         </el-table-column>
-        <el-table-column label="结果" :width="isMobile ? 72 : 90">
+        <el-table-column label="结果" :width="isMobile ? 72 : 86">
           <template #default="{ row }">
             <el-tag :type="row.status === 'ok' ? 'success' : (row.status === 'partial' ? 'warning' : 'danger')"
                     size="small" effect="plain">
@@ -435,15 +458,23 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="多连接" :width="isMobile ? 82 : 105">
-          <template #default="{ row }"><span class="np-mono">{{ row.multi_mbps == null ? '—' : row.multi_mbps + ' Mbps' }}</span></template>
+        <el-table-column label="下载速度" :width="isMobile ? 92 : 108">
+          <template #default="{ row }">
+            <span class="np-mono">{{ row.mb_per_s == null ? '—' : Number(row.mb_per_s).toFixed(2) + ' MB/s' }}</span>
+          </template>
         </el-table-column>
-        <el-table-column label="单连接" :width="isMobile ? 82 : 105">
-          <template #default="{ row }"><span class="np-mono">{{ row.single_mbps == null ? '—' : row.single_mbps + ' Mbps' }}</span></template>
+        <el-table-column label="实际流量" :width="isMobile ? 82 : 96">
+          <template #default="{ row }"><span class="np-mono">{{ fmtTraffic(row.bytes_total) }}</span></template>
+        </el-table-column>
+        <el-table-column v-if="!isMobile" label="连接(ms)" width="90">
+          <template #default="{ row }">{{ row.connect_ms ?? row.samples?.[0]?.connect_ms ?? '—' }}</template>
+        </el-table-column>
+        <el-table-column v-if="!isMobile" label="采样(s)" width="80">
+          <template #default="{ row }">{{ row.download_seconds == null ? '—' : Number(row.download_seconds).toFixed(1) }}</template>
         </el-table-column>
         <el-table-column v-if="!isMobile" label="测速源">
           <template #default="{ row }">
-            <span class="np-muted">{{ row.sources_ok + "/" + row.sources_total + " 有效" + (row.message ? " · " + row.message : "") }}</span>
+            <span class="np-muted">{{ (row.sources_ok ?? 0) + "/" + (row.sources_total ?? 0) + " 有效" + (row.message ? " · " + row.message : "") }}</span>
           </template>
         </el-table-column>
       </el-table>
@@ -453,4 +484,15 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 
 <style scoped>
 .np-latency-over { color: var(--el-color-danger); font-weight: 600; }
+.np-speed-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-family: var(--np-mono, monospace);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  background: #fff;
+}
 </style>

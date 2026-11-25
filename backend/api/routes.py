@@ -22,6 +22,7 @@ from backend.models.schemas import (AirportIn, AirportPatch, GroupIn, GroupPatch
                                     SpeedSourcePatch, SpeedTestIn)
 from backend.scheduler import manager
 from backend.services import fetcher
+from backend.services.speed_queue import queue as speed_queue, schedule_state
 from backend.scoring import eligibility, sampler
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
@@ -594,6 +595,7 @@ def _airport_payload(row: dict) -> dict:
         "pool_count": row["node_count"] if row["enabled"] else 0,
         "filter_keywords": fetcher.normalize_keywords(row.get("filter_keywords")),
         "filtered_count": filtered,
+        "speed_excluded": bool(row.get("speed_excluded")),
         "traffic_available": bool(row.get("traffic_updated_at")),
         "traffic_upload": upload,
         "traffic_download": download,
@@ -830,7 +832,7 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
     ceiling2 = db.get_int("sub_max_latency2", 1000)
     latency_labels = _latency_labels()
     idents = _node_names()
-    speeds = speedtest.latest_by_node()
+    speeds = speedtest.speed_map()
     items = []
     for node in nodes:
         per_group = results.get(node["id"], {})
@@ -839,7 +841,12 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
                    f"{builder.TAG_SEP.join(passed_idents)}{builder.NAME_SEP}{node['raw_name']}"
                    if passed_idents
                    else f"{node['airport_name']}{builder.NAME_SEP}未通过{builder.NAME_SEP}{node['raw_name']}")
-        node["display_name"] = display
+        speed = speeds.get(node["id"]) or {}
+        node["display_name"] = speedtest.apply_speed_prefix(
+            display, speed.get("marker") or speedtest.PENDING_PREFIX)
+        if speed:
+            speed["multi_mbps"] = speed.get("mbps")
+        node["speed"] = speed
         probe = latests.get(node["id"]) or {}
         targets = probe.get("targets") or {}
         node["latency_targets"] = {
@@ -868,7 +875,6 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
             for gid, res in per_group.items() if gid in groups
         }
         node["passed_idents_count"] = len(passed_idents)
-        node["speed"] = speeds.get(node["id"])
         items.append(node)
 
     hit_mode = (passed or "").strip().lower() in ("0", "no", "fail", "miss", "missed")
@@ -967,7 +973,10 @@ async def node_detail(node_id: int):
               "short": latency_labels["W"]["short"]},
     }
     node["latency"] = summary.get("fastest_ms") or summary.get("latency_ms") or (node["latency"] or 0)
-    node["speed"] = (speedtest.latest_by_node().get(node_id) or None)
+    state = speedtest.speed_map().get(node_id) or {}
+    if state:
+        state["multi_mbps"] = state.get("mbps")
+    node["speed"] = state
     node["speed_history"] = speedtest.node_history(node_id, 10)
     good = all(node["latency_targets"][t]["best"] is not None for t in ("G", "W"))
     node["publishable"] = bool(good)
@@ -1129,7 +1138,12 @@ SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "su
                 "sub_publish_interval_minutes",
                 "speed_enabled", "speed_connections", "speed_warmup_seconds",
                 "speed_sample_seconds", "speed_connect_timeout", "speed_total_timeout",
-                "speed_retry", "speed_auto_enabled", "speed_auto_interval_minutes",
+                "speed_retry", "speed_schedule_enabled", "speed_timezone",
+                "speed_window_start", "speed_window_end", "speed_schedule_every_days",
+                "speed_traffic_limit_mb", "speed_result_ttl_days",
+                "speed_grade_excellent", "speed_grade_good", "speed_grade_medium",
+                "speed_grade_poor",
+                "speed_auto_enabled", "speed_auto_interval_minutes",
                 "speed_auto_nodes"]
 
 
@@ -1155,6 +1169,25 @@ async def get_settings():
 @api.patch("/settings", dependencies=protected)
 async def update_settings(payload: SettingsIn):
     data = payload.model_dump(exclude_unset=True)
+    if any(k.startswith("speed_grade_") for k in data):
+        values = []
+        for key, default in (("excellent", 5), ("good", 2), ("medium", 1), ("poor", 0.25)):
+            raw = data.get(f"speed_grade_{key}", db.get(f"speed_grade_{key}", str(default)))
+            values.append(float(raw or default))
+        if not (values[0] > values[1] > values[2] > values[3] > 0):
+            raise HTTPException(status_code=400, detail="速度阈值必须满足 优 > 良 > 中 > 差 > 0")
+    if "speed_window_start" in data or "speed_window_end" in data:
+        start = data.get("speed_window_start", db.get("speed_window_start"))
+        end = data.get("speed_window_end", db.get("speed_window_end"))
+        try:
+            sh, sm = [int(x) for x in str(start).split(":")]
+            eh, em = [int(x) for x in str(end).split(":")]
+            if not (0 <= sh <= 23 and 0 <= sm <= 59 and 0 <= eh <= 23 and 0 <= em <= 59):
+                raise ValueError
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="测速窗口时间格式必须为 HH:MM")
+        if (eh * 60 + em) <= (sh * 60 + sm):
+            raise HTTPException(status_code=400, detail="测速窗口结束时间必须晚于开始时间")
     for key, value in data.items():
         if value is None:
             continue
@@ -1179,19 +1212,67 @@ async def update_settings(payload: SettingsIn):
         db.append_log("INFO", "下发",
                       "下发计划已更改，下次运行："
                       + (nxt.strftime("%Y-%m-%d %H:%M:%S") if nxt else "已清除"))
+    if "speed_window_start" in data or "speed_window_end" in data:
+        db.append_log("INFO", "测速",
+                      f"测速窗口已改为 {db.get('speed_window_start')}—{db.get('speed_window_end')}")
+    if any(k in data for k in ("speed_schedule_enabled", "speed_schedule_every_days")):
+        db.append_log("INFO", "测速",
+                      f"定时测速：{'启用' if db.get('speed_schedule_enabled') == '1' else '停用'}，"
+                      f"每 {db.get_int('speed_schedule_every_days', 1)} 天一次")
+    if "speed_traffic_limit_mb" in data:
+        db.append_log("INFO", "测速", f"单节点单次流量上限改为 {db.get_int('speed_traffic_limit_mb', 50)} MB")
     db.append_log("INFO", "设置", f"设置已更新，共 {len(data)} 项")
     return {"ok": True}
 
 
 # ---------------------------------------------------------------------------- download speed
+def _speed_guard():
+    if db.get("speed_enabled", "1") != "1":
+        raise HTTPException(status_code=403, detail="下载测速模块已停用")
+
+
 @api.get("/speed/overview", dependencies=protected)
 async def speed_overview():
-    return {**speedtest.overview(), "items": speedtest.list_sources()}
+    airports = [{"id": a["id"], "name": a["name"], "enabled": bool(a["enabled"]),
+                 "speed_excluded": bool(a.get("speed_excluded"))}
+                for a in fetcher.all_airports()]
+    return {**speedtest.overview(), "items": speedtest.list_sources(),
+            "queue": speed_queue.snapshot(), "schedule": schedule_state(),
+            "airports": airports}
 
 
 @api.get("/speed/sources", dependencies=protected)
 async def speed_sources():
     return {"items": speedtest.list_sources(), "settings": speedtest._settings()}
+
+
+@api.get("/speed/queue", dependencies=protected)
+async def speed_queue_status():
+    return {"queue": speed_queue.snapshot(), "schedule": schedule_state()}
+
+
+@api.get("/speed/nodes", dependencies=protected)
+async def speed_node_list():
+    states = speedtest.speed_map()
+    rows = db.rows(
+        """SELECT n.id, n.raw_name, a.name AS airport_name, a.enabled AS airport_enabled,
+                  a.speed_excluded
+           FROM nodes n JOIN airports a ON a.id=n.airport_id
+           WHERE a.enabled=1 ORDER BY a.name, n.raw_name"""
+    )
+    items = []
+    for row in rows:
+        state = states.get(row["id"]) or {}
+        base = f"{row['airport_name']}·{row['raw_name']}"
+        items.append({
+            "id": row["id"],
+            "name": speedtest.apply_speed_prefix(base,
+                                                 state.get("marker") or speedtest.PENDING_PREFIX),
+            "airport": row["airport_name"],
+            "excluded": bool(row["speed_excluded"]),
+            "speed": state,
+        })
+    return {"items": items}
 
 
 @api.patch("/speed/sources/{source_id}", dependencies=protected)
@@ -1231,20 +1312,52 @@ async def speed_source_check(payload: dict | None = None):
 
 @api.post("/speed/test", dependencies=protected)
 async def speed_test_node(payload: SpeedTestIn):
-    if db.get("speed_enabled", "1") != "1":
-        raise HTTPException(status_code=403, detail="下载测速模块已停用")
-    if manager.state.running:
-        raise HTTPException(status_code=409, detail="检测批次正在运行，请结束后再测下载速度")
+    _speed_guard()
     try:
-        run = await speedtest.run_node(payload.node_id, payload.source_ids)
+        job, _ = speed_queue.enqueue(payload.node_id, "manual",
+                                     source_ids=payload.source_ids)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc))
+    run = await speed_queue.wait(job, timeout=90)
     if not run:
         raise HTTPException(status_code=500, detail="测速结果写入失败")
     db.append_log("INFO", "测速",
-                  f"节点 #{payload.node_id} 下载测速：{run.get('status')}，"
-                  f"{run.get('sources_ok')}/{run.get('sources_total')} 源有效")
+                  f"节点 #{payload.node_id} 手动测速：{run.get('status')}，"
+                  f"{run.get('sources_ok', 0)}/{run.get('sources_total', 0)} 源有效")
     return run
+
+
+@api.post("/speed/run/all", dependencies=protected)
+async def speed_run_all():
+    _speed_guard()
+    ids = speedtest.eligible_node_ids()
+    result = speed_queue.enqueue_many(ids, "all")
+    db.append_log("INFO", "测速", f"全部重新测速：{result['created']}/{len(ids)} 个节点入队")
+    return {"ok": True, **result, "queue": speed_queue.snapshot()}
+
+
+@api.post("/speed/run/new", dependencies=protected)
+async def speed_run_new():
+    _speed_guard()
+    ids = speedtest.eligible_node_ids(new_only=True)
+    result = speed_queue.enqueue_many(ids, "new")
+    db.append_log("INFO", "测速", f"新节点测速：{result['created']}/{len(ids)} 个节点入队")
+    return {"ok": True, **result, "queue": speed_queue.snapshot()}
+
+
+@api.patch("/speed/airports/{airport_id}", dependencies=protected)
+async def speed_airport_exclusion(airport_id: int, payload: dict):
+    airport = db.row("SELECT id, name FROM airports WHERE id=?", (airport_id,))
+    if not airport:
+        raise HTTPException(status_code=404, detail="机场不存在")
+    if "speed_excluded" not in payload:
+        raise HTTPException(status_code=400, detail="缺少 speed_excluded")
+    excluded = bool(payload["speed_excluded"])
+    db.execute("UPDATE airports SET speed_excluded=?, updated_at=? WHERE id=?",
+               (1 if excluded else 0, db.now(), airport_id))
+    db.append_log("INFO", "测速",
+                  f"机场「{airport['name']}」{'已排除测速' if excluded else '已恢复测速'}")
+    return {"ok": True, "airport_id": airport_id, "speed_excluded": excluded}
 
 
 @api.get("/speed/node/{node_id}", dependencies=protected)
@@ -1393,8 +1506,17 @@ def _serve_sub(token: str | None, fmt: str | None, ua: str,
         fmt = "singbox"
     if fmt in ("v2ray", "base64", "txt"):
         fmt = "base64"
+    speed_raw = None
+    if raw_query:
+        repaired = _deep_unescape(raw_query)
+        parsed = urllib.parse.parse_qs(repaired)
+        speed_raw = (parsed.get("speed") or [None])[0]
     try:
-        fmt, content = builder.read(fmt)
+        levels = builder.parse_speed_levels(speed_raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        fmt, content = builder.read(fmt, levels)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="订阅尚未生成")
     media = {"clash": "text/yaml; charset=utf-8", "singbox": "application/json; charset=utf-8",
