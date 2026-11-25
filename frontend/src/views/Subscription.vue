@@ -30,22 +30,14 @@ function pick(paths) {
 }
 
 const shownLinks = ref('queryless')
-const speedFormat = ref('clash')
-const speedLevels = ref(['excellent', 'good'])
+const speedExcludeLevels = ref([])
 const SPEED_OPTIONS = [
-  { value: 'excellent', label: '🟣 优', desc: '≥ 5 MB/s' },
-  { value: 'good', label: '🟢 良', desc: '≥ 2 MB/s' },
-  { value: 'medium', label: '🔵 中', desc: '≥ 1 MB/s' },
-  { value: 'poor', label: '🟠 差', desc: '≥ 256 KB/s' },
-  { value: 'danger', label: '🔴 危', desc: '< 256 KB/s' }
+  { value: 'excellent', label: '优', desc: '≥ 5 MB/s', color: '#8B5CF6' },
+  { value: 'good', label: '良', desc: '≥ 2 MB/s', color: '#16A34A' },
+  { value: 'medium', label: '中', desc: '≥ 1 MB/s', color: '#2563EB' },
+  { value: 'poor', label: '差', desc: '≥ 256 KB/s', color: '#EA580C' },
+  { value: 'danger', label: '危', desc: '< 256 KB/s', color: '#DC2626' }
 ]
-const speedFilterLink = computed(() => {
-  if (!info.value || !speedLevels.value.length) return ''
-  const token = info.value.settings?.sub_token || ''
-  const query = speedLevels.value.map(v => encodeURIComponent(v)).join(',')
-  return `${info.value.base_url}/sub/all/${token}/${speedFormat.value}?speed=${query}`
-})
-
 const LOON_REASON = {
   protocol: '协议不支持',
   cipher: '加密方式不支持',
@@ -66,11 +58,14 @@ const filterHint = computed(() => {
   const f = info.value && info.value.filter
   if (!f) return null
   return {
-    active: (f.keywords || []).length > 0,
+    active: !!f.active,
     keywords: f.keywords || [],
+    speedLevels: f.speed_levels || [],
     eligible: f.eligible || 0,
     kept: f.kept || 0,
     dropped: f.dropped || 0,
+    keywordDropped: f.keyword_dropped || 0,
+    speedDropped: f.speed_dropped || 0,
     sample: f.sample || [],
     nodes: f.nodes || [],
     filtered: f.filtered || [],
@@ -85,6 +80,8 @@ async function load() {
   try {
     info.value = await api.get('/api/subscription')
     form.value = { ...info.value.settings, regenerate_token: false }
+    const levels = (form.value.sub_filter_speed_levels || '').split(',').filter(Boolean)
+    speedExcludeLevels.value = levels
   } catch (e) { ElMessage.error(e.message) }
   finally { loading.value = false }
 }
@@ -106,6 +103,7 @@ async function save() {
       sub_token: form.value.sub_token,
       regenerate_token: form.value.regenerate_token,
       sub_filter_keywords: form.value.sub_filter_keywords || '',
+      sub_filter_speed_levels: speedExcludeLevels.value.join(','),
     })
     ElMessage.success('订阅设置已保存')
     form.value.regenerate_token = false
@@ -146,7 +144,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">订阅输出</h2>
     <div class="np-page-desc">
-      系统只生成一个统一订阅 <span class="np-mono">/sub/all</span>；访问需要 Token，内容不暴露机场原始 URL。下发关键词过滤是输出层的唯一手动口子。
+      系统只生成一个统一订阅 <span class="np-mono">/sub/all</span>；访问需要 Token，内容不暴露机场原始 URL。下发关键词与测速标签过滤是输出层的手动口子；测速标签勾选即排除。
     </div>
 
     <el-row :gutter="16">
@@ -191,52 +189,36 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
           </div>
         </div>
 
-        <!-- 客户端独立速度筛选 -->
-        <div class="np-card" style="padding:20px;margin-top:16px" v-if="info">
-          <div class="np-section-title">
-            客户端速度筛选
-            <div class="np-flex" />
-            <el-select v-model="speedFormat" size="small" style="width:150px">
-              <el-option label="Clash / Mihomo" value="clash" />
-              <el-option label="sing-box" value="singbox" />
-              <el-option label="通用 Base64" value="base64" />
-              <el-option label="Loon" value="loon" />
-            </el-select>
-          </div>
-          <div class="np-muted" style="margin-bottom:10px">
-            每个客户端使用自己的筛选 URL，互不影响。只输出“最近一次有效测速”命中等级的节点；待测速、机场排除、测速异常和全部源失败不会被归入任何等级。
-          </div>
-          <div class="speed-filter-grid" style="display:flex;flex-wrap:wrap;gap:6px 18px">
-            <el-checkbox-group v-model="speedLevels">
-              <el-checkbox v-for="opt in SPEED_OPTIONS" :key="opt.value" :value="opt.value">
-                {{ opt.label }} <span class="np-muted">{{ opt.desc }}</span>
-              </el-checkbox>
-            </el-checkbox-group>
-          </div>
-          <div class="link-row" style="margin-top:8px">
-            <div class="link-label">筛选地址</div>
-            <div class="link-control">
-              <el-input :model-value="prettyLink(speedFilterLink)" readonly size="small"
-                        :type="isMobile ? 'textarea' : 'text'" :autosize="{ minRows: 1, maxRows: 2 }" />
-              <el-button class="link-copy" :disabled="!speedFilterLink" @click="copy(speedFilterLink)">复制</el-button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 当前订阅状态 + 关键词过滤（合并成一个小板块） -->
+        <!-- 当前订阅状态 + 下发过滤（合并成一个板块） -->
         <div class="np-card" style="padding:20px;margin-top:16px">
-          <div class="np-section-title">当前订阅状态</div>
+          <div class="np-section-title">当前订阅状态与下发过滤</div>
           <el-descriptions v-if="info" :column="isMobile ? 1 : 3" size="small" border>
             <el-descriptions-item label="节点数">{{ info.meta.nodes || 0 }}</el-descriptions-item>
             <el-descriptions-item label="最近生成">{{ formatTs(info.meta.updated_at) }}</el-descriptions-item>
             <el-descriptions-item label="名称">{{ info.meta.name }}</el-descriptions-item>
-            <el-descriptions-item v-if="filterHint" label="关键词过滤">
+            <el-descriptions-item v-if="filterHint" label="下发过滤">
               <span v-if="!filterHint.active" class="np-muted">未设置（不过滤，合格节点全部下发）</span>
               <span v-else>
-                命中 <b>{{ filterHint.dropped }}</b> 个 / 合格 {{ filterHint.eligible }} 个，实际下发 {{ filterHint.kept }} 个
+                排除 <b>{{ filterHint.dropped }}</b> 个 / 合格 {{ filterHint.eligible }} 个，实际下发 {{ filterHint.kept }} 个
+                <span class="np-muted" style="margin-left:6px">
+                  关键词 {{ filterHint.keywordDropped }} · 速度 {{ filterHint.speedDropped }}
+                </span>
               </span>
             </el-descriptions-item>
           </el-descriptions>
+
+          <div class="np-filter-row">
+            <div class="np-filter-head">
+              <b>测速标签排除</b>
+              <span class="np-muted">勾选即排除该等级节点；待测速、机场排除、测速异常、全源失败不参与等级排除</span>
+            </div>
+            <el-checkbox-group v-model="speedExcludeLevels" class="speed-filter-grid">
+              <el-checkbox v-for="opt in SPEED_OPTIONS" :key="opt.value" :value="opt.value">
+                <span class="np-speed-dot" :style="{ background: opt.color }" />{{ opt.label }}
+                <span class="np-muted">{{ opt.desc }}</span>
+              </el-checkbox>
+            </el-checkbox-group>
+          </div>
 
           <div class="np-filter-row">
             <div class="np-filter-head">
@@ -247,9 +229,9 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
                       class="np-filter-box np-filter-compact"
                       placeholder="例如：剩余流量 官网，过期 某机场" />
             <div class="np-filter-foot">
-              <span class="np-muted">命中机场名 / 节点名 / 服务器地址的合格节点不会进入订阅，也不影响机场检测与评分。保存后点「立即重新生成」或等下次定时下发生效。</span>
+              <span class="np-muted">命中机场名 / 节点名 / 服务器地址的节点，或勾选速度等级对应的节点，不会进入订阅；不影响机场检测与评分。保存后点「立即重新生成」或等下次定时下发生效。</span>
               <div class="np-flex" />
-              <el-button size="small" :loading="saving" @click="save">保存过滤关键词</el-button>
+              <el-button size="small" :loading="saving" @click="save">保存过滤规则</el-button>
             </div>
           </div>
 
@@ -289,16 +271,18 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
               <div class="np-node-item is-hit" v-for="(item, i) in filteredNodes" :key="'f' + i">
                 <span class="np-node-idx">{{ i + 1 }}</span>
                 <span class="np-node-name" :title="item.name">{{ item.name }}</span>
-                <span class="np-node-kw" :title="'命中关键词：' + item.keyword">{{ item.keyword }}</span>
+                <span class="np-node-kw" :title="(item.reason_type === 'speed' ? '速度等级：' : '命中关键词：') + item.reason">
+                  {{ item.reason_type === 'speed' ? '速度 ' + item.reason : '关键词 ' + item.reason }}
+                </span>
               </div>
             </div>
             <div v-else class="np-empty">
-              {{ filterHint && filterHint.active ? '当前没有节点命中关键词' : '未设置关键词过滤' }}
+              {{ filterHint && filterHint.active ? '当前没有节点被下发过滤排除' : '未设置下发过滤' }}
             </div>
           </div>
 
           <div class="np-muted" style="margin-top:10px">
-            列表按实时检测结果与当前关键词计算：命中项显示触发的关键词，方便校正写法。
+            列表按实时检测结果与当前过滤规则计算：被过滤项显示触发的速度等级或关键词，方便校正。
           </div>
         </div>
       </el-col>

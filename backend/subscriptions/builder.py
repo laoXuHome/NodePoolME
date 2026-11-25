@@ -145,6 +145,41 @@ def filter_keywords() -> list[str]:
     return keys
 
 
+def speed_filter_levels() -> list[str]:
+    """下发速度标签排除：返回规范化等级，空表示不排除。"""
+    raw = db.get("sub_filter_speed_levels") or ""
+    if not str(raw).strip():
+        return []
+    try:
+        levels = parse_speed_levels(raw) or set()
+    except ValueError:
+        return []
+    return [g for g in speedtest.GRADE_DEFS if g in levels]
+
+
+def apply_speed_filter(nodes: list[dict]) -> tuple[list[dict], list[dict]]:
+    """勾选等级即排除对应速度标签的节点；仅作用于最近一次有效测速结果。"""
+    levels = set(speed_filter_levels())
+    if not levels:
+        return nodes, []
+    kept: list[dict] = []
+    dropped: list[dict] = []
+    for node in nodes:
+        state = node.get("speed") or {}
+        grade = state.get("grade") if state.get("status") == "ok" else None
+        if grade in levels:
+            meta = speedtest.GRADE_DEFS.get(grade) or {}
+            label = f"{meta.get('emoji', '')} {meta.get('label', grade)}".strip()
+            dropped.append({
+                "id": node.get("id"), "name": node.get("display_name"),
+                "airport_id": node.get("airport_id"), "keyword": None,
+                "reason_type": "speed", "reason": label, "grade": grade,
+            })
+        else:
+            kept.append(node)
+    return kept, dropped
+
+
 def apply_name_filter(nodes: list[dict]) -> tuple[list[dict], list[dict]]:
     """按关键词剔除不适合下发的节点（机场名、节点名、服务器地址任一命中即剔除）。"""
     keys = filter_keywords()
@@ -159,7 +194,8 @@ def apply_name_filter(nodes: list[dict]) -> tuple[list[dict], list[dict]]:
         hit = next((k for k in keys if k in haystack), None)
         if hit:
             dropped.append({"id": node.get("id"), "name": node.get("display_name"),
-                            "airport_id": node.get("airport_id"), "keyword": hit})
+                            "airport_id": node.get("airport_id"), "keyword": hit,
+                            "reason_type": "keyword", "reason": hit})
         else:
             kept.append(node)
     return kept, dropped
@@ -776,14 +812,22 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
     cycle early publishes exactly the progress achieved so far.
     """
     nodes, stats = collect_nodes(batch_id)
-    out_nodes, dropped = apply_name_filter(nodes)
-    if dropped:
-        sample = "、".join(str(d["name"]) for d in dropped[:3])
+    keyword_kept, keyword_dropped = apply_name_filter(nodes)
+    out_nodes, speed_dropped = apply_speed_filter(keyword_kept)
+    dropped = keyword_dropped + speed_dropped
+    if keyword_dropped:
+        sample = "、".join(str(d["name"]) for d in keyword_dropped[:3])
         db.append_log("INFO", "下发",
-                      f"关键词过滤剔除 {len(dropped)} 个节点（{sample}"
-                      f"{'…' if len(dropped) > 3 else ''}），评分统计仍按 {len(nodes)} 个达标节点计算")
+                      f"关键词过滤剔除 {len(keyword_dropped)} 个节点（{sample}"
+                      f"{'…' if len(keyword_dropped) > 3 else ''}），评分统计仍按 {len(nodes)} 个达标节点计算")
+    if speed_dropped:
+        sample = "、".join(str(d["name"]) for d in speed_dropped[:3])
+        db.append_log("INFO", "下发",
+                      f"速度标签排除 {len(speed_dropped)} 个节点（{sample}"
+                      f"{'…' if len(speed_dropped) > 3 else ''}），评分统计仍按 {len(nodes)} 个达标节点计算")
     stats = {**stats, "filtered": len(dropped), "after_filter": len(out_nodes),
-             "filter_hits": dropped[:10]}
+             "keyword_filtered": len(keyword_dropped),
+             "speed_filtered": len(speed_dropped), "filter_hits": dropped[:10]}
     loon_kept, loon_skipped = loon_plan(out_nodes)
     stats["loon"] = {"available": len(loon_kept), "excluded": sum(loon_skipped.values()),
                      "reasons": loon_skipped}
@@ -795,7 +839,7 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
     previous = meta()
     if not out_nodes and previous.get("nodes"):
         db.append_log("WARN", "下发",
-                      "本批次没有可下发的节点（已达标的节点可能全部被关键词过滤），保留原有订阅不变")
+                      "本批次没有可下发的节点（已达标的节点可能全部被下发过滤排除），保留原有订阅不变")
         try:
             # 仍按未过滤的达标节点记录快照，保证下拉/评分曲线不因过滤出现断点
             record_share_snapshot(nodes, batch_id, reason, total_nodes=stats.get("total"))

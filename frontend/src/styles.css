@@ -1193,6 +1193,9 @@ tr.is-off .np-score-cell b { color: #b0b5bf; }
 .np-filter-head b { font-weight: 700; }
 .np-filter-head .np-muted { font-size: 12px; }
 .np-filter-compact textarea { min-height: 54px; font-size: 12.8px; line-height: 1.7; }
+.speed-filter-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(112px, 1fr)); gap:8px 10px; }
+.speed-filter-grid .el-checkbox { margin-right:0; }
+.np-speed-dot { display:inline-block; width:9px; height:9px; margin-right:4px; border-radius:50%; vertical-align:-1px; }
 .np-filter-foot {
   display: flex;
   align-items: center;

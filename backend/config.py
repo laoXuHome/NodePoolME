@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NodePoolME"
-VERSION = "1.7.0"
+VERSION = "1.7.1"
 
 DATA_DIR = Path(os.getenv("NODEPOOL_DATA_DIR", "./data")).resolve()
 CONFIG_DIR = Path(os.getenv("NODEPOOL_CONFIG_DIR", str(DATA_DIR / "config"))).resolve()
@@ -106,6 +106,7 @@ DEFAULT_SETTINGS = {
     "sub_publish_mode": "time",              # time = 每天固定时刻 / interval = 固定间隔
     "sub_publish_interval_minutes": "180",
     "sub_filter_keywords": "",
+    "sub_filter_speed_levels": "",
     "dispersion_mask": "24",
     "speed_enabled": "1",
     "speed_primary_sources": "3",

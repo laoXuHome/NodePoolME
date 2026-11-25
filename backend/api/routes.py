@@ -1064,18 +1064,27 @@ async def subscription_info(request: Request):
     token = auth.sub_token()
     # 只读提示：当前关键词过滤命中了多少个已筛选出的合格节点（不影响检测与评分）
     keywords = builder.filter_keywords()
+    speed_levels = builder.speed_filter_levels()
     eligible, _ = builder.collect_nodes()
-    kept, dropped = builder.apply_name_filter(eligible)
+    keyword_kept, keyword_dropped = builder.apply_name_filter(eligible)
+    kept, speed_dropped = builder.apply_speed_filter(keyword_kept)
+    dropped = keyword_dropped + speed_dropped
     loon_kept, loon_skipped = builder.loon_plan(kept)
     filter_hint = {
         "keywords": keywords,
+        "speed_levels": speed_levels,
         "eligible": len(eligible),
         "kept": len(kept),
         "dropped": len(dropped),
+        "keyword_dropped": len(keyword_dropped),
+        "speed_dropped": len(speed_dropped),
+        "active": bool(keywords or speed_levels),
         "sample": [d.get("name") for d in dropped[:5]],
-        # 订阅输出页的两个列表：实际下发节点 / 被关键词命中剔除的节点
+        # 订阅输出页的两个列表：实际下发节点 / 被下发过滤剔除的节点
         "nodes": [n.get("display_name") for n in kept],
-        "filtered": [{"name": d.get("name"), "keyword": d.get("keyword")} for d in dropped],
+        "filtered": [{"name": d.get("name"), "keyword": d.get("keyword"),
+                      "reason": d.get("reason"), "reason_type": d.get("reason_type"),
+                      "grade": d.get("grade")} for d in dropped],
         "loon": {"available": len(loon_kept), "excluded": sum(loon_skipped.values()),
                  "reasons": loon_skipped},
     }
@@ -1085,6 +1094,7 @@ async def subscription_info(request: Request):
             "sub_name": db.get("sub_name"),
             "sub_token": token,
             "sub_filter_keywords": db.get("sub_filter_keywords") or "",
+            "sub_filter_speed_levels": ",".join(builder.speed_filter_levels()),
         },
         "meta": builder.meta(),
         "links": {
@@ -1117,6 +1127,14 @@ async def update_subscription(payload: SubSettings):
             db.set_setting("sub_token", token)
     if "sub_filter_keywords" in payload.model_fields_set:
         db.set_setting("sub_filter_keywords", (payload.sub_filter_keywords or "").strip())
+    if "sub_filter_speed_levels" in payload.model_fields_set:
+        raw = (payload.sub_filter_speed_levels or "").strip()
+        try:
+            levels = builder.parse_speed_levels(raw) or set()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        order = ("excellent", "good", "medium", "poor", "danger")
+        db.set_setting("sub_filter_speed_levels", ",".join(g for g in order if g in levels))
     return {"ok": True}
 
 

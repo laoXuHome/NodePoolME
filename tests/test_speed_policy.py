@@ -219,3 +219,58 @@ def test_new_node_test_includes_expired_results():
     _valid_run(node_id, 3.0, finished_at="2026-11-01 10:00:00")
     assert speedtest.eligible_node_ids(new_only=True) == [node_id]
     assert node_id in speedtest.expired_node_ids()
+
+
+def test_speed_label_exclusion_is_global_and_checked_means_drop():
+    _, fast = _node("香港09")
+    _, slow = _node("香港10")
+    _valid_run(fast, 6.0)
+    _valid_run(slow, 0.1)
+    nodes = [
+        {"id": fast, "display_name": "🟣测速机场·香港09", "airport_id": 1,
+         "speed": {"status": "ok", "grade": "excellent"}},
+        {"id": slow, "display_name": "🔴测速机场·香港10", "airport_id": 1,
+         "speed": {"status": "ok", "grade": "danger"}},
+        {"id": 999, "display_name": "⚠️测速机场·异常", "airport_id": 1,
+         "speed": {"status": "error", "grade": "excellent"}},
+    ]
+    db.set_setting("sub_filter_speed_levels", "优,危")
+    try:
+        assert builder.speed_filter_levels() == ["excellent", "danger"]
+        kept, dropped = builder.apply_speed_filter(nodes)
+        assert [n["id"] for n in kept] == [999]
+        assert {d["grade"] for d in dropped} == {"excellent", "danger"}
+        assert all(d["reason_type"] == "speed" for d in dropped)
+    finally:
+        db.set_setting("sub_filter_speed_levels", "")
+
+
+def test_speed_exclusion_ignores_pending_and_failed_states():
+    _, node_id = _node("香港11")
+    nodes = [{"id": node_id, "display_name": "待测速测速机场·香港11", "airport_id": 1,
+              "speed": {"status": "pending", "grade": None}}]
+    db.set_setting("sub_filter_speed_levels", "excellent")
+    try:
+        kept, dropped = builder.apply_speed_filter(nodes)
+        assert kept and not dropped
+    finally:
+        db.set_setting("sub_filter_speed_levels", "")
+
+
+def test_publish_applies_speed_exclusion(monkeypatch, tmp_path):
+    _, node_id = _node("香港12")
+    _valid_run(node_id, 6.0)
+    state = speedtest.speed_map()[node_id]
+    entry = builder._snapshot_entry(node_id, "🟣测速机场·香港12", state)
+    assert entry
+    monkeypatch.setattr(builder.config, "SUB_DIR", tmp_path)
+    monkeypatch.setattr(builder, "collect_nodes", lambda batch_id=None: ([entry], {"total": 1}))
+    db.set_setting("sub_filter_keywords", "")
+    db.set_setting("sub_filter_speed_levels", "excellent")
+    try:
+        result = builder.publish(reason="speed-test")
+        assert result["stats"]["speed_filtered"] == 1
+        assert result["stats"]["keyword_filtered"] == 0
+        assert result["stats"]["after_filter"] == 0
+    finally:
+        db.set_setting("sub_filter_speed_levels", "")

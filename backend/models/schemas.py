@@ -64,6 +64,8 @@ class SubSettings(BaseModel):
     sub_token: Optional[str] = None
     regenerate_token: bool = False
     sub_filter_keywords: Optional[str] = Field(default=None, max_length=4000)
+    # 固定标签排除：excellent,good,medium,poor,danger，勾选表示排除该等级
+    sub_filter_speed_levels: Optional[str] = Field(default=None, max_length=120)
 
 
 class SettingsIn(BaseModel):
