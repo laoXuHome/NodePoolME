@@ -667,8 +667,8 @@ async def _test_single_node(node_id: int, group_ids: list[int] | None = None,
 
 
 async def fetch_now(airport_id: int, trigger: str = "manual") -> dict:
-    if state.running:
-        return {"ok": False, "error": "已有检测批次在运行，请完成后重试"}
+    if state.running or gate.owner:
+        return {"ok": False, "error": "检测或下载测速正在运行，请完成后重试"}
     airport = fetcher.airport_by_id(airport_id)
     if not airport:
         return {"ok": False, "error": "机场不存在"}
@@ -683,7 +683,7 @@ async def fetch_now(airport_id: int, trigger: str = "manual") -> dict:
 
 # ---------------------------------------------------------------------------- scheduler jobs
 async def job_fetch() -> None:
-    if state.fetching or state.running:
+    if state.fetching or state.running or gate.owner:
         return
     due = fetcher.due_airports()
     if not due:

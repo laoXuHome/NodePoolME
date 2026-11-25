@@ -80,7 +80,8 @@ async function loadSpeed() {
     const [settings, overview, nodes] = await Promise.all([
       api.get('/api/settings'), api.get('/api/speed/overview'), api.get('/api/speed/nodes')
     ])
-    speedForm.value = { ...settings.settings }
+    speedForm.value = { ...settings.settings,
+                        speed_parallel_nodes: settings.settings.speed_parallel_nodes ?? 4 }
     speedOverview.value = overview
     speedSources.value = overview.items || []
     speedAirports.value = overview.airports || []
@@ -102,6 +103,7 @@ async function saveSpeed() {
       speed_traffic_limit_mb: speedNumber('speed_traffic_limit_mb'),
       speed_result_ttl_days: speedNumber('speed_result_ttl_days'),
       speed_connections: speedNumber('speed_connections'),
+      speed_parallel_nodes: speedNumber('speed_parallel_nodes'),
       speed_warmup_seconds: speedNumber('speed_warmup_seconds'),
       speed_sample_seconds: speedNumber('speed_sample_seconds'),
       speed_connect_timeout: speedNumber('speed_connect_timeout'),
@@ -350,8 +352,11 @@ onUnmounted(() => {
           <section class="speed-config-panel">
             <div class="speed-subhead">
               测速参数
-              <span class="speed-subhead-note">独立于节点检测 · 连接与采样单位：秒</span>
+              <span class="speed-subhead-note">独立于节点检测 · 并行节点 / 每源连接数</span>
             </div>
+            <el-form-item label="并行节点">
+              <el-input-number v-model="speedForm.speed_parallel_nodes" :min="1" :max="8" class="speed-num" />
+            </el-form-item>
             <el-form-item label="并发连接">
               <el-input-number v-model="speedForm.speed_connections" :min="1" :max="8" class="speed-num" />
             </el-form-item>
@@ -364,7 +369,7 @@ onUnmounted(() => {
             <el-form-item label="连接超时">
               <el-input-number v-model="speedForm.speed_connect_timeout" :min="3" :max="30" class="speed-num" />
             </el-form-item>
-            <el-form-item label="整轮超时">
+            <el-form-item label="单源超时">
               <el-input-number v-model="speedForm.speed_total_timeout" :min="8" :max="60" class="speed-num" />
             </el-form-item>
             <el-form-item label="失败重试">

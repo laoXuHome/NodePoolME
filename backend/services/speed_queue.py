@@ -50,10 +50,19 @@ def _clock(value: str | None, fallback: str) -> dtime:
 def window_bounds(now: datetime | None = None) -> tuple[datetime, datetime, datetime]:
     tz = _tz()
     current = (now or datetime.now(tz)).astimezone(tz)
-    start = datetime.combine(current.date(), _clock(db.get("speed_window_start"), "18:00"), tz)
-    end = datetime.combine(current.date(), _clock(db.get("speed_window_end"), "23:30"), tz)
-    if end <= start:
-        end += timedelta(days=1)
+    start_time = _clock(db.get("speed_window_start"), "18:00")
+    end_time = _clock(db.get("speed_window_end"), "23:30")
+    if end_time > start_time:
+        start = datetime.combine(current.date(), start_time, tz)
+        end = datetime.combine(current.date(), end_time, tz)
+    elif current.time() < end_time:
+        # After midnight, still inside yesterday's overnight window.
+        start = datetime.combine((current - timedelta(days=1)).date(), start_time, tz)
+        end = datetime.combine(current.date(), end_time, tz)
+    else:
+        # Before midnight, the window ends on the next calendar day.
+        start = datetime.combine(current.date(), start_time, tz)
+        end = datetime.combine((current + timedelta(days=1)).date(), end_time, tz)
     return current, start, end
 
 
@@ -412,14 +421,14 @@ class SpeedQueue:
                 current, start, end = window_bounds()
                 if not (start <= current < end):
                     continue
+                window_date = start.date().isoformat()
                 last = db.get("speed_schedule_last_date") or ""
-                today = current.date().isoformat()
-                if last == today:
+                if last == window_date:
                     continue
                 every = max(1, min(db.get_int("speed_schedule_every_days", 1), 30))
                 if last:
                     try:
-                        gap = (current.date() - datetime.strptime(last, "%Y-%m-%d").date()).days
+                        gap = (start.date() - datetime.strptime(last, "%Y-%m-%d").date()).days
                         if gap < every:
                             continue
                     except ValueError:
@@ -427,17 +436,17 @@ class SpeedQueue:
                 node_ids = speedtest.eligible_node_ids()
                 if not node_ids:
                     db.append_log("INFO", "测速", "定时计划没有可测节点")
-                    db.set_setting("speed_schedule_last_date", today)
+                    db.set_setting("speed_schedule_last_date", window_date)
                     continue
                 left = max(time.time(), current.timestamp())
                 right = end.timestamp()
                 if right - left < 5:
                     continue
-                db.set_setting("speed_schedule_last_date", today)
                 result = self.enqueue_many(node_ids, "schedule", spread=(left, right))
+                db.set_setting("speed_schedule_last_date", window_date)
                 db.append_log("INFO", "测速",
                               f"定时计划已创建：{len(node_ids)} 个节点，"
-                              f"{current.strftime('%H:%M')}—{end.strftime('%H:%M')} "
+                              f"{start.strftime('%H:%M')}—{end.strftime('%H:%M')} "
                               f"随机分散，新建 {result['created']}，跳过 {result['duplicate']}")
             except asyncio.CancelledError:
                 raise

@@ -26,6 +26,8 @@ CONTENT_RANGE_RE = re.compile(r"bytes\s+(\d+)-(\d+)/(\d+|\*)", re.I)
 PROBE_BYTES = 256 * 1024
 MIN_SOURCE_SIZE = 8 * 1024 * 1024
 SPEED_UA = "NodePoolME-Speedtest/1.0"
+SOURCE_RECHECK_SECONDS = 300
+SOURCE_RECENT_CHECK_SECONDS = 60
 
 
 @dataclass
@@ -91,6 +93,7 @@ def now() -> str:
 
 SPEED_MARKERS = ("🟣", "🟢", "🔵", "🟠", "🔴", "●", "⚪", "⚠️", "🚫")
 PENDING_PREFIX = "待测速"
+PENDING_MARKER = PENDING_PREFIX
 GRADE_DEFS = {
     "excellent": {"label": "优", "emoji": "🟣", "color": "#8B5CF6", "key": "excellent"},
     "good": {"label": "良", "emoji": "🟢", "color": "#16A34A", "key": "good"},
@@ -148,7 +151,7 @@ def strip_speed_prefix(name: str | None) -> str:
     return base
 
 
-def apply_speed_prefix(name: str | None, marker: str = PENDING_PREFIX) -> str:
+def apply_speed_prefix(name: str | None, marker: str = PENDING_MARKER) -> str:
     return f"{marker}{strip_speed_prefix(name)}"
 
 
@@ -368,6 +371,27 @@ async def check_sources(source_ids: list[int] | None = None) -> list[dict]:
     return [asdict(c) for c in checks]
 
 
+def _source_check_age_seconds(source: dict) -> float | None:
+    age = _run_age_days(source.get("last_check_at"))
+    return None if age is None else age * 86400
+
+
+async def _confirm_source_failure(source: dict) -> bool:
+    """Confirm a node-side source error with a direct source check.
+
+    A proxy can return 200/403 for a Range request while the source itself is
+    healthy; that must not permanently remove the source from the pool. Only a
+    failed direct check is allowed to flip ``speed_sources.health`` to fail.
+    """
+    if source.get("health") == "fail":
+        return True
+    age = _source_check_age_seconds(source)
+    if age is not None and age < SOURCE_RECENT_CHECK_SECONDS:
+        return False
+    checks = await check_sources([int(source["id"])])
+    return bool(checks and not checks[0].get("ok"))
+
+
 async def _worker(client: httpx.AsyncClient, url: str, window: tuple[int, int],
                   warmup: float, sample: float, conn_timeout: float,
                   total_deadline: float, max_bytes: int | None = None) -> WorkerSample:
@@ -562,8 +586,12 @@ async def _ensure_sources(primary: int) -> list[dict]:
     healthy = select_sources(primary + 2)
     if len(healthy) >= primary:
         return healthy[:primary]
-    unchecked = [s for s in list_sources(enabled_only=True)
-                 if s["health"] != "fail" and s["id"] not in {h["id"] for h in healthy}][:8]
+    sources = list_sources(enabled_only=True)
+    unchecked = [
+        s for s in sources
+        if s["id"] not in {h["id"] for h in healthy}
+        and ((age := _source_check_age_seconds(s)) is None or age >= SOURCE_RECHECK_SECONDS)
+    ][:8]
     if unchecked:
         await check_sources([s["id"] for s in unchecked])
     return select_sources(primary + 2)
@@ -652,7 +680,9 @@ async def run_node(node_id: int, source_ids: list[int] | None = None,
                 # A node that cannot open the proxy tunnel will not recover on retry.
                 if result.error_type == "node_connect":
                     break
-                budget = min(remaining, max(256 * 1024, remaining))
+                # Keep the source's original slice on retry. Resetting to the whole
+                # remaining node budget lets one failed source starve every later source.
+                budget = min(budget, remaining)
             if result is None:
                 break
             if result.ok:
@@ -661,12 +691,13 @@ async def run_node(node_id: int, source_ids: list[int] | None = None,
                 node_errors += 1
             else:
                 source_errors += 1
-                db.execute("UPDATE speed_sources SET health='fail', last_error=?, "
-                           "updated_at=? WHERE id=?",
+                confirmed = await _confirm_source_failure(source)
+                db.execute("UPDATE speed_sources SET last_error=?, updated_at=? WHERE id=?",
                            (result.message or result.error_type, now(), source["id"]))
                 db.append_log("WARN", "测速",
                               f"节点 #{node_id} 测速源「{source['name']}」失败："
-                              f"{result.error_type or 'error'} {result.message or ''}".strip())
+                              f"{result.error_type or 'error'} {result.message or ''}"
+                              f"{'（直连确认源故障）' if confirmed else '（源直连正常，按节点侧失败处理）'}")
             if node_errors >= 2:
                 break
         sources_ok = len(valid)
@@ -801,8 +832,8 @@ def speed_map() -> dict[int, dict]:
         node_id = node["id"]
         if excluded.get(node["airport_id"]):
             out[node_id] = {
-                "status": "excluded", "marker": "⚪", "label": "机场已排除测速",
-                "grade": None, "grade_label": "", "emoji": "⚪", "color": "#D1D5DB",
+                "status": "excluded", "marker": "●", "label": "机场已排除测速",
+                "grade": None, "grade_label": "", "emoji": "●", "color": "#9CA3AF",
                 "mb_per_s": None, "mbps": None,
             }
             continue
@@ -829,9 +860,9 @@ def speed_map() -> dict[int, dict]:
         last_status = last_run.get("status")
         if run:
             base = {
-                "status": "stale", "marker": PENDING_PREFIX,
+                "status": "stale", "marker": PENDING_MARKER,
                 "label": f"测速结果已过期（{round(age or 0, 1)} 天前）",
-                "grade": None, "grade_label": "", "emoji": "", "color": "#9CA3AF",
+                "grade": None, "grade_label": "", "emoji": "", "color": "#D1D5DB",
                 "mb_per_s": run.get("mb_per_s"), "mbps": run.get("multi_mbps"),
                 "finished_at": run.get("finished_at"), "age_days": round(age or 0, 2),
                 "sources_ok": run.get("sources_ok"), "sources_total": run.get("sources_total"),
@@ -848,9 +879,9 @@ def speed_map() -> dict[int, dict]:
                     "grade": None, "grade_label": "", "emoji": "⚠️",
                     "color": "#F59E0B", "mb_per_s": None, "mbps": None}
         else:
-            base = {"status": "pending", "marker": PENDING_PREFIX,
+            base = {"status": "pending", "marker": PENDING_MARKER,
                     "label": "尚未取得有效测速结果", "grade": None,
-                    "grade_label": "", "emoji": "", "color": "#9CA3AF",
+                    "grade_label": "", "emoji": "", "color": "#D1D5DB",
                     "mb_per_s": None, "mbps": None}
         base["last_run_status"] = last_status
         base["last_message"] = last_run.get("message")
@@ -893,7 +924,8 @@ def node_history(node_id: int, limit: int = 20) -> list[dict]:
 
 def overview() -> dict:
     sources = list_sources()
-    healthy = [s for s in sources if s["health"] == "ok" and s["enabled"]]
+    healthy = [s for s in sources
+               if s["enabled"] and s["health"] == "ok" and s["range_ok"]]
     runs = db.rows("SELECT status, confidence FROM speed_runs "
                    "WHERE started_at >= datetime('now','localtime','-1 day')")
     return {
@@ -901,7 +933,7 @@ def overview() -> dict:
         "sources_enabled": len([s for s in sources if s["enabled"]]),
         "sources_healthy": len(healthy),
         "runs_24h": len(runs),
-        "runs_ok_24h": len([r for r in runs if r["status"] == "ok"]),
+        "runs_ok_24h": len([r for r in runs if r["status"] in ("ok", "partial")]),
         "settings": _settings(),
         "grades": GRADE_DEFS,
     }

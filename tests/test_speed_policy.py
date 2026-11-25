@@ -56,8 +56,9 @@ def test_speed_tag_prefix_is_idempotent_and_exclusion_wins():
     assert tagged == "🟢测速机场·香港01"
     db.execute("UPDATE airports SET speed_excluded=1 WHERE id=?", (airport_id,))
     state = speedtest.speed_map()[node_id]
-    assert state["status"] == "excluded" and state["marker"] == "⚪"
-    assert speedtest.apply_speed_prefix("🟢测速机场·香港01", state["marker"]) == "⚪测速机场·香港01"
+    assert state["status"] == "excluded" and state["marker"] == "●"
+    assert state["color"] == "#9CA3AF"
+    assert speedtest.apply_speed_prefix("🟢测速机场·香港01", state["marker"]) == "●测速机场·香港01"
 
 
 def test_failure_never_overwrites_last_valid_label():
@@ -94,6 +95,19 @@ def test_traffic_limit_default_and_schedule_window():
     assert start.hour == 18 and end.hour == 23 and end.minute == 30
     current, start, end = speed_queue.window_bounds(
         datetime(2026, 11, 25, 23, 40, tzinfo=ZoneInfo("Asia/Shanghai")))
+    assert not (start <= current < end)
+
+
+def test_overnight_window_after_midnight_belongs_to_previous_day():
+    db.set_setting("speed_window_start", "20:00")
+    db.set_setting("speed_window_end", "02:00")
+    current, start, end = speed_queue.window_bounds(
+        datetime(2026, 11, 26, 0, 30, tzinfo=ZoneInfo("Asia/Shanghai")))
+    assert start.date().isoformat() == "2026-11-25"
+    assert end.date().isoformat() == "2026-11-26"
+    assert start <= current < end
+    current, start, end = speed_queue.window_bounds(
+        datetime(2026, 11, 26, 15, 0, tzinfo=ZoneInfo("Asia/Shanghai")))
     assert not (start <= current < end)
 
 
@@ -214,6 +228,80 @@ def test_run_node_records_bytes_and_connect_time(monkeypatch):
     assert run["grade"] == "excellent"
 
 
+def test_retry_keeps_source_budget_and_later_sources_run(monkeypatch):
+    import asyncio
+    from backend.testers import engine as engine_mod
+
+    _, node_id = _node("香港11")
+    node = db.row("SELECT * FROM nodes WHERE id=?", (node_id,))
+    sources = [
+        {"id": 11, "name": "A", "url": "https://example.com/a", "region": ""},
+        {"id": 12, "name": "B", "url": "https://example.com/b", "region": ""},
+    ]
+    calls = []
+
+    class FakeEngine:
+        name = "mihomo"
+        block_ports = {node["fingerprint"]: 1082}
+
+    async def fake_sources(primary):
+        return sources
+
+    async def fake_confirm(source):
+        return False
+
+    async def fake_source(source, port, node, settings, max_bytes=None):
+        calls.append((source["id"], max_bytes))
+        if source["id"] == 11 and len([c for c in calls if c[0] == 11]) == 1:
+            return speedtest.SourceResult(
+                source, False, bytes=5 * 1024 * 1024, error_type="status",
+                message="HTTP 403")
+        return speedtest.SourceResult(
+            source, True, bytes=5 * 1024 * 1024, seconds=5, single_mbps=10,
+            multi_mbps=40, single_mb_per_s=1.25, multi_mb_per_s=5,
+            status_code=206, range_ok=True, confidence="normal")
+
+    monkeypatch.setattr(engine_mod.engine_manager, "engine", FakeEngine(), raising=False)
+    monkeypatch.setattr(speedtest, "_ensure_sources", fake_sources)
+    monkeypatch.setattr(speedtest, "_test_source", fake_source)
+    monkeypatch.setattr(speedtest, "_confirm_source_failure", fake_confirm)
+    run = asyncio.run(speedtest.run_node(node_id, trigger="manual", prepared=True))
+    assert run["status"] == "ok"
+    # First attempt: 50 MB / 2 sources. Retry must not get the remaining 45 MB.
+    assert calls[0] == (11, 25 * 1024 * 1024)
+    assert calls[1] == (11, 25 * 1024 * 1024)
+    assert calls[2][0] == 12
+    assert calls[2][1] == 40 * 1024 * 1024
+
+
+def test_recent_direct_source_check_blocks_false_source_failure(monkeypatch):
+    import asyncio
+
+    source_id = db.execute(
+        "INSERT INTO speed_sources (name, region, url, priority, enabled, health, range_ok, "
+        "size_bytes, last_check_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("T", "", "https://example.com/probe", 1, 1, "ok", 1, 104857600,
+         datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S"),
+         "2026-11-25 09:00:00", "2026-11-25 09:00:00"),
+    )
+    src = db.row("SELECT * FROM speed_sources WHERE id=?", (source_id,))
+
+    async def should_not_run(source_ids=None):
+        raise AssertionError("a recent direct check should be trusted")
+
+    monkeypatch.setattr(speedtest, "check_sources", should_not_run)
+    assert asyncio.run(speedtest._confirm_source_failure(src)) is False
+
+    async def direct_fail(source_ids=None):
+        return [{"source_id": source_id, "ok": False}]
+
+    db.execute("UPDATE speed_sources SET last_check_at='2026-11-24 10:00:00' WHERE id=?",
+               (source_id,))
+    src = db.row("SELECT * FROM speed_sources WHERE id=?", (source_id,))
+    monkeypatch.setattr(speedtest, "check_sources", direct_fail)
+    assert asyncio.run(speedtest._confirm_source_failure(src)) is True
+
+
 def test_new_node_test_includes_expired_results():
     _, node_id = _node("香港10")
     _valid_run(node_id, 3.0, finished_at="2026-11-01 10:00:00")
@@ -278,7 +366,7 @@ def test_publish_applies_speed_exclusion(monkeypatch, tmp_path):
 
 def test_status_tags_can_be_excluded_individually():
     nodes = [
-        {"id": 1, "display_name": "⚪已排除", "airport_id": 1,
+        {"id": 1, "display_name": "●已排除", "airport_id": 1,
          "speed": {"status": "excluded"}},
         {"id": 2, "display_name": "⚠️异常", "airport_id": 1,
          "speed": {"status": "error"}},

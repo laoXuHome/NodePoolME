@@ -1164,7 +1164,7 @@ SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "su
                 "latency_test_timeout", "sub_max_latency", "sub_max_latency2",
                 "sub_publish_enabled", "sub_publish_time", "sub_publish_mode",
                 "sub_publish_interval_minutes",
-                "speed_enabled", "speed_connections", "speed_warmup_seconds",
+                "speed_enabled", "speed_connections", "speed_parallel_nodes", "speed_warmup_seconds",
                 "speed_sample_seconds", "speed_connect_timeout", "speed_total_timeout",
                 "speed_retry", "speed_schedule_enabled", "speed_timezone",
                 "speed_window_start", "speed_window_end", "speed_schedule_every_days",
@@ -1214,8 +1214,7 @@ async def update_settings(payload: SettingsIn):
                 raise ValueError
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="测速窗口时间格式必须为 HH:MM")
-        if (eh * 60 + em) <= (sh * 60 + sm):
-            raise HTTPException(status_code=400, detail="测速窗口结束时间必须晚于开始时间")
+        # 允许结束时间早于开始时间：这种窗口跨午夜，由 window_bounds 按两天计算。
     for key, value in data.items():
         if value is None:
             continue

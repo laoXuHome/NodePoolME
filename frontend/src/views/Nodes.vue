@@ -143,11 +143,11 @@ const SPEED_META = {
 function speedText(row) {
   const s = row?.speed
   if (!s) return '待测速'
-  if (s.status === 'excluded') return '⚪ 排除'
+  if (s.status === 'excluded') return '● 排除'
   if (s.status === 'ok') {
     return s.mb_per_s == null ? '无数据' : `${s.emoji} ${Number(s.mb_per_s).toFixed(2)} MB/s`
   }
-  if (s.status === 'stale') return '● 待测速'
+  if (s.status === 'stale') return '待测速'
   if (s.status === 'source_failed') return '🚫 全源失败'
   if (s.status === 'error') return '⚠️ 异常'
   return '待测速'
@@ -170,7 +170,7 @@ function speedType(row) {
   return s.status === 'stale' ? 'info' : 'warning'
 }
 function speedColor(row) {
-  if (row?.speed?.status === 'excluded') return '#4B5563'
+  if (row?.speed?.color) return row.speed.color
   return SPEED_META[row?.speed?.grade]?.color || '#64748b'
 }
 function fmtTraffic(bytes) {

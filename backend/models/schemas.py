@@ -95,6 +95,7 @@ class SettingsIn(BaseModel):
     sub_publish_interval_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
     speed_enabled: Optional[bool] = None
     speed_connections: Optional[int] = Field(default=None, ge=1, le=8)
+    speed_parallel_nodes: Optional[int] = Field(default=None, ge=1, le=8)
     speed_warmup_seconds: Optional[float] = Field(default=None, ge=0, le=5)
     speed_sample_seconds: Optional[float] = Field(default=None, ge=3, le=30)
     speed_connect_timeout: Optional[float] = Field(default=None, ge=3, le=30)
