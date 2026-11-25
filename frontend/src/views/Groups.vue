@@ -409,7 +409,7 @@ onUnmounted(() => {
         <span><b style="color:#2563EB"><span class="np-speed-dot is-tag" style="background:#2563EB"></span>中</b> ≥ 1 MB/s</span>
         <span><b style="color:#EA580C"><span class="np-speed-dot is-tag" style="background:#EA580C"></span>差</b> ≥ 256 KB/s</span>
         <span><b style="color:#DC2626"><span class="np-speed-dot is-tag" style="background:#DC2626"></span>危</b> &lt; 256 KB/s</span>
-        <span><b><span class="np-speed-dot" style="background:#4B5563"></span>已排除</b></span>
+        <span><b><span class="np-speed-dot is-tag" style="background:#4B5563"></span>已排除</b></span>
         <span><b style="color:#F59E0B"><span class="np-speed-dot is-tag is-warn" style="background:#F59E0B">!</span>异常</b></span>
         <span><b style="color:#DC2626">🚫 全部源失败</b></span>
         <span><b>待测速</b></span>
