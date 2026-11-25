@@ -409,7 +409,7 @@ onUnmounted(() => {
         <span><b style="color:#2563EB">🔵 中</b> ≥ 1 MB/s</span>
         <span><b style="color:#EA580C">🟠 差</b> ≥ 256 KB/s</span>
         <span><b style="color:#DC2626">🔴 危</b> &lt; 256 KB/s</span>
-        <span><b>⚪ 已排除</b></span>
+        <span><b><span class="np-speed-dot" style="background:#4B5563"></span>已排除</b></span>
         <span><b style="color:#F59E0B">⚠️ 异常</b></span>
         <span><b style="color:#DC2626">🚫 全部源失败</b></span>
         <span><b>待测速</b></span>
@@ -419,7 +419,7 @@ onUnmounted(() => {
         <div class="speed-table-block">
           <div class="speed-table-head">
             机场测速范围
-            <span class="np-muted">排除后不创建任务、不消耗流量，显示 ⚪</span>
+            <span class="np-muted">排除后不创建任务、不消耗流量，显示深灰点</span>
           </div>
           <el-table :data="speedAirports" size="small">
             <el-table-column prop="name" label="机场" min-width="180" />

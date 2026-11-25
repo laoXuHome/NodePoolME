@@ -37,7 +37,7 @@ const SPEED_OPTIONS = [
   { value: 'medium', label: '中', color: '#2563EB' },
   { value: 'poor', label: '差', color: '#EA580C' },
   { value: 'danger', label: '危', color: '#DC2626' },
-  { value: 'excluded', label: '已排除', color: '#94A3B8', ring: true },
+  { value: 'excluded', label: '已排除', color: '#4B5563' },
   { value: 'error', label: '异常', color: '#D97706', symbol: '!' },
   { value: 'source_failed', label: '全源失败', color: '#B91C1C', symbol: '×' },
   { value: 'pending', label: '待测速', color: '#64748B', symbol: '…' }
