@@ -165,7 +165,7 @@ async function checkSpeedSources() {
   speedChecking.value = true
   try {
     const res = await api.post('/api/speed/sources/check', {})
-    ElMessage.success(`健康检查完成：${res.ok}/${res.total} 个源正常`)
+    ElMessage.success(`测试源健康检测完成：${res.ok}/${res.total} 个源正常`)
     speedSources.value = res.items || []
   } catch (e) { ElMessage.error(e.message) }
   finally { speedChecking.value = false }
@@ -174,7 +174,7 @@ async function checkSpeedSources() {
 async function toggleSpeedSource(row) {
   try {
     await api.patch(`/api/speed/sources/${row.id}`, { enabled: !!row.enabled })
-    ElMessage.success(row.enabled ? '已启用，首次测速前会重新健康检查' : '已停用')
+    ElMessage.success(row.enabled ? '已启用，首次测速前会重新检测测速源' : '已停用')
     await loadSpeed()
   } catch (e) { ElMessage.error(e.message) }
 }
@@ -279,7 +279,6 @@ onUnmounted(() => {
           排队 {{ (speedOverview.queue?.counts?.queued || 0) + (speedOverview.queue?.counts?.waiting || 0) }} ·
           近 24 小时有效 {{ speedOverview.runs_ok_24h || 0 }}
         </span>
-        <el-button size="small" :loading="speedChecking" @click="checkSpeedSources">健康检查</el-button>
         <el-button size="small" type="primary" :loading="speedSaving" @click="saveSpeed">保存测速设置</el-button>
       </div>
       <div class="np-muted speed-desc">
@@ -445,8 +444,11 @@ onUnmounted(() => {
 
         <div class="speed-table-block">
           <div class="speed-table-head">
-            测速源
-            <span class="np-muted">健康检查直连源站，不经过节点</span>
+            <div class="speed-table-title">
+              测速源
+              <span class="np-muted">检测直连源站，不经过节点</span>
+            </div>
+            <el-button size="small" :loading="speedChecking" @click="checkSpeedSources">测试源健康检测</el-button>
           </div>
           <el-table :data="speedSources" size="small" max-height="220">
             <el-table-column prop="name" label="测速源" min-width="150" />
@@ -624,17 +626,27 @@ onUnmounted(() => {
 }
 .speed-table-head {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
+  align-items: center;
+  gap: 8px 12px;
   font-weight: 600;
   font-size: 13px;
   color: #334155;
   margin-bottom: 8px;
 }
+.speed-table-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
 .speed-table-head .np-muted {
   font-weight: 400;
   font-size: 11px;
+}
+.speed-table-head > .el-button {
+  margin-left: auto;
 }
 @media (max-width: 1100px) {
   .speed-tables { grid-template-columns: 1fr; }
