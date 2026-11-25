@@ -1,7 +1,7 @@
 """Unified download-speed queue and evening schedule.
 
 Every scheduled/manual/all/new test goes through this one FIFO queue. Batch concurrency
-uses the existing global_concurrency setting, duplicate node jobs are rejected, and the
+uses its own speed_parallel_nodes limit, duplicate node jobs are rejected, and the
 Mihomo config is prepared once for a batch (the process has one core instance).
 """
 import asyncio
@@ -16,6 +16,7 @@ from backend.database import db
 from backend.testers import engine as engine_mod
 from backend.testers import speedtest
 from backend.scheduler import manager as scheduler
+from backend.services.runtime_gate import gate
 
 TRIGGER_LABELS = {
     "schedule": "定时测速", "manual": "手动测速",
@@ -231,7 +232,7 @@ class SpeedQueue:
                   if j.status not in ("queued", "waiting", "running")]
         recent.sort(key=lambda x: x["id"], reverse=True)
         return {"counts": counts, "active": active[:limit], "recent": recent[:limit],
-                "total_tracked": len(self.jobs)}
+                "total_tracked": len(self.jobs), "work": gate.snapshot()}
 
     # ------------------------------------------------------------------ dispatcher
     async def _dispatch_loop(self) -> None:
@@ -255,13 +256,15 @@ class SpeedQueue:
                     except asyncio.TimeoutError:
                         pass
                     continue
-                if scheduler.state.running:
+                if scheduler.state.running or (gate.owner and gate.owner != "speed"):
+                    waiting_for = "检测批次" if scheduler.state.running else (gate.label or "节点检测")
                     for job in ready:
                         job.status = "waiting"
-                        job.message = "等待检测批次完成"
+                        job.message = f"等待{waiting_for}完成"
                     await asyncio.sleep(3)
                     continue
-                limit = max(1, min(db.get_int("global_concurrency", 10), 30))
+                # 测速批次自己的并发，复用节点检测的 global_concurrency 会让两套任务互相影响
+                limit = max(1, min(db.get_int("speed_parallel_nodes", 4), 8))
                 batch = ready[:limit]
                 self._batch_task = asyncio.create_task(self._run_batch(batch),
                                                        name=f"speed-batch-{batch[0].id}")
@@ -289,6 +292,18 @@ class SpeedQueue:
         return None
 
     async def _run_batch(self, jobs: list[SpeedJob]) -> None:
+        if not await gate.try_acquire("speed", "下载测速"):
+            for job in jobs:
+                if job.status in ("queued", "waiting"):
+                    job.status = "waiting"
+                    job.message = f"等待{gate.label or '节点检测'}完成"
+            return
+        try:
+            await self._run_batch_inner(jobs)
+        finally:
+            await gate.release("speed")
+
+    async def _run_batch_inner(self, jobs: list[SpeedJob]) -> None:
         try:
             valid: list[tuple[SpeedJob, dict]] = []
             for job in jobs:

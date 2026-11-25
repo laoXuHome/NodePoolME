@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from backend.database import db
 from backend.services import fetcher
+from backend.services.runtime_gate import gate
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
 
@@ -36,6 +37,9 @@ class RuntimeState:
         self.paused = False
         self.stop_requested = False
         self.pause_event: asyncio.Event | None = None
+        self.deferred = False
+        self.deferred_reason: str | None = None
+        self.defer_lock = asyncio.Lock()
         # 延迟检测 / 标签检测分开统计，供前端两条环形进度使用
         self.latency_done = 0
         self.latency_total = 0
@@ -65,6 +69,9 @@ class RuntimeState:
             "block_size": self.block_size,
             "paused": self.paused,
             "stop_requested": self.stop_requested,
+            "deferred": self.deferred,
+            "deferred_reason": self.deferred_reason,
+            "work": gate.snapshot(),
             "latency_done": self.latency_done,
             "latency_total": self.latency_total,
             "latency_pct": round(self.latency_done / self.latency_total * 100, 1) if self.latency_total else 0,
@@ -428,6 +435,35 @@ def due_groups(force: bool = False, ids: list[int] | None = None) -> list[dict]:
 
 async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
                     reason: str = "schedule") -> dict:
+    """Run a detection cycle only when the download-speed queue is idle.
+
+    If speed testing owns the engine, the cycle stays pending instead of failing,
+    and starts as soon as the current speed batch releases the gate.
+    """
+    if state.running:
+        return {"ok": False, "error": "已有检测批次正在运行", "batch_id": state.batch_id}
+    if not await gate.try_acquire("detect", "节点检测评分"):
+        async with state.defer_lock:
+            if state.deferred:
+                return {"ok": False, "deferred": True,
+                        "error": "节点检测已在等待下载测速完成"}
+            state.deferred = True
+            state.deferred_reason = f"{gate.label}进行中，检测已延迟"
+            state.phase = "等待下载测速完成"
+            db.append_log("INFO", "检测", f"检测批次延迟：{gate.label}进行中")
+        try:
+            await gate.acquire_wait("detect", "节点检测评分")
+        finally:
+            state.deferred = False
+            state.deferred_reason = None
+    try:
+        return await _run_cycle(force=force, group_ids=group_ids, reason=reason)
+    finally:
+        await gate.release("detect")
+
+
+async def _run_cycle(force: bool = False, group_ids: list[int] | None = None,
+                     reason: str = "schedule") -> dict:
     if state.running:
         return {"ok": False, "error": "已有检测批次正在运行", "batch_id": state.batch_id}
     groups = due_groups(force=force, ids=group_ids)
@@ -565,6 +601,19 @@ async def run_cycle(force: bool = False, group_ids: list[int] | None = None,
 async def test_single_node(node_id: int, group_ids: list[int] | None = None,
                            mode: str = "all") -> dict:
     """mode: all | latency | tags. Lets the detail dialog test either half alone."""
+    if state.running:
+        return {"ok": False, "error": "已有检测批次在运行，请完成后重试"}
+    if not await gate.try_acquire("detect", "节点检测评分"):
+        return {"ok": False, "deferred": True,
+                "error": f"{gate.label}进行中，节点检测已延迟"}
+    try:
+        return await _test_single_node(node_id, group_ids=group_ids, mode=mode)
+    finally:
+        await gate.release("detect")
+
+
+async def _test_single_node(node_id: int, group_ids: list[int] | None = None,
+                            mode: str = "all") -> dict:
     if state.running:
         return {"ok": False, "error": "已有检测批次在运行，请完成后重试"}
     node = db.row(

@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NodePoolME"
-VERSION = "1.7.14"
+VERSION = "1.8.0"
 
 DATA_DIR = Path(os.getenv("NODEPOOL_DATA_DIR", "./data")).resolve()
 CONFIG_DIR = Path(os.getenv("NODEPOOL_CONFIG_DIR", str(DATA_DIR / "config"))).resolve()
@@ -111,6 +111,7 @@ DEFAULT_SETTINGS = {
     "speed_enabled": "1",
     "speed_primary_sources": "3",
     "speed_connections": "4",
+    "speed_parallel_nodes": "4",
     "speed_warmup_seconds": "2",
     "speed_sample_seconds": "10",
     "speed_connect_timeout": "8",

@@ -23,6 +23,7 @@ from backend.models.schemas import (AirportIn, AirportPatch, GroupIn, GroupPatch
 from backend.scheduler import manager
 from backend.services import fetcher
 from backend.services.speed_queue import queue as speed_queue, schedule_state
+from backend.services.runtime_gate import gate
 from backend.scoring import eligibility, sampler
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
@@ -1024,8 +1025,8 @@ async def test_node(node_id: int, payload: NodeTestIn | None = None):
 async def run_cycle(payload: RunIn | None = None):
     """Kick a batch off in the background; progress is polled through /api/runtime."""
     payload = payload or RunIn()
-    if manager.state.running:
-        raise HTTPException(status_code=409, detail="已有检测批次正在运行")
+    if manager.state.running or manager.state.deferred:
+        raise HTTPException(status_code=409, detail="检测批次正在运行或等待测速完成")
     if not db.row("SELECT COUNT(*) AS c FROM nodes n JOIN airports a ON a.id=n.airport_id"
                   " WHERE a.enabled=1")["c"]:
         raise HTTPException(status_code=409, detail="缓存池为空")
@@ -1265,7 +1266,7 @@ async def speed_overview():
                 for a in fetcher.all_airports()]
     return {**speedtest.overview(), "items": speedtest.list_sources(),
             "queue": speed_queue.snapshot(), "schedule": schedule_state(),
-            "airports": airports}
+            "work": gate.snapshot(), "airports": airports}
 
 
 @api.get("/speed/sources", dependencies=protected)
@@ -1275,7 +1276,8 @@ async def speed_sources():
 
 @api.get("/speed/queue", dependencies=protected)
 async def speed_queue_status():
-    return {"queue": speed_queue.snapshot(), "schedule": schedule_state()}
+    return {"queue": speed_queue.snapshot(), "schedule": schedule_state(),
+            "work": gate.snapshot()}
 
 
 @api.get("/speed/nodes", dependencies=protected)
