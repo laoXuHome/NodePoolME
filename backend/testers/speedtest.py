@@ -89,7 +89,7 @@ def now() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
-SPEED_MARKERS = ("🟣", "🟢", "🔵", "🟠", "🔴", "⚪", "⚠️", "🚫")
+SPEED_MARKERS = ("🟣", "🟢", "🔵", "🟠", "🔴", "●", "⚪", "⚠️", "🚫")
 PENDING_PREFIX = "待测速"
 GRADE_DEFS = {
     "excellent": {"label": "优", "emoji": "🟣", "color": "#8B5CF6", "key": "excellent"},
@@ -801,8 +801,8 @@ def speed_map() -> dict[int, dict]:
         node_id = node["id"]
         if excluded.get(node["airport_id"]):
             out[node_id] = {
-                "status": "excluded", "marker": "⚪", "label": "机场已排除测速",
-                "grade": None, "grade_label": "", "emoji": "⚪", "color": "#9CA3AF",
+                "status": "excluded", "marker": "●", "label": "机场已排除测速",
+                "grade": None, "grade_label": "", "emoji": "●", "color": "#4B5563",
                 "mb_per_s": None, "mbps": None,
             }
             continue

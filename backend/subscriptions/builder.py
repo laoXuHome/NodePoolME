@@ -154,7 +154,7 @@ SPEED_FILTER_ALIASES = {
     "poor": "poor", "差": "poor", "🟠": "poor",
     "danger": "danger", "危": "danger", "🔴": "danger",
     "pending": "pending", "待测速": "pending", "待测": "pending", "❓": "pending",
-    "excluded": "excluded", "已排除": "excluded", "机场排除": "excluded", "⚪": "excluded",
+    "excluded": "excluded", "已排除": "excluded", "机场排除": "excluded", "●": "excluded", "⚪": "excluded",
     "error": "error", "异常": "error", "测速异常": "error", "⚠": "error", "⚠️": "error",
     "source_failed": "source_failed", "全源失败": "source_failed",
     "全部源失败": "source_failed", "🚫": "source_failed",
