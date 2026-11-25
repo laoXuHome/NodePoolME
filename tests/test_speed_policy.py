@@ -56,8 +56,8 @@ def test_speed_tag_prefix_is_idempotent_and_exclusion_wins():
     assert tagged == "🟢测速机场·香港01"
     db.execute("UPDATE airports SET speed_excluded=1 WHERE id=?", (airport_id,))
     state = speedtest.speed_map()[node_id]
-    assert state["status"] == "excluded" and state["marker"] == "●"
-    assert speedtest.apply_speed_prefix("🟢测速机场·香港01", state["marker"]) == "●测速机场·香港01"
+    assert state["status"] == "excluded" and state["marker"] == "⚪"
+    assert speedtest.apply_speed_prefix("🟢测速机场·香港01", state["marker"]) == "⚪测速机场·香港01"
 
 
 def test_failure_never_overwrites_last_valid_label():

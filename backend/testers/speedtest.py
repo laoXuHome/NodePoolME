@@ -801,8 +801,8 @@ def speed_map() -> dict[int, dict]:
         node_id = node["id"]
         if excluded.get(node["airport_id"]):
             out[node_id] = {
-                "status": "excluded", "marker": "●", "label": "机场已排除测速",
-                "grade": None, "grade_label": "", "emoji": "●", "color": "#4B5563",
+                "status": "excluded", "marker": "⚪", "label": "机场已排除测速",
+                "grade": None, "grade_label": "", "emoji": "⚪", "color": "#D1D5DB",
                 "mb_per_s": None, "mbps": None,
             }
             continue
@@ -831,7 +831,7 @@ def speed_map() -> dict[int, dict]:
             base = {
                 "status": "stale", "marker": PENDING_PREFIX,
                 "label": f"测速结果已过期（{round(age or 0, 1)} 天前）",
-                "grade": None, "grade_label": "", "emoji": "", "color": "#F59E0B",
+                "grade": None, "grade_label": "", "emoji": "", "color": "#9CA3AF",
                 "mb_per_s": run.get("mb_per_s"), "mbps": run.get("multi_mbps"),
                 "finished_at": run.get("finished_at"), "age_days": round(age or 0, 2),
                 "sources_ok": run.get("sources_ok"), "sources_total": run.get("sources_total"),
