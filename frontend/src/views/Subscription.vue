@@ -31,6 +31,22 @@ function pick(paths) {
 
 const shownLinks = ref('queryless')
 
+const LOON_REASON = {
+  protocol: '协议不支持',
+  cipher: '加密方式不支持',
+  transport: '传输方式不支持',
+  port: '端口小于 3',
+  plugin: 'SS 插件不支持',
+}
+const loonHint = computed(() => {
+  const l = info.value && info.value.filter && info.value.filter.loon
+  if (!l) return null
+  const reasons = Object.entries(l.reasons || {})
+    .map(([k, v]) => `${LOON_REASON[k] || k} ${v}`)
+    .join('、')
+  return { available: l.available || 0, excluded: l.excluded || 0, reasons }
+})
+
 const filterHint = computed(() => {
   const f = info.value && info.value.filter
   if (!f) return null
@@ -142,7 +158,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             <el-radio-button value="queryless">无参数（反代推荐）</el-radio-button>
             <el-radio-button value="query">带 format 参数</el-radio-button>
           </el-radio-group>
-          <div class="link-row" v-for="(label, key) in { clash: 'Clash / Mihomo', singbox: 'sing-box', base64: '通用 Base64' }" :key="key">
+          <div class="link-row" v-for="(label, key) in { loon: 'Loon（iOS 专用）', clash: 'Clash / Mihomo', singbox: 'sing-box', base64: '通用 Base64' }" :key="key">
             <div class="link-label">{{ label }}</div>
             <div class="link-control">
               <el-input :model-value="prettyLink((shownLinks === 'queryless' ? querylessLinks : fullLinks)[key])" readonly size="small"
@@ -150,6 +166,10 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
                         :type="isMobile ? 'textarea' : 'text'" :autosize="{ minRows: 1, maxRows: 2 }" />
               <el-button class="link-copy" @click="copy((shownLinks === 'queryless' ? querylessLinks : fullLinks)[key])">复制</el-button>
             </div>
+          </div>
+          <div v-if="loonHint" class="np-muted" style="margin-top:10px">
+            Loon 专用订阅：可用 {{ loonHint.available }} 个节点<template v-if="loonHint.excluded">，自动排除 {{ loonHint.excluded }} 个（{{ loonHint.reasons }}）</template>。
+            只输出 Loon 支持的协议、加密方式与传输方式，并对密码和节点名做转义。
           </div>
           <div class="np-muted" style="margin-top:10px">
             反代转发会把 <span class="np-mono">&amp;</span> 转义坏，优先用「无参数」地址 <span class="np-mono">/sub/all/&lt;token&gt;/clash</span>；带 format 参数时按客户端 UA 自动选择。

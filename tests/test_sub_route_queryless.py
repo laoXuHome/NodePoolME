@@ -23,7 +23,7 @@ def test_queryless_route():
     builder.publish(reason="test")
     token = auth.sub_token()
     client = TestClient(app)
-    for fmt in ("clash", "singbox", "base64"):
+    for fmt in ("clash", "singbox", "base64", "loon"):
         r = client.get(f"/sub/all/{token}/{fmt}")
         assert r.status_code == 200, (fmt, r.status_code, r.text[:100])
     r = client.get(f"/sub/all/{token}")

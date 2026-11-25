@@ -5,6 +5,7 @@ import os
 import re
 from collections import Counter
 from datetime import datetime, timedelta
+from urllib.parse import quote, urlencode
 
 import yaml
 
@@ -417,6 +418,208 @@ def build_base64(nodes: list[dict]) -> str:
     return base64.b64encode(payload.encode()).decode()
 
 
+# ---------------------------------------------------------------------------- Loon specific
+# Loon only accepts a narrow protocol/transport/cipher set. Sending it a mixed
+# subscription makes the client silently skip lines, so the node count in Loon is
+# smaller than the number published by NodePoolME. build_loon() emits a filtered,
+# correctly escaped plain-text subscription that Loon can parse line by line.
+LOON_SS_CIPHERS = {
+    "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm",
+    "aes-128-gcm", "aes-192-gcm", "aes-256-gcm",
+    "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305",
+    "rc4", "rc4-md5",
+    "aes-128-cfb", "aes-192-cfb", "aes-256-cfb",
+    "aes-128-ctr", "aes-192-ctr", "aes-256-ctr",
+    "bf-cfb", "camellia-128-cfb", "camellia-192-cfb", "camellia-256-cfb",
+    "cast5-cfb", "des-cfb", "idea-cfb", "rc2-cfb", "seed-cfb",
+    "salsa20", "chacha20", "chacha20-ietf",
+}
+LOON_CIPHER_ALIASES = {
+    "chacha20-poly1305": "chacha20-ietf-poly1305",
+    "xchacha20-poly1305": "xchacha20-ietf-poly1305",
+}
+LOON_TRANSPORTS = {"", "tcp", "ws", "http", "h2"}
+LOON_SS_PLUGINS = {"obfs-local", "simple-obfs", "obfs"}
+LOON_URI_SCHEMES = ("ss://", "ssr://", "vmess://", "vless://", "trojan://",
+                    "hysteria2://", "anytls://")
+
+
+def _frag(name: str) -> str:
+    """Keep CJK names readable while escaping characters that break a URI fragment."""
+    out = []
+    for ch in str(name or ""):
+        if ch in "\r\n":
+            continue
+        if ch == "%":
+            out.append("%25")
+        elif ch == "#":
+            out.append("%23")
+        elif ch == " ":
+            out.append("%20")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _q(values: dict) -> str:
+    clean = {k: v for k, v in values.items() if v not in (None, "")}
+    return urlencode(clean, quote_via=quote, safe="/")
+
+
+def _loon_ss_plugin(params: dict) -> tuple[str | None, str | None]:
+    plugin = str(params.get("plugin") or "").strip().lower()
+    if not plugin or plugin in ("none", "plain"):
+        return None, None
+    if plugin not in LOON_SS_PLUGINS:
+        return None, "plugin"
+    opts = params.get("plugin-opts") or {}
+    if not isinstance(opts, dict):
+        opts = {}
+    mode = str(opts.get("mode") or opts.get("obfs") or "http")
+    host = str(opts.get("host") or opts.get("obfs-host") or "")
+    value = f"obfs-local;obfs={mode}"
+    if host:
+        value += f";obfs-host={host}"
+    return value, None
+
+
+def _loon_skip_reason(node: dict) -> str | None:
+    try:
+        port = int(node.get("port") or 0)
+    except (TypeError, ValueError):
+        port = 0
+    if port < 3:
+        return "port"
+    proto = str(node.get("protocol") or "").lower()
+    params = node.get("params") or {}
+    if proto == "ss":
+        cipher = str(params.get("cipher") or "aes-128-gcm").lower()
+        cipher = LOON_CIPHER_ALIASES.get(cipher, cipher)
+        if cipher not in LOON_SS_CIPHERS:
+            return "cipher"
+        _, plugin_reason = _loon_ss_plugin(params)
+        return plugin_reason
+    if proto == "ssr":
+        return None
+    if proto in ("vmess", "vless", "trojan"):
+        net = str(params.get("network") or "tcp").lower()
+        if net not in LOON_TRANSPORTS:
+            return "transport"
+        return None
+    if proto in ("hysteria2", "hy2", "anytls"):
+        return None
+    # hysteria v1, tuic, http/socks and anything else have no Loon subscription URI.
+    return "protocol"
+
+
+def loon_plan(nodes: list[dict]) -> tuple[list[dict], dict[str, int]]:
+    kept: list[dict] = []
+    skipped: Counter = Counter()
+    for node in nodes:
+        reason = _loon_skip_reason(node)
+        if reason:
+            skipped[reason] += 1
+        else:
+            kept.append(node)
+    return kept, dict(skipped)
+
+
+def _loon_uri(node: dict) -> str:
+    p = node.get("params") or {}
+    t = str(node.get("protocol") or "").lower()
+    name = _frag(node.get("display_name") or node.get("raw_name") or "")
+    server, port = node.get("server"), int(node.get("port") or 0)
+    if t == "ss":
+        cipher = str(p.get("cipher") or "aes-128-gcm").lower()
+        cipher = LOON_CIPHER_ALIASES.get(cipher, cipher)
+        userinfo = base64.urlsafe_b64encode(
+            f"{cipher}:{p.get('password', '')}".encode()
+        ).decode().rstrip("=")
+        plugin, _ = _loon_ss_plugin(p)
+        query = f"?plugin={quote(plugin, safe='')}" if plugin else ""
+        return f"ss://{userinfo}@{server}:{port}{query}#{name}"
+    if t == "ssr":
+        pw = base64.urlsafe_b64encode(str(p.get("password", "")).encode()).decode().rstrip("=")
+        body = (f"{server}:{port}:{p.get('protocol', 'origin')}:"
+                f"{p.get('cipher', 'rc4-md5')}:{p.get('obfs', 'plain')}:{pw}")
+        q = {"remarks": base64.urlsafe_b64encode(name.encode()).decode().rstrip("=")}
+        if p.get("obfs-param"):
+            q["obfsparam"] = base64.urlsafe_b64encode(
+                str(p["obfs-param"]).encode()).decode().rstrip("=")
+        if p.get("protocol-param"):
+            q["protoparam"] = base64.urlsafe_b64encode(
+                str(p["protocol-param"]).encode()).decode().rstrip("=")
+        raw = body + "/?" + urlencode(q)
+        return "ssr://" + base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+    if t == "vmess":
+        net = str(p.get("network") or "tcp").lower()
+        net = "h2" if net == "http" else net
+        tls = str(p.get("security") or "").lower() == "tls"
+        data = {
+            "v": "2", "ps": node.get("display_name") or node.get("raw_name") or "",
+            "add": server, "port": str(port), "id": p.get("uuid", ""),
+            "aid": str(p.get("alterId", 0)), "scy": p.get("cipher", "auto"),
+            "net": net, "type": "none", "host": p.get("host", ""),
+            "path": p.get("path", ""), "tls": "tls" if tls else "",
+            "sni": p.get("sni") or (p.get("host") if tls else "") or "",
+            "alpn": p.get("alpn", ""), "fp": p.get("fingerprint", ""),
+        }
+        return "vmess://" + base64.b64encode(
+            json.dumps(data, ensure_ascii=False).encode()).decode()
+    if t == "vless":
+        net = str(p.get("network") or "tcp").lower()
+        net = "http" if net == "h2" else net
+        security = str(p.get("security") or "none").lower()
+        q = {"encryption": "none", "security": security, "type": net,
+             "sni": p.get("sni", ""), "fp": p.get("fingerprint", ""),
+             "alpn": p.get("alpn", "")}
+        if net in ("ws", "http"):
+            q.update({"path": p.get("path", ""), "host": p.get("host", "")})
+        if p.get("flow"):
+            q["flow"] = p["flow"]
+        if security == "reality":
+            q.update({"pbk": p.get("publicKey", ""), "sid": p.get("shortId", "")})
+        return f"vless://{p.get('uuid','')}@{server}:{port}?{_q(q)}#{name}"
+    if t == "trojan":
+        net = str(p.get("network") or "tcp").lower()
+        net = "http" if net == "h2" else net
+        q = {"security": "tls", "type": net, "sni": p.get("sni", ""),
+             "alpn": p.get("alpn", "")}
+        if net in ("ws", "http"):
+            q.update({"path": p.get("path", ""), "host": p.get("host", "")})
+        if p.get("skip-cert-verify"):
+            q["allowInsecure"] = "1"
+        return (f"trojan://{quote(str(p.get('password', '')), safe='')}@"
+                f"{server}:{port}?{_q(q)}#{name}")
+    if t in ("hysteria2", "hy2"):
+        q = {"sni": p.get("sni", ""), "alpn": p.get("alpn", "")}
+        if p.get("insecure") or p.get("skip-cert-verify"):
+            q["insecure"] = "1"
+        if p.get("obfs"):
+            q["obfs"] = p["obfs"]
+            q["obfs-password"] = p.get("obfs-password", "")
+        return (f"hysteria2://{quote(str(p.get('password', '')), safe='')}@"
+                f"{server}:{port}?{_q(q)}#{name}")
+    if t == "anytls":
+        q = {"sni": p.get("sni", "")}
+        if p.get("insecure") or p.get("skip-cert-verify"):
+            q["insecure"] = "1"
+        return (f"anytls://{quote(str(p.get('password', '')), safe='')}@"
+                f"{server}:{port}?{_q(q)}#{name}")
+    raise ValueError(f"Loon 不支持的协议：{t}")
+
+
+def build_loon(nodes: list[dict]) -> str:
+    kept, skipped = loon_plan(nodes)
+    total_skipped = sum(skipped.values())
+    head = f"# NodePoolME Loon 订阅 · 可用 {len(kept)} 个"
+    if total_skipped:
+        detail = "、".join(f"{k} {v}" for k, v in sorted(skipped.items()))
+        head += f" · 已排除 {total_skipped} 个（{detail}）"
+    lines = [head] + [_loon_uri(n) for n in kept]
+    return "\n".join(lines) + "\n"
+
+
 def validate(fmt: str, content: str, nodes: list[dict]) -> None:
     if fmt == "clash":
         doc = yaml.safe_load(content)
@@ -433,13 +636,21 @@ def validate(fmt: str, content: str, nodes: list[dict]) -> None:
             decoded = base64.b64decode(content).decode()
             if "://" not in decoded:
                 raise ValueError("Base64 输出不是节点链接列表")
+    elif fmt == "loon":
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if not line.startswith(LOON_URI_SCHEMES):
+                raise ValueError(f"Loon 输出包含不支持的节点行：{line[:40]}")
     else:
         raise ValueError(f"未知订阅格式：{fmt}")
 
 
 FORMATS = {"clash": ("sub_all.yaml", build_clash),
            "singbox": ("sub_all.json", build_singbox),
-           "base64": ("sub_all.base64", build_base64)}
+           "base64": ("sub_all.base64", build_base64),
+           "loon": ("sub_all.loon.txt", build_loon)}
 
 
 
@@ -527,7 +738,7 @@ def add_published_node(node_id: int) -> dict:
 
     sub_name = db.get("sub_name", "NodePool Unified") or "NodePool Unified"
     for fmt, (filename, fn) in FORMATS.items():
-        content = fn(nodes, sub_name) if fmt != "base64" else fn(nodes)
+        content = fn(nodes, sub_name) if fmt in ("clash", "singbox") else fn(nodes)
         validate(fmt, content, nodes)
         target = config.SUB_DIR / filename
         tmp = config.SUB_DIR / f".{filename}.tmp"
@@ -566,6 +777,13 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
                       f"{'…' if len(dropped) > 3 else ''}），评分统计仍按 {len(nodes)} 个达标节点计算")
     stats = {**stats, "filtered": len(dropped), "after_filter": len(out_nodes),
              "filter_hits": dropped[:10]}
+    loon_kept, loon_skipped = loon_plan(out_nodes)
+    stats["loon"] = {"available": len(loon_kept), "excluded": sum(loon_skipped.values()),
+                     "reasons": loon_skipped}
+    if loon_skipped:
+        db.append_log("INFO", "下发",
+                      f"Loon 专用订阅排除 {sum(loon_skipped.values())} 个节点："
+                      + "、".join(f"{k} {v}" for k, v in sorted(loon_skipped.items())))
     sub_name = db.get("sub_name", "NodePool Unified") or "NodePool Unified"
     previous = meta()
     if not out_nodes and previous.get("nodes"):
@@ -579,7 +797,7 @@ def publish(reason: str = "manual", batch_id: int | None = None) -> dict:
         return {**previous, "skipped": True, "stats": stats}
     written = {}
     for fmt, (filename, fn) in FORMATS.items():
-        content = fn(out_nodes, sub_name) if fmt != "base64" else fn(out_nodes)
+        content = fn(out_nodes, sub_name) if fmt in ("clash", "singbox") else fn(out_nodes)
         validate(fmt, content, out_nodes)
         target = config.SUB_DIR / filename
         tmp = config.SUB_DIR / f".{filename}.tmp"
@@ -633,6 +851,23 @@ def meta() -> dict:
 def read(fmt: str = "clash") -> tuple[str, str]:
     filename, _ = FORMATS.get(fmt, FORMATS["clash"])
     path = config.SUB_DIR / filename
+    if not path.exists() and fmt == "loon":
+        # Upgrade path: older installs have no sub_all.loon.txt yet. Rebuild it from the
+        # published manifest instead of returning 404 to Loon on the first refresh.
+        previous = meta()
+        names = {int(x["id"]): x["name"] for x in (previous.get("node_names") or [])}
+        ids = previous.get("node_ids") or []
+        nodes = [n for n in (_snapshot_entry(int(i), names.get(int(i), "")) for i in ids) if n]
+        if not nodes:
+            nodes = _live_snapshot()
+        content = build_loon(nodes)
+        try:
+            tmp = config.SUB_DIR / ".sub_all.loon.txt.tmp"
+            tmp.write_text(content, encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError:
+            pass
+        return fmt, content
     if not path.exists():
         raise FileNotFoundError(fmt)
     return fmt, path.read_text(encoding="utf-8")

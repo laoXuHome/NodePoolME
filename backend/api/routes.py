@@ -1051,6 +1051,7 @@ async def subscription_info(request: Request):
     keywords = builder.filter_keywords()
     eligible, _ = builder.collect_nodes()
     kept, dropped = builder.apply_name_filter(eligible)
+    loon_kept, loon_skipped = builder.loon_plan(kept)
     filter_hint = {
         "keywords": keywords,
         "eligible": len(eligible),
@@ -1060,6 +1061,8 @@ async def subscription_info(request: Request):
         # 订阅输出页的两个列表：实际下发节点 / 被关键词命中剔除的节点
         "nodes": [n.get("display_name") for n in kept],
         "filtered": [{"name": d.get("name"), "keyword": d.get("keyword")} for d in dropped],
+        "loon": {"available": len(loon_kept), "excluded": sum(loon_skipped.values()),
+                 "reasons": loon_skipped},
     }
     return {
         "filter": filter_hint,
@@ -1071,12 +1074,14 @@ async def subscription_info(request: Request):
         "meta": builder.meta(),
         "links": {
             "path": _sub_link(token),
+            "loon": _sub_link(token) + "&format=loon",
             "clash": _sub_link(token) + "&format=clash",
             "singbox": _sub_link(token) + "&format=singbox",
             "base64": _sub_link(token) + "&format=base64",
         },
         "base_url": str(request.base_url).rstrip("/"),
         "queryless": {
+            "loon": f"/sub/all/{token}/loon",
             "clash": f"/sub/all/{token}/clash",
             "singbox": f"/sub/all/{token}/singbox",
             "base64": f"/sub/all/{token}/base64",
@@ -1293,7 +1298,9 @@ def _serve_sub(token: str | None, fmt: str | None, ua: str,
         raise HTTPException(status_code=403, detail="订阅 Token 无效")
     if not fmt:
         low = ua.lower()
-        if "sing-box" in low or "singbox" in low:
+        if "loon" in low:
+            fmt = "loon"
+        elif "sing-box" in low or "singbox" in low:
             fmt = "singbox"
         elif "clash" in low or "mihomo" in low or "meta" in low:
             fmt = "clash"
@@ -1310,8 +1317,8 @@ def _serve_sub(token: str | None, fmt: str | None, ua: str,
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="订阅尚未生成")
     media = {"clash": "text/yaml; charset=utf-8", "singbox": "application/json; charset=utf-8",
-             "base64": "text/plain; charset=utf-8"}[fmt]
-    ext = {"clash": "yaml", "singbox": "json", "base64": "txt"}[fmt]
+             "base64": "text/plain; charset=utf-8", "loon": "text/plain; charset=utf-8"}[fmt]
+    ext = {"clash": "yaml", "singbox": "json", "base64": "txt", "loon": "txt"}[fmt]
     headers = {
         "Content-Disposition": f'inline; filename="nodepool.{ext}"',
         "Profile-Update-Interval": "12",
