@@ -11,6 +11,10 @@ const blank = () => ({ name: '', ident: '', url: '', method: 'GET', expect_statu
                        expect_body: '', max_latency: 0, enabled: true, sort_order: 10 })
 const form = ref(blank())
 const isMobile = ref(false)
+const speedForm = ref({})
+const speedSources = ref([])
+const speedChecking = ref(false)
+const speedSaving = ref(false)
 let mq = null
 function syncMobile(e) { isMobile.value = e.matches }
 
@@ -57,11 +61,61 @@ async function remove(row) {
   catch (e) { ElMessage.error(e.message) }
 }
 
+async function loadSpeed() {
+  try {
+    const [settings, overview] = await Promise.all([
+      api.get('/api/settings'), api.get('/api/speed/overview')
+    ])
+    speedForm.value = { ...settings.settings }
+    speedSources.value = overview.items || []
+  } catch (e) { ElMessage.error(e.message) }
+}
+
+async function saveSpeed() {
+  speedSaving.value = true
+  try {
+    await api.patch('/api/settings', {
+      speed_enabled: !!Number(speedForm.value.speed_enabled),
+      speed_connections: Number(speedForm.value.speed_connections),
+      speed_warmup_seconds: Number(speedForm.value.speed_warmup_seconds),
+      speed_sample_seconds: Number(speedForm.value.speed_sample_seconds),
+      speed_connect_timeout: Number(speedForm.value.speed_connect_timeout),
+      speed_total_timeout: Number(speedForm.value.speed_total_timeout),
+      speed_retry: Number(speedForm.value.speed_retry),
+      speed_auto_enabled: !!Number(speedForm.value.speed_auto_enabled),
+      speed_auto_interval_minutes: Number(speedForm.value.speed_auto_interval_minutes),
+      speed_auto_nodes: Number(speedForm.value.speed_auto_nodes)
+    })
+    ElMessage.success('测速参数已保存')
+    await loadSpeed()
+  } catch (e) { ElMessage.error(e.message) }
+  finally { speedSaving.value = false }
+}
+
+async function checkSpeedSources() {
+  speedChecking.value = true
+  try {
+    const res = await api.post('/api/speed/sources/check', {})
+    ElMessage.success(`健康检查完成：${res.ok}/${res.total} 个源正常`)
+    speedSources.value = res.items || []
+  } catch (e) { ElMessage.error(e.message) }
+  finally { speedChecking.value = false }
+}
+
+async function toggleSpeedSource(row) {
+  try {
+    await api.patch(`/api/speed/sources/${row.id}`, { enabled: !!row.enabled })
+    ElMessage.success(row.enabled ? '已启用，首次测速前会重新健康检查' : '已停用')
+    await loadSpeed()
+  } catch (e) { ElMessage.error(e.message) }
+}
+
 onMounted(() => {
   mq = window.matchMedia('(max-width: 768px)')
   isMobile.value = mq.matches
   mq.addEventListener('change', syncMobile)
   load()
+  loadSpeed()
 })
 onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 </script>
@@ -138,6 +192,86 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             <el-button link @click="openEdit(row)">编辑</el-button>
             <el-button link type="danger" :disabled="row.is_default" @click="remove(row)">删除</el-button>
           </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <div class="np-card" style="padding:20px;margin-top:16px">
+      <div class="np-section-title">
+        下载测速（独立模块）
+        <div class="np-flex" />
+        <el-button size="small" :loading="speedChecking" @click="checkSpeedSources">健康检查</el-button>
+        <el-button size="small" type="primary" :loading="speedSaving" @click="saveSpeed">保存测速设置</el-button>
+      </div>
+      <div class="np-muted" style="margin-bottom:12px">
+        走节点本地 SOCKS 端口直连公共 HTTPS 测速源，4 连接分段下载。测速结果不参与评分，测速源故障与节点故障分开记录。
+      </div>
+      <el-form label-width="150px" size="default">
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="启用下载测速"><el-switch v-model="speedForm.speed_enabled" active-value="1" inactive-value="0" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="并发连接"><el-input-number v-model="speedForm.speed_connections" :min="1" :max="8" style="width:100%" /></el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="预热 (秒)"><el-input-number v-model="speedForm.speed_warmup_seconds" :min="0" :max="5" :step="0.5" style="width:100%" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="采样 (秒)"><el-input-number v-model="speedForm.speed_sample_seconds" :min="3" :max="30" style="width:100%" /></el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="单连接超时 (秒)"><el-input-number v-model="speedForm.speed_connect_timeout" :min="3" :max="30" style="width:100%" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="整轮超时 (秒)"><el-input-number v-model="speedForm.speed_total_timeout" :min="8" :max="60" style="width:100%" /></el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="失败重试"><el-input-number v-model="speedForm.speed_retry" :min="0" :max="2" style="width:100%" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="自动测速"><el-switch v-model="speedForm.speed_auto_enabled" active-value="1" inactive-value="0" /></el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="自动间隔 (分钟)"><el-input-number v-model="speedForm.speed_auto_interval_minutes" :min="15" :max="1440" :step="15" style="width:100%" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="每轮节点数"><el-input-number v-model="speedForm.speed_auto_nodes" :min="1" :max="20" style="width:100%" /></el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+      <el-table :data="speedSources" size="small" max-height="260">
+        <el-table-column prop="name" label="测速源" min-width="150" />
+        <el-table-column prop="region" label="地区" width="90" />
+        <el-table-column label="健康" width="86">
+          <template #default="{ row }">
+            <el-tag size="small" effect="plain"
+                    :type="row.health === 'ok' ? 'success' : (row.health === 'fail' ? 'danger' : 'info')">
+              {{ row.health === 'ok' ? '正常' : (row.health === 'fail' ? '异常' : '未检查') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="Range" width="76">
+          <template #default="{ row }"><span class="np-mono">{{ row.range_ok ? '206' : '—' }}</span></template>
+        </el-table-column>
+        <el-table-column label="连接 ms" width="86">
+          <template #default="{ row }">{{ row.latency_ms ?? '—' }}</template>
+        </el-table-column>
+        <el-table-column label="启用" width="66">
+          <template #default="{ row }">
+            <el-switch v-model="row.enabled" :active-value="1" :inactive-value="0" @change="toggleSpeedSource(row)" />
+          </template>
+        </el-table-column>
+        <el-table-column label="地址" min-width="280">
+          <template #default="{ row }"><span class="np-muted">{{ row.url }}</span></template>
         </el-table-column>
       </el-table>
     </div>
