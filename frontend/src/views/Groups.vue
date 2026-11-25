@@ -328,13 +328,13 @@ onUnmounted(() => {
           <el-col :xs="24" :sm="12" :md="6">
             <el-form-item label="执行频率">
               <el-input-number v-model="speedForm.speed_schedule_every_days" :min="1" :max="30"
-                               style="width:100%" />
+                               class="speed-num" />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="6">
             <el-form-item label="流量上限 MB">
               <el-input-number v-model="speedForm.speed_traffic_limit_mb" :min="1" :max="1024"
-                               :step="10" style="width:100%" />
+                               :step="10" class="speed-num" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -354,7 +354,7 @@ onUnmounted(() => {
           <el-col :xs="24" :sm="12" :md="6">
             <el-form-item label="有效期 天">
               <el-input-number v-model="speedForm.speed_result_ttl_days" :min="1" :max="30"
-                               style="width:100%" />
+                               class="speed-num" />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="6">
@@ -370,22 +370,22 @@ onUnmounted(() => {
         </div>
         <el-row :gutter="12">
           <el-col :xs="24" :sm="12" :md="4">
-            <el-form-item label="并发连接"><el-input-number v-model="speedForm.speed_connections" :min="1" :max="8" style="width:100%" /></el-form-item>
+            <el-form-item label="并发连接"><el-input-number v-model="speedForm.speed_connections" :min="1" :max="8" class="speed-num" /></el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="4">
-            <el-form-item label="预热（秒）"><el-input-number v-model="speedForm.speed_warmup_seconds" :min="0" :max="5" :step="0.5" style="width:100%" /></el-form-item>
+            <el-form-item label="预热（秒）"><el-input-number v-model="speedForm.speed_warmup_seconds" :min="0" :max="5" :step="0.5" class="speed-num" /></el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="4">
-            <el-form-item label="采样（秒）"><el-input-number v-model="speedForm.speed_sample_seconds" :min="3" :max="30" style="width:100%" /></el-form-item>
+            <el-form-item label="采样（秒）"><el-input-number v-model="speedForm.speed_sample_seconds" :min="3" :max="30" class="speed-num" /></el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="4">
-            <el-form-item label="连接超时"><el-input-number v-model="speedForm.speed_connect_timeout" :min="3" :max="30" style="width:100%" /></el-form-item>
+            <el-form-item label="连接超时"><el-input-number v-model="speedForm.speed_connect_timeout" :min="3" :max="30" class="speed-num" /></el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="4">
-            <el-form-item label="整轮超时"><el-input-number v-model="speedForm.speed_total_timeout" :min="8" :max="60" style="width:100%" /></el-form-item>
+            <el-form-item label="整轮超时"><el-input-number v-model="speedForm.speed_total_timeout" :min="8" :max="60" class="speed-num" /></el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="4">
-            <el-form-item label="失败重试"><el-input-number v-model="speedForm.speed_retry" :min="0" :max="2" style="width:100%" /></el-form-item>
+            <el-form-item label="失败重试"><el-input-number v-model="speedForm.speed_retry" :min="0" :max="2" class="speed-num" /></el-form-item>
           </el-col>
         </el-row>
 
@@ -397,7 +397,7 @@ onUnmounted(() => {
           <el-col v-for="g in THRESHOLD_ROWS" :key="g.key" :xs="12" :sm="6">
             <el-form-item :label="g.emoji + ' ' + g.label">
               <el-input-number v-model="speedForm['speed_grade_' + g.key]" :min="0.01" :max="1024"
-                               :step="g.key === 'poor' ? 0.05 : 1" :precision="2" style="width:100%" />
+                               :step="g.key === 'poor' ? 0.05 : 1" :precision="2" class="speed-num-wide" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -577,6 +577,14 @@ onUnmounted(() => {
   color: #64748b;
   margin: 0 2px 8px;
 }
+.speed-num {
+  width: 100% !important;
+  max-width: 112px;
+}
+.speed-num-wide {
+  width: 100% !important;
+  max-width: 132px;
+}
 .speed-form :deep(.el-form-item) {
   margin-bottom: 4px;
 }
@@ -662,5 +670,11 @@ onUnmounted(() => {
   .speed-actions { align-items: stretch; }
   .speed-action-main .el-button { flex: 1; }
   .speed-actions .el-select { width: 100% !important; }
+}
+@media (max-width: 768px) {
+  .speed-num,
+  .speed-num-wide {
+    max-width: none;
+  }
 }
 </style>
