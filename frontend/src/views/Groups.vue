@@ -223,6 +223,7 @@ onUnmounted(() => {
     <div v-if="isMobile" class="np-mobile-list">
       <div v-for="row in items" :key="row.id" class="np-mobile-card">
         <div class="np-mobile-card-head">
+          <el-switch :model-value="row.enabled" size="small" @change="(v) => toggle(row, v)" />
           <div class="np-mobile-title">
             {{ row.name }}
             <div class="np-mobile-sub">
@@ -230,7 +231,6 @@ onUnmounted(() => {
               <span style="margin-left:6px">{{ row.method }}</span>
             </div>
           </div>
-          <el-switch :model-value="row.enabled" size="small" @change="(v) => toggle(row, v)" />
         </div>
         <div class="np-mobile-meta">
           <span class="np-mono" style="max-width:100%;overflow:hidden;text-overflow:ellipsis">{{ row.url }}</span>
@@ -250,6 +250,11 @@ onUnmounted(() => {
 
     <div v-if="!isMobile" class="np-card">
       <el-table :data="items">
+        <el-table-column label="启用" width="64" align="center">
+          <template #default="{ row }">
+            <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
+          </template>
+        </el-table-column>
         <el-table-column prop="name" label="名称（内部）" width="120" />
         <el-table-column label="标识" width="100">
           <template #default="{ row }"><el-tag effect="plain" size="small">{{ row.ident }}</el-tag></template>
@@ -266,11 +271,6 @@ onUnmounted(() => {
         <el-table-column prop="passed" label="通过" width="60" />
         <el-table-column label="最近运行" width="150">
           <template #default="{ row }">{{ formatTs(row.last_run_at) }}</template>
-        </el-table-column>
-        <el-table-column label="启用" width="70">
-          <template #default="{ row }">
-            <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
-          </template>
         </el-table-column>
         <el-table-column label="操作" width="120">
           <template #default="{ row }">
@@ -462,14 +462,14 @@ onUnmounted(() => {
             <el-button size="small" :loading="speedChecking" @click="checkSpeedSources">测试源健康检测</el-button>
           </div>
           <el-table :data="speedSources" size="small">
-            <el-table-column label="启用" width="64" align="center">
+            <el-table-column label="启用" width="56" align="center">
               <template #default="{ row }">
                 <el-switch v-model="row.enabled" :active-value="1" :inactive-value="0" @change="toggleSpeedSource(row)" />
               </template>
             </el-table-column>
-            <el-table-column prop="name" label="测速源" min-width="150" />
-            <el-table-column prop="region" label="地区" width="86" />
-            <el-table-column label="健康" width="80">
+            <el-table-column prop="name" label="测速源" min-width="120" show-overflow-tooltip />
+            <el-table-column prop="region" label="地区" width="60" />
+            <el-table-column label="健康" width="64">
               <template #default="{ row }">
                 <el-tag size="small" effect="plain"
                         :type="row.health === 'ok' ? 'success' : (row.health === 'fail' ? 'danger' : 'info')">
@@ -477,13 +477,13 @@ onUnmounted(() => {
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="Range" width="70">
+            <el-table-column label="Range" width="56">
               <template #default="{ row }"><span class="np-mono">{{ row.range_ok ? '206' : '—' }}</span></template>
             </el-table-column>
-            <el-table-column label="连接 ms" width="82">
+            <el-table-column label="连接 ms" width="66">
               <template #default="{ row }">{{ row.latency_ms ?? '—' }}</template>
             </el-table-column>
-            <el-table-column label="地址" min-width="260">
+            <el-table-column label="地址" min-width="150" show-overflow-tooltip>
               <template #default="{ row }"><span class="np-muted">{{ row.url }}</span></template>
             </el-table-column>
           </el-table>
@@ -724,7 +724,7 @@ onUnmounted(() => {
 }
 .speed-tables {
   display: grid;
-  grid-template-columns: minmax(320px, .85fr) minmax(620px, 2fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   align-items: start;
 }
