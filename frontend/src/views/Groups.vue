@@ -391,29 +391,40 @@ onUnmounted(() => {
 
         <div class="speed-subhead">
           速度等级阈值（MB/s）
-          <span class="speed-subhead-note">危 = 低于「差」阈值，无需单独设置</span>
+          <span class="speed-subhead-note">数值为各档下限</span>
         </div>
-        <el-row :gutter="12">
-          <el-col v-for="g in THRESHOLD_ROWS" :key="g.key" :xs="12" :sm="6">
-            <el-form-item :label="g.emoji + ' ' + g.label">
-              <el-input-number v-model="speedForm['speed_grade_' + g.key]" :min="0.01" :max="1024"
-                               :step="g.key === 'poor' ? 0.05 : 1" :precision="2" class="speed-num-wide" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <div class="speed-threshold-grid">
+          <div v-for="g in THRESHOLD_ROWS" :key="g.key" class="speed-threshold">
+            <span class="speed-threshold-label">
+              <span class="np-speed-dot is-tag" :style="{ background: g.color }"></span>{{ g.label }}
+            </span>
+            <el-input-number v-model="speedForm['speed_grade_' + g.key]" :min="0.01" :max="1024"
+                             :step="g.key === 'poor' ? 0.05 : 1" :precision="2" class="speed-num-wide" />
+          </div>
+        </div>
+        <div class="speed-status-queue">
+          <span class="speed-status">
+            <span class="np-speed-dot is-tag" style="background:#DC2626"></span>
+            <b style="color:#DC2626">危</b><i>低于「差」阈值</i>
+          </span>
+          <span class="speed-status">
+            <span class="np-speed-dot is-tag" style="background:#D1D5DB"></span>
+            <b>已排除</b><i>机场不参与测速</i>
+          </span>
+          <span class="speed-status">
+            <span class="np-speed-dot is-tag is-warn" style="background:#F59E0B">!</span>
+            <b style="color:#F59E0B">异常</b><i>最近一次测速失败</i>
+          </span>
+          <span class="speed-status">
+            <span class="np-noentry"></span>
+            <b style="color:#DC2626">全部源失败</b><i>所有测速源不可用</i>
+          </span>
+          <span class="speed-status">
+            <span class="np-speed-dot is-tag" style="background:#9CA3AF"></span>
+            <b>待测速</b><i>尚无有效结果</i>
+          </span>
+        </div>
       </el-form>
-
-      <div class="speed-legend">
-        <span><b style="color:#8B5CF6"><span class="np-speed-dot is-tag" style="background:#8B5CF6"></span>优</b> ≥ 5 MB/s</span>
-        <span><b style="color:#16A34A"><span class="np-speed-dot is-tag" style="background:#16A34A"></span>良</b> ≥ 2 MB/s</span>
-        <span><b style="color:#2563EB"><span class="np-speed-dot is-tag" style="background:#2563EB"></span>中</b> ≥ 1 MB/s</span>
-        <span><b style="color:#EA580C"><span class="np-speed-dot is-tag" style="background:#EA580C"></span>差</b> ≥ 256 KB/s</span>
-        <span><b style="color:#DC2626"><span class="np-speed-dot is-tag" style="background:#DC2626"></span>危</b> &lt; 256 KB/s</span>
-        <span><b><span class="np-speed-dot is-tag" style="background:#D1D5DB"></span>已排除</b></span>
-        <span><b style="color:#F59E0B"><span class="np-speed-dot is-tag is-warn" style="background:#F59E0B">!</span>异常</b></span>
-        <span><b style="color:#DC2626">🚫 全部源失败</b></span>
-        <span><b><span class="np-speed-dot is-tag" style="background:#9CA3AF"></span>待测速</b></span>
-      </div>
 
       <div class="speed-tables">
         <div class="speed-table-block">
@@ -618,6 +629,57 @@ onUnmounted(() => {
   color: #94a3b8;
   margin-top: 2px;
 }
+.speed-threshold-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px 12px;
+  padding-bottom: 2px;
+}
+.speed-threshold {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.speed-threshold-label {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: #334155;
+}
+.speed-threshold .speed-num-wide {
+  flex: 1 1 auto;
+  width: auto !important;
+  min-width: 0;
+  max-width: 132px;
+}
+.speed-status-queue {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #475569;
+  margin-bottom: 6px;
+}
+.speed-status {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.speed-status b {
+  font-weight: 600;
+}
+.speed-status i {
+  font-style: normal;
+  margin-left: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
 .speed-legend {
   display: flex;
   flex-wrap: wrap;
@@ -675,6 +737,16 @@ onUnmounted(() => {
   .speed-num,
   .speed-num-wide {
     max-width: none;
+  }
+  .speed-threshold-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 10px;
+  }
+  .speed-threshold-label {
+    flex-basis: 40px;
+  }
+  .speed-status-queue {
+    gap: 6px 12px;
   }
 }
 </style>
