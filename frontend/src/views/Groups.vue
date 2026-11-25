@@ -422,19 +422,19 @@ onUnmounted(() => {
             <span class="np-muted">排除后不创建任务、不消耗流量，显示深灰点</span>
           </div>
           <el-table :data="speedAirports" size="small">
-            <el-table-column prop="name" label="机场" min-width="180" />
-            <el-table-column label="节点" width="90">
-              <template #default="{ row }">
-                <span class="np-muted">{{ speedNodes.filter(n => n.airport === row.name).length }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="参与测速" width="150" align="right">
+            <el-table-column label="参与测速" width="110">
               <template #default="{ row }">
                 <el-switch :model-value="!row.speed_excluded"
                            style="margin-right:6px" @change="v => toggleAirportSpeed(row, v)" />
                 <span :style="{ color: row.speed_excluded ? '#EA580C' : '#64748b', fontSize: '12px' }">
                   {{ row.speed_excluded ? '排除' : '参与' }}
                 </span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="name" label="机场" min-width="180" />
+            <el-table-column label="节点" width="90">
+              <template #default="{ row }">
+                <span class="np-muted">{{ speedNodes.filter(n => n.airport === row.name).length }}</span>
               </template>
             </el-table-column>
           </el-table>
@@ -449,6 +449,11 @@ onUnmounted(() => {
             <el-button size="small" :loading="speedChecking" @click="checkSpeedSources">测试源健康检测</el-button>
           </div>
           <el-table :data="speedSources" size="small">
+            <el-table-column label="启用" width="64" align="center">
+              <template #default="{ row }">
+                <el-switch v-model="row.enabled" :active-value="1" :inactive-value="0" @change="toggleSpeedSource(row)" />
+              </template>
+            </el-table-column>
             <el-table-column prop="name" label="测速源" min-width="150" />
             <el-table-column prop="region" label="地区" width="86" />
             <el-table-column label="健康" width="80">
@@ -464,11 +469,6 @@ onUnmounted(() => {
             </el-table-column>
             <el-table-column label="连接 ms" width="82">
               <template #default="{ row }">{{ row.latency_ms ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column label="启用" width="62">
-              <template #default="{ row }">
-                <el-switch v-model="row.enabled" :active-value="1" :inactive-value="0" @change="toggleSpeedSource(row)" />
-              </template>
             </el-table-column>
             <el-table-column label="地址" min-width="260">
               <template #default="{ row }"><span class="np-muted">{{ row.url }}</span></template>
