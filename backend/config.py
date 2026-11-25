@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NodePoolME"
-VERSION = "1.8.1"
+VERSION = "1.8.2"
 
 DATA_DIR = Path(os.getenv("NODEPOOL_DATA_DIR", "./data")).resolve()
 CONFIG_DIR = Path(os.getenv("NODEPOOL_CONFIG_DIR", str(DATA_DIR / "config"))).resolve()
@@ -128,11 +128,10 @@ DEFAULT_SETTINGS = {
     "speed_traffic_limit_mb": "50",
     # 最新有效结果保留时长；过期只显示待测速，不判故障、不补测
     "speed_result_ttl_days": "3",
-    # 五级速度阈值，单位 MB/s（256 KB/s = 0.25 MB/s）
+    # 四档速度阈值，单位 MB/s（512 KB/s = 0.5 MB/s）
     "speed_grade_excellent": "5",
     "speed_grade_good": "2",
-    "speed_grade_medium": "1",
-    "speed_grade_poor": "0.25",
+    "speed_grade_poor": "0.5",
 }
 
 for _d in (DATA_DIR, CONFIG_DIR, LOG_DIR, BACKUP_DIR, SUB_DIR):

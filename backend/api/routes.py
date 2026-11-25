@@ -1169,8 +1169,7 @@ SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "su
                 "speed_retry", "speed_schedule_enabled", "speed_timezone",
                 "speed_window_start", "speed_window_end", "speed_schedule_every_days",
                 "speed_traffic_limit_mb", "speed_result_ttl_days",
-                "speed_grade_excellent", "speed_grade_good", "speed_grade_medium",
-                "speed_grade_poor",
+                "speed_grade_excellent", "speed_grade_good", "speed_grade_poor",
                 "speed_auto_enabled", "speed_auto_interval_minutes",
                 "speed_auto_nodes"]
 
@@ -1199,11 +1198,11 @@ async def update_settings(payload: SettingsIn):
     data = payload.model_dump(exclude_unset=True)
     if any(k.startswith("speed_grade_") for k in data):
         values = []
-        for key, default in (("excellent", 5), ("good", 2), ("medium", 1), ("poor", 0.25)):
+        for key, default in (("excellent", 5), ("good", 2), ("poor", 0.5)):
             raw = data.get(f"speed_grade_{key}", db.get(f"speed_grade_{key}", str(default)))
             values.append(float(raw or default))
-        if not (values[0] > values[1] > values[2] > values[3] > 0):
-            raise HTTPException(status_code=400, detail="速度阈值必须满足 优 > 良 > 中 > 差 > 0")
+        if not (values[0] > values[1] > values[2] > 0):
+            raise HTTPException(status_code=400, detail="速度阈值必须满足 优 > 良 > 差 > 0")
     if "speed_window_start" in data or "speed_window_end" in data:
         start = data.get("speed_window_start", db.get("speed_window_start"))
         end = data.get("speed_window_end", db.get("speed_window_end"))

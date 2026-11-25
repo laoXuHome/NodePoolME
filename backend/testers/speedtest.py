@@ -95,9 +95,8 @@ SPEED_MARKERS = ("🟣", "🟢", "🔵", "🟠", "🔴", "●", "⚪", "⚠️",
 PENDING_PREFIX = "待测速"
 PENDING_MARKER = PENDING_PREFIX
 GRADE_DEFS = {
-    "excellent": {"label": "优", "emoji": "🟣", "color": "#8B5CF6", "key": "excellent"},
-    "good": {"label": "良", "emoji": "🟢", "color": "#16A34A", "key": "good"},
-    "medium": {"label": "中", "emoji": "🔵", "color": "#2563EB", "key": "medium"},
+    "excellent": {"label": "优", "emoji": "🟢", "color": "#16A34A", "key": "excellent"},
+    "good": {"label": "良", "emoji": "🔵", "color": "#2563EB", "key": "good"},
     "poor": {"label": "差", "emoji": "🟠", "color": "#EA580C", "key": "poor"},
     "danger": {"label": "危", "emoji": "🔴", "color": "#DC2626", "key": "danger"},
 }
@@ -107,30 +106,26 @@ def grade_thresholds() -> dict[str, float]:
     return {
         "excellent": float(db.get("speed_grade_excellent", "5") or 5),
         "good": float(db.get("speed_grade_good", "2") or 2),
-        "medium": float(db.get("speed_grade_medium", "1") or 1),
-        "poor": float(db.get("speed_grade_poor", "0.25") or 0.25),
+        "poor": float(db.get("speed_grade_poor", "0.5") or 0.5),
     }
 
 
 def grade_for(mb_per_s: float | None, thresholds: dict | None = None) -> dict:
-    """Five-level grade based on real download throughput in MB/s."""
+    """Four-level grade based on real download throughput in MB/s."""
     if mb_per_s is None or mb_per_s < 0:
         return {}
     th = thresholds or grade_thresholds()
-    excellent, good = th["excellent"], th["good"]
-    medium, poor = th["medium"], th["poor"]
+    excellent, good, poor = th["excellent"], th["good"], th["poor"]
     if mb_per_s >= excellent:
         key = "excellent"
     elif mb_per_s >= good:
         key = "good"
-    elif mb_per_s >= medium:
-        key = "medium"
     elif mb_per_s >= poor:
         key = "poor"
     else:
         key = "danger"
     return {**GRADE_DEFS[key], "threshold_mb_s": poor if key == "danger" else {
-        "excellent": excellent, "good": good, "medium": medium, "poor": poor
+        "excellent": excellent, "good": good, "poor": poor
     }[key]}
 
 
@@ -663,26 +658,27 @@ async def run_node(node_id: int, source_ids: list[int] | None = None,
                 break
             if remaining <= 256 * 1024:
                 break
-            left_sources = max(1, max_attempts - attempts)
-            budget = remaining if left_sources == 1 else max(1024 * 1024, remaining // left_sources)
-            budget = min(remaining, budget)
+            # The cap is the amount needed to finish one speed-test URL. Bytes from
+            # an attempt that never completed do not consume it, so the next retry
+            # or the next source can still use the full cap.
+            budget = min(settings["traffic_limit_bytes"], remaining)
             attempts += 1
             attempt = 0
             result = None
             while attempt <= settings["retry"] and remaining > 256 * 1024:
                 attempt += 1
                 result = await _test_source(source, port, node, settings, max_bytes=budget)
-                remaining -= min(result.bytes, remaining)
                 consumed_bytes += result.bytes
                 _save_sample(run_id, node_id, result)
                 if result.ok:
+                    remaining -= min(result.bytes, remaining)
                     break
                 # A node that cannot open the proxy tunnel will not recover on retry.
                 if result.error_type == "node_connect":
                     break
-                # Keep the source's original slice on retry. Resetting to the whole
-                # remaining node budget lets one failed source starve every later source.
-                budget = min(budget, remaining)
+                # A failed attempt is not charged to the node cap; retry gets the
+                # same full allowance instead of the leftover bytes.
+                budget = min(settings["traffic_limit_bytes"], remaining)
             if result is None:
                 break
             if result.ok:

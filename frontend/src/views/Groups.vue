@@ -22,13 +22,12 @@ const speedNodeId = ref(null)
 const speedBusy = ref('')
 let speedTimer = null
 const GRADE_ROWS = [
-  { key: 'excellent', label: '优', emoji: '🟣', color: '#8B5CF6' },
-  { key: 'good', label: '良', emoji: '🟢', color: '#16A34A' },
-  { key: 'medium', label: '中', emoji: '🔵', color: '#2563EB' },
+  { key: 'excellent', label: '优', emoji: '🟢', color: '#16A34A' },
+  { key: 'good', label: '良', emoji: '🔵', color: '#2563EB' },
   { key: 'poor', label: '差', emoji: '🟠', color: '#EA580C' },
   { key: 'danger', label: '危', emoji: '🔴', color: '#DC2626' }
 ]
-const THRESHOLD_ROWS = GRADE_ROWS.slice(0, 4)
+const THRESHOLD_ROWS = GRADE_ROWS.slice(0, 3)
 let mq = null
 function syncMobile(e) { isMobile.value = e.matches }
 
@@ -111,7 +110,6 @@ async function saveSpeed() {
       speed_retry: speedNumber('speed_retry'),
       speed_grade_excellent: speedNumber('speed_grade_excellent'),
       speed_grade_good: speedNumber('speed_grade_good'),
-      speed_grade_medium: speedNumber('speed_grade_medium'),
       speed_grade_poor: speedNumber('speed_grade_poor')
     })
     ElMessage.success('测速参数已保存')
@@ -335,6 +333,9 @@ onUnmounted(() => {
               <el-input-number v-model="speedForm.speed_traffic_limit_mb" :min="1" :max="1024"
                                :step="10" class="speed-num" />
             </el-form-item>
+            <div class="speed-cap-note">
+              仅完整测完的测速地址计入上限；失败或未跑完的地址不占额度，重试和下一个地址仍拿完整上限。
+            </div>
             <el-form-item label="开始时间">
               <el-time-picker v-model="speedForm.speed_window_start" format="HH:mm"
                               value-format="HH:mm" placeholder="18:00" style="width:100%" />
@@ -641,9 +642,15 @@ onUnmounted(() => {
   color: #94a3b8;
   margin-top: 2px;
 }
+.speed-cap-note {
+  margin: -6px 0 6px 102px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #94a3b8;
+}
 .speed-threshold-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px 12px;
   padding-bottom: 2px;
 }
@@ -756,6 +763,9 @@ onUnmounted(() => {
   .speed-num,
   .speed-num-wide {
     max-width: none;
+  }
+  .speed-cap-note {
+    margin-left: 0;
   }
   .speed-threshold-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

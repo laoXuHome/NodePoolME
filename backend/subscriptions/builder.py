@@ -145,12 +145,12 @@ def filter_keywords() -> list[str]:
     return keys
 
 
-SPEED_FILTER_ORDER = ("excellent", "good", "medium", "poor", "danger",
+SPEED_FILTER_ORDER = ("excellent", "good", "poor", "danger",
                       "pending", "excluded", "error", "source_failed")
 SPEED_FILTER_ALIASES = {
-    "excellent": "excellent", "优": "excellent", "🟣": "excellent",
-    "good": "good", "良": "good", "🟢": "good",
-    "medium": "medium", "中": "medium", "🔵": "medium",
+    "excellent": "excellent", "优": "excellent", "🟣": "excellent", "🟢": "excellent",
+    "good": "good", "良": "good", "🔵": "good",
+    "medium": "poor", "中": "poor",
     "poor": "poor", "差": "poor", "🟠": "poor",
     "danger": "danger", "危": "danger", "🔴": "danger",
     "pending": "pending", "待测速": "pending", "待测": "pending", "❓": "pending",
@@ -160,19 +160,19 @@ SPEED_FILTER_ALIASES = {
     "全部源失败": "source_failed", "🚫": "source_failed",
 }
 SPEED_FILTER_LABELS = {
-    "excellent": "优", "good": "良", "medium": "中", "poor": "差", "danger": "危",
+    "excellent": "优", "good": "良", "poor": "差", "danger": "危",
     "pending": "待测速", "excluded": "已排除", "error": "异常", "source_failed": "全源失败",
 }
 
 
 def parse_speed_filter_tags(value: str | None) -> set[str]:
-    """解析下发标签过滤：支持五级速度 + 待测速/已排除/异常/全源失败。"""
+    """解析下发标签过滤：支持四档速度 + 待测速/已排除/异常/全源失败。"""
     if value is None or not str(value).strip():
         return set()
     tokens = [t.strip().lower() for t in re.split(r"[,\s，]+", str(value)) if t.strip()]
     tags = {SPEED_FILTER_ALIASES[t] for t in tokens if t in SPEED_FILTER_ALIASES}
     if not tags:
-        raise ValueError("测速标签无效；可用 优/良/中/差/危/待测速/已排除/异常/全源失败")
+        raise ValueError("测速标签无效；可用 优/良/差/危/待测速/已排除/异常/全源失败")
     return tags
 
 
@@ -202,7 +202,7 @@ def speed_tag(state: dict) -> str | None:
 
 
 def apply_speed_filter(nodes: list[dict]) -> tuple[list[dict], list[dict]]:
-    """勾选标签即排除带该标签的节点；包含五级速度与测速状态标签。"""
+    """勾选标签即排除带该标签的节点；包含四档速度与测速状态标签。"""
     tags = set(speed_filter_tags())
     if not tags:
         return nodes, []
@@ -944,9 +944,9 @@ def meta() -> dict:
 
 
 SPEED_LEVEL_ALIASES = {
-    "excellent": "excellent", "优": "excellent", "🟣": "excellent", "purple": "excellent",
-    "good": "good", "良": "good", "🟢": "good", "green": "good",
-    "medium": "medium", "中": "medium", "🔵": "medium", "blue": "medium",
+    "excellent": "excellent", "优": "excellent", "🟣": "excellent", "🟢": "excellent", "purple": "excellent", "green": "excellent",
+    "good": "good", "良": "good", "🔵": "good", "blue": "good",
+    "medium": "poor", "中": "poor",
     "poor": "poor", "差": "poor", "🟠": "poor", "orange": "poor",
     "danger": "danger", "危": "danger", "🔴": "danger", "red": "danger",
 }
@@ -958,7 +958,7 @@ def parse_speed_levels(value: str | None) -> set[str] | None:
     tokens = [t.strip().lower() for t in re.split(r"[,\s，]+", str(value)) if t.strip()]
     levels = {SPEED_LEVEL_ALIASES[t] for t in tokens if t in SPEED_LEVEL_ALIASES}
     if not levels:
-        raise ValueError("speed 参数无效；可用 excellent,good,medium,poor,danger")
+        raise ValueError("speed 参数无效；可用 excellent,good,poor,danger")
     return levels
 
 

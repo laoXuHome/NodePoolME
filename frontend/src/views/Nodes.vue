@@ -125,7 +125,6 @@ function shortTs(ts) { const full = formatTs(ts); return full === '—' ? full :
 const SPEED_FILTER_OPTIONS = [
   { value: 'excellent', label: '优' },
   { value: 'good', label: '良' },
-  { value: 'medium', label: '中' },
   { value: 'poor', label: '差' },
   { value: 'danger', label: '危' },
   { value: 'pending', label: '待测速' },
@@ -134,9 +133,8 @@ const SPEED_FILTER_OPTIONS = [
   { value: 'source_failed', label: '全源失败' }
 ]
 const SPEED_META = {
-  excellent: { label: '优', emoji: '🟣', color: '#8B5CF6' },
-  good: { label: '良', emoji: '🟢', color: '#16A34A' },
-  medium: { label: '中', emoji: '🔵', color: '#2563EB' },
+  excellent: { label: '优', emoji: '🟢', color: '#16A34A' },
+  good: { label: '良', emoji: '🔵', color: '#2563EB' },
   poor: { label: '差', emoji: '🟠', color: '#EA580C' },
   danger: { label: '危', emoji: '🔴', color: '#DC2626' }
 }
@@ -164,7 +162,7 @@ function speedType(row) {
   const s = row?.speed
   if (!s) return 'info'
   if (s.status === 'ok') {
-    return ['excellent', 'good'].includes(s.grade) ? 'success' : (s.grade === 'medium' ? 'warning' : 'danger')
+    return ['excellent', 'good'].includes(s.grade) ? 'success' : (s.grade === 'poor' ? 'warning' : 'danger')
   }
   if (s.status === 'excluded') return 'info'
   return s.status === 'stale' ? 'info' : 'warning'

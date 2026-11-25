@@ -64,7 +64,7 @@ class SubSettings(BaseModel):
     sub_token: Optional[str] = None
     regenerate_token: bool = False
     sub_filter_keywords: Optional[str] = Field(default=None, max_length=4000)
-    # 固定标签排除：excellent,good,medium,poor,danger，勾选表示排除该等级
+    # 固定标签排除：excellent,good,poor,danger，勾选表示排除该等级
     sub_filter_speed_levels: Optional[str] = Field(default=None, max_length=120)
 
 
@@ -110,7 +110,6 @@ class SettingsIn(BaseModel):
     speed_result_ttl_days: Optional[int] = Field(default=None, ge=1, le=30)
     speed_grade_excellent: Optional[float] = Field(default=None, gt=0, le=1024)
     speed_grade_good: Optional[float] = Field(default=None, gt=0, le=1024)
-    speed_grade_medium: Optional[float] = Field(default=None, gt=0, le=1024)
     speed_grade_poor: Optional[float] = Field(default=None, gt=0, le=1024)
     speed_auto_enabled: Optional[bool] = None
     speed_auto_interval_minutes: Optional[int] = Field(default=None, ge=15, le=1440)

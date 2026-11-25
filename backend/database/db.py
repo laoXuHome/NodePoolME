@@ -235,7 +235,7 @@ CREATE TABLE IF NOT EXISTS speed_runs (
     connect_ms INTEGER,                       -- 有效测速源连接耗时中位数
     airport_name TEXT,
     trigger TEXT,                             -- schedule / manual / all / new
-    grade TEXT,                               -- excellent / good / medium / poor / danger
+    grade TEXT,                               -- excellent / good / poor / danger
     traffic_limit_bytes INTEGER NOT NULL DEFAULT 0,
     sources_total INTEGER NOT NULL DEFAULT 0,
     sources_ok INTEGER NOT NULL DEFAULT 0,
@@ -365,6 +365,17 @@ def init_db() -> None:
         if get("speed_connect_timeout") in ("10", "10.0"):
             set_setting("speed_connect_timeout", "8")
         set_setting("speed_v17_defaults", "1")
+    # Migration: speed grades collapsed from five levels to four. Only migrate the
+    # old default gap (中=1, 差=0.25); keep custom thresholds untouched.
+    if get("speed_grade_scheme") != "4":
+        if (get("speed_grade_medium") is not None
+                and get("speed_grade_poor") in ("0.25", "0.250")):
+            set_setting("speed_grade_poor", "0.5")
+        set_setting("speed_grade_scheme", "4")
+    # Remove the retired middle grade left by older five-tier databases.
+    if get("speed_grade_medium") is not None:
+        conn.execute("DELETE FROM settings WHERE key = 'speed_grade_medium'")
+        conn.commit()
     import secrets
 
     if not get("sub_token"):

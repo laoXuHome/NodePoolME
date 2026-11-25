@@ -35,10 +35,9 @@ def test_grade_boundaries_use_mb_per_s():
     assert speedtest.grade_for(5.0)["key"] == "excellent"
     assert speedtest.grade_for(4.99)["key"] == "good"
     assert speedtest.grade_for(2.0)["key"] == "good"
-    assert speedtest.grade_for(1.99)["key"] == "medium"
-    assert speedtest.grade_for(1.0)["key"] == "medium"
-    assert speedtest.grade_for(0.25)["key"] == "poor"
-    assert speedtest.grade_for(0.249)["key"] == "danger"
+    assert speedtest.grade_for(1.99)["key"] == "poor"
+    assert speedtest.grade_for(0.5)["key"] == "poor"
+    assert speedtest.grade_for(0.499)["key"] == "danger"
     assert speedtest.grade_for(0.01)["key"] == "danger"   # real slow speed is a grade, not an error
     assert speedtest.grade_for(None) == {}
 
@@ -53,7 +52,7 @@ def test_speed_tag_prefix_is_idempotent_and_exclusion_wins():
     state = speedtest.speed_map()[node_id]
     assert state["status"] == "ok" and state["grade"] == "good"
     tagged = speedtest.apply_speed_prefix("🟣测速机场·香港01", state["marker"])
-    assert tagged == "🟢测速机场·香港01"
+    assert tagged == "🔵测速机场·香港01"
     db.execute("UPDATE airports SET speed_excluded=1 WHERE id=?", (airport_id,))
     state = speedtest.speed_map()[node_id]
     assert state["status"] == "excluded" and state["marker"] == "●"
@@ -115,7 +114,7 @@ def test_speed_filter_accepts_keys_and_chinese_labels():
     assert builder.parse_speed_levels(None) is None
     assert builder.parse_speed_levels("excellent,good") == {"excellent", "good"}
     assert builder.parse_speed_levels("优，良") == {"excellent", "good"}
-    assert builder.parse_speed_levels("🟣,🔵") == {"excellent", "medium"}
+    assert builder.parse_speed_levels("🟣,🔵") == {"excellent", "good"}
 
 
 def test_eligible_nodes_respect_airport_exclusion():
@@ -161,8 +160,8 @@ def test_subscription_speed_filter_returns_only_selected_and_never_falls_back(mo
     (tmp_path / "sub_all.yaml").write_text("proxies: [{name: stale-full}]", encoding="utf-8")
     _, content = builder.read("clash", {"excellent"})
     proxies = yaml.safe_load(content)["proxies"]
-    assert [p["name"] for p in proxies] == ["🟣测速机场·香港07"]
-    _, empty = builder.read("clash", {"medium"})
+    assert [p["name"] for p in proxies] == ["🟢测速机场·香港07"]
+    _, empty = builder.read("clash", {"poor"})
     assert yaml.safe_load(empty)["proxies"] in ([], None)
 
 
@@ -228,7 +227,7 @@ def test_run_node_records_bytes_and_connect_time(monkeypatch):
     assert run["grade"] == "excellent"
 
 
-def test_retry_keeps_source_budget_and_later_sources_run(monkeypatch):
+def test_failed_source_does_not_consume_budget(monkeypatch):
     import asyncio
     from backend.testers import engine as engine_mod
 
@@ -252,7 +251,7 @@ def test_retry_keeps_source_budget_and_later_sources_run(monkeypatch):
 
     async def fake_source(source, port, node, settings, max_bytes=None):
         calls.append((source["id"], max_bytes))
-        if source["id"] == 11 and len([c for c in calls if c[0] == 11]) == 1:
+        if source["id"] == 11:
             return speedtest.SourceResult(
                 source, False, bytes=5 * 1024 * 1024, error_type="status",
                 message="HTTP 403")
@@ -266,12 +265,47 @@ def test_retry_keeps_source_budget_and_later_sources_run(monkeypatch):
     monkeypatch.setattr(speedtest, "_test_source", fake_source)
     monkeypatch.setattr(speedtest, "_confirm_source_failure", fake_confirm)
     run = asyncio.run(speedtest.run_node(node_id, trigger="manual", prepared=True))
+    assert run["status"] == "partial"
+    # A fails both attempts; its 10 MB is not charged. B still gets the full 50 MB.
+    assert calls[0] == (11, 50 * 1024 * 1024)
+    assert calls[1] == (11, 50 * 1024 * 1024)
+    assert calls[2] == (12, 50 * 1024 * 1024)
+    assert run["bytes_total"] == 15 * 1024 * 1024
+
+
+def test_successful_source_charges_remaining_cap(monkeypatch):
+    import asyncio
+    from backend.testers import engine as engine_mod
+
+    _, node_id = _node("香港12")
+    node = db.row("SELECT * FROM nodes WHERE id=?", (node_id,))
+    sources = [
+        {"id": 21, "name": "A", "url": "https://example.com/a", "region": ""},
+        {"id": 22, "name": "B", "url": "https://example.com/b", "region": ""},
+    ]
+    calls = []
+
+    class FakeEngine:
+        name = "mihomo"
+        block_ports = {node["fingerprint"]: 1082}
+
+    async def fake_sources(primary):
+        return sources
+
+    async def fake_source(source, port, node, settings, max_bytes=None):
+        calls.append((source["id"], max_bytes))
+        return speedtest.SourceResult(
+            source, True, bytes=5 * 1024 * 1024, seconds=5, single_mbps=10,
+            multi_mbps=40, single_mb_per_s=1.25, multi_mb_per_s=5,
+            status_code=206, range_ok=True, confidence="normal")
+
+    monkeypatch.setattr(engine_mod.engine_manager, "engine", FakeEngine(), raising=False)
+    monkeypatch.setattr(speedtest, "_ensure_sources", fake_sources)
+    monkeypatch.setattr(speedtest, "_test_source", fake_source)
+    run = asyncio.run(speedtest.run_node(node_id, trigger="manual", prepared=True))
     assert run["status"] == "ok"
-    # First attempt: 50 MB / 2 sources. Retry must not get the remaining 45 MB.
-    assert calls[0] == (11, 25 * 1024 * 1024)
-    assert calls[1] == (11, 25 * 1024 * 1024)
-    assert calls[2][0] == 12
-    assert calls[2][1] == 40 * 1024 * 1024
+    assert calls[0] == (21, 50 * 1024 * 1024)
+    assert calls[1] == (22, 45 * 1024 * 1024)
 
 
 def test_recent_direct_source_check_blocks_false_source_failure(monkeypatch):
