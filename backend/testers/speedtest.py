@@ -104,8 +104,8 @@ GRADE_DEFS = {
 
 def grade_thresholds() -> dict[str, float]:
     return {
-        "excellent": float(db.get("speed_grade_excellent", "5") or 5),
-        "good": float(db.get("speed_grade_good", "2") or 2),
+        "excellent": float(db.get("speed_grade_excellent", "3") or 3),
+        "good": float(db.get("speed_grade_good", "1.5") or 1.5),
         "poor": float(db.get("speed_grade_poor", "0.5") or 0.5),
     }
 

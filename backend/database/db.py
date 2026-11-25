@@ -372,6 +372,14 @@ def init_db() -> None:
                 and get("speed_grade_poor") in ("0.25", "0.250")):
             set_setting("speed_grade_poor", "0.5")
         set_setting("speed_grade_scheme", "4")
+    # Migration: v1.8.4 lowers the default 优/良 thresholds from 5/2 to 3/1.5.
+    # Only shift a pair that still matches the old defaults; custom values survive.
+    if get("speed_grade_v184_defaults") != "1":
+        if (get("speed_grade_excellent") in ("5", "5.0", "5.00")
+                and get("speed_grade_good") in ("2", "2.0", "2.00")):
+            set_setting("speed_grade_excellent", "3")
+            set_setting("speed_grade_good", "1.5")
+        set_setting("speed_grade_v184_defaults", "1")
     # Remove the retired middle grade left by older five-tier databases.
     if get("speed_grade_medium") is not None:
         conn.execute("DELETE FROM settings WHERE key = 'speed_grade_medium'")

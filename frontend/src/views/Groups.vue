@@ -88,6 +88,18 @@ async function loadSpeed() {
   } catch (e) { ElMessage.error(e.message) }
 }
 
+async function refreshSpeedStatus(silent = false) {
+  try {
+    const [overview, nodes] = await Promise.all([
+      api.get('/api/speed/overview'), api.get('/api/speed/nodes')
+    ])
+    speedOverview.value = overview
+    speedSources.value = overview.items || []
+    speedAirports.value = overview.airports || []
+    speedNodes.value = nodes.items || []
+  } catch (e) { if (!silent) ElMessage.error(e.message) }
+}
+
 function speedNumber(key) { return Number(speedForm.value[key]) }
 
 async function saveSpeed() {
@@ -125,7 +137,7 @@ async function runAllSpeed() {
   try {
     const res = await api.post('/api/speed/run/all', {})
     ElMessage.success(`已入队 ${res.created} 个节点${res.duplicate ? `，跳过重复 ${res.duplicate}` : ''}`)
-    await loadSpeed()
+    await refreshSpeedStatus()
   } catch (e) { ElMessage.error(e.message) }
   finally { speedBusy.value = '' }
 }
@@ -135,7 +147,7 @@ async function runNewSpeed() {
   try {
     const res = await api.post('/api/speed/run/new', {})
     ElMessage.success(res.created ? `已入队 ${res.created} 个待测节点` : '没有尚无有效测速结果的节点')
-    await loadSpeed()
+    await refreshSpeedStatus()
   } catch (e) { ElMessage.error(e.message) }
   finally { speedBusy.value = '' }
 }
@@ -148,7 +160,7 @@ async function runSelectedSpeed() {
     if (res.status === 'queued') ElMessage.info(res.message)
     else if (res.mb_per_s != null) ElMessage.success(`节点测速完成：${res.mb_per_s.toFixed(2)} MB/s`)
     else ElMessage.warning(`测速未取得有效结果：${res.message || res.status}`)
-    await loadSpeed()
+    await refreshSpeedStatus()
   } catch (e) { ElMessage.error(e.message) }
   finally { speedBusy.value = '' }
 }
@@ -157,7 +169,7 @@ async function toggleAirportSpeed(row, participate) {
   try {
     await api.patch(`/api/speed/airports/${row.id}`, { speed_excluded: !participate })
     ElMessage.success(participate ? '该机场已参与测速' : '该机场已排除测速')
-    await loadSpeed()
+    await refreshSpeedStatus()
   } catch (e) { ElMessage.error(e.message) }
 }
 
@@ -175,7 +187,7 @@ async function toggleSpeedSource(row) {
   try {
     await api.patch(`/api/speed/sources/${row.id}`, { enabled: !!row.enabled })
     ElMessage.success(row.enabled ? '已启用，首次测速前会重新检测测速源' : '已停用')
-    await loadSpeed()
+    await refreshSpeedStatus()
   } catch (e) { ElMessage.error(e.message) }
 }
 
@@ -185,7 +197,7 @@ onMounted(() => {
   mq.addEventListener('change', syncMobile)
   load()
   loadSpeed()
-  speedTimer = setInterval(loadSpeed, 15000)
+  speedTimer = setInterval(() => refreshSpeedStatus(true), 15000)
 })
 onUnmounted(() => {
   if (mq) mq.removeEventListener('change', syncMobile)

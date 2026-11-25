@@ -32,10 +32,10 @@ def _valid_run(node_id: int, mb_per_s: float, finished_at: str = "2026-11-25 10:
 
 
 def test_grade_boundaries_use_mb_per_s():
-    assert speedtest.grade_for(5.0)["key"] == "excellent"
-    assert speedtest.grade_for(4.99)["key"] == "good"
-    assert speedtest.grade_for(2.0)["key"] == "good"
-    assert speedtest.grade_for(1.99)["key"] == "poor"
+    assert speedtest.grade_for(3.0)["key"] == "excellent"
+    assert speedtest.grade_for(2.99)["key"] == "good"
+    assert speedtest.grade_for(1.5)["key"] == "good"
+    assert speedtest.grade_for(1.49)["key"] == "poor"
     assert speedtest.grade_for(0.5)["key"] == "poor"
     assert speedtest.grade_for(0.499)["key"] == "danger"
     assert speedtest.grade_for(0.01)["key"] == "danger"   # real slow speed is a grade, not an error
