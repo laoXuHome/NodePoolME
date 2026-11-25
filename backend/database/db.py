@@ -183,6 +183,83 @@ CREATE TABLE IF NOT EXISTS run_events (
     batch_id INTEGER,
     note TEXT
 );
+
+CREATE TABLE IF NOT EXISTS speed_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    region TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL UNIQUE,
+    priority INTEGER NOT NULL DEFAULT 1,      -- 0 = 主测速源, 1 = 备用
+    enabled INTEGER NOT NULL DEFAULT 1,
+    health TEXT NOT NULL DEFAULT 'unknown',    -- unknown / ok / fail
+    range_ok INTEGER NOT NULL DEFAULT 0,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    latency_ms INTEGER,
+    last_error TEXT,
+    last_check_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_speed_sources_priority ON speed_sources (priority, enabled, health);
+
+CREATE TABLE IF NOT EXISTS speed_source_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    ts TEXT NOT NULL,
+    ok INTEGER NOT NULL,
+    dns_ms INTEGER,
+    connect_ms INTEGER,
+    tls_ms INTEGER,
+    status_code INTEGER,
+    range_ok INTEGER NOT NULL DEFAULT 0,
+    content_length INTEGER NOT NULL DEFAULT 0,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    error_type TEXT,
+    message TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_speed_check_source ON speed_source_checks (source_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS speed_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id INTEGER NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL DEFAULT 'running',   -- ok / partial / failed / source_unavailable / node_error / engine_error
+    confidence TEXT NOT NULL DEFAULT 'none',  -- normal / low / none
+    multi_mbps REAL,
+    single_mbps REAL,
+    sources_total INTEGER NOT NULL DEFAULT 0,
+    sources_ok INTEGER NOT NULL DEFAULT 0,
+    error_type TEXT,
+    message TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_speed_runs_node ON speed_runs (node_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS speed_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    node_id INTEGER NOT NULL,
+    source_id INTEGER NOT NULL,
+    source_name TEXT NOT NULL DEFAULT '',
+    source_region TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    dns_ms INTEGER,
+    connect_ms INTEGER,
+    tls_ms INTEGER,
+    ttfb_ms INTEGER,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    seconds REAL NOT NULL DEFAULT 0,
+    single_mbps REAL,
+    multi_mbps REAL,
+    status_code INTEGER,
+    range_ok INTEGER NOT NULL DEFAULT 0,
+    ok INTEGER NOT NULL DEFAULT 0,
+    error_type TEXT,
+    message TEXT,
+    confidence TEXT NOT NULL DEFAULT 'none'
+);
+CREATE INDEX IF NOT EXISTS idx_speed_samples_run ON speed_samples (run_id);
+CREATE INDEX IF NOT EXISTS idx_speed_samples_node ON speed_samples (node_id, id DESC);
 """
 
 
@@ -284,6 +361,16 @@ def init_db() -> None:
     # Migration: "degraded" is no longer a state; status is just available/unavailable
     conn.execute("UPDATE nodes SET status='available' WHERE status='degraded'")
     conn.commit()
+    # Migration: OVH's proof endpoints now 301 to regional speedtest hosts.
+    for old, new in (
+        ("https://sgp.proof.ovh.net/files/100Mb.dat",
+         "https://sin1-sgp.speedtest.network.ovh.net/files/100Mb.dat"),
+        ("https://gra.proof.ovh.net/files/100Mb.dat",
+         "https://lil2-gra.speedtest.network.ovh.net/files/100Mb.dat"),
+    ):
+        conn.execute("UPDATE speed_sources SET url=?, health='unknown', range_ok=0, "
+                     "last_error=NULL, updated_at=? WHERE url=?", (new, now(), old))
+    conn.commit()
     # Seed default test groups only on a fresh database
     cur = conn.execute("SELECT COUNT(*) AS c FROM test_groups")
     if cur.fetchone()["c"] == 0:
@@ -296,6 +383,17 @@ def init_db() -> None:
                     g["name"], g["ident"], g["url"], "GET", 8, g["expect_status"], "", 0, 30, 1,
                     g["sort_order"], 1, now(),
                 ),
+            )
+        conn.commit()
+    # Seed public download-speed sources once. Health is unknown until the first check.
+    cur = conn.execute("SELECT COUNT(*) AS c FROM speed_sources")
+    if cur.fetchone()["c"] == 0:
+        for src in config.DEFAULT_SPEED_SOURCES:
+            conn.execute(
+                "INSERT INTO speed_sources (name, region, url, priority, enabled, health,"
+                " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                (src["name"], src["region"], src["url"], src["priority"], 1, "unknown",
+                 now(), now()),
             )
         conn.commit()
     # Migration: available-node share history (older rows get the current availability once)

@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NodePoolME"
-VERSION = "1.6.5"
+VERSION = "1.6.6"
 
 DATA_DIR = Path(os.getenv("NODEPOOL_DATA_DIR", "./data")).resolve()
 CONFIG_DIR = Path(os.getenv("NODEPOOL_CONFIG_DIR", str(DATA_DIR / "config"))).resolve()
@@ -58,6 +58,27 @@ DEFAULT_FILTER_KEYWORDS = [
     "如果", "网站", "剩余", "套餐", "重置", "到期", "流量",
 ]
 
+# 公共下载测速源：全部为直连 HTTPS，不需要注册或自建服务器。
+# priority 0 = 主测速源（亚洲/欧洲各一组），1 = 备用；首次使用前必须通过健康检查。
+DEFAULT_SPEED_SOURCES = [
+    {"name": "Vultr 新加坡", "region": "SG", "priority": 0,
+     "url": "https://sgp-ping.vultr.com/vultr.com.100MB.bin"},
+    {"name": "OVHcloud 新加坡", "region": "SG", "priority": 0,
+     "url": "https://sin1-sgp.speedtest.network.ovh.net/files/100Mb.dat"},
+    {"name": "Hetzner 纽伦堡", "region": "DE", "priority": 0,
+     "url": "https://nbg1-speed.hetzner.com/100MB.bin"},
+    {"name": "Hetzner 法尔肯施泰因", "region": "DE", "priority": 1,
+     "url": "https://fsn1-speed.hetzner.com/100MB.bin"},
+    {"name": "OVHcloud 法国", "region": "FR", "priority": 1,
+     "url": "https://lil2-gra.speedtest.network.ovh.net/files/100Mb.dat"},
+    {"name": "Vultr 东京", "region": "JP", "priority": 1,
+     "url": "https://hnd-jp-ping.vultr.com/vultr.com.100MB.bin"},
+    {"name": "Vultr 洛杉矶", "region": "US", "priority": 1,
+     "url": "https://lax-ca-us-ping.vultr.com/vultr.com.100MB.bin"},
+    {"name": "Hetzner 俄勒冈", "region": "US", "priority": 1,
+     "url": "https://hil-speed.hetzner.com/100MB.bin"},
+]
+
 DEFAULT_SETTINGS = {
     "global_concurrency": "10",
     "group_concurrency": "5",
@@ -86,6 +107,17 @@ DEFAULT_SETTINGS = {
     "sub_publish_interval_minutes": "180",
     "sub_filter_keywords": "",
     "dispersion_mask": "24",
+    "speed_enabled": "1",
+    "speed_primary_sources": "3",
+    "speed_connections": "4",
+    "speed_warmup_seconds": "2",
+    "speed_sample_seconds": "12",
+    "speed_connect_timeout": "10",
+    "speed_total_timeout": "20",
+    "speed_retry": "1",
+    "speed_auto_enabled": "0",
+    "speed_auto_interval_minutes": "180",
+    "speed_auto_nodes": "3",
 }
 
 for _d in (DATA_DIR, CONFIG_DIR, LOG_DIR, BACKUP_DIR, SUB_DIR):

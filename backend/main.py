@@ -1,4 +1,5 @@
 """Application entry point: API, scheduler, bundled frontend."""
+import asyncio
 import logging
 import logging.handlers
 from contextlib import asynccontextmanager
@@ -15,6 +16,7 @@ from backend.scheduler import manager
 from backend.services import fetcher
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
+from backend.testers import speedtest
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -47,10 +49,16 @@ async def lifespan(app: FastAPI):
     db.record_run_event("start")
     await engine_mod.engine_manager.start()
     manager.start_scheduler()
+    speed_task = asyncio.create_task(speedtest.auto_loop())
     log.info("NodePool 已启动（内核：%s）", engine_mod.engine_manager.name)
     try:
         yield
     finally:
+        speed_task.cancel()
+        try:
+            await speed_task
+        except asyncio.CancelledError:
+            pass
         manager.stop_scheduler()
         await engine_mod.engine_manager.stop()
         db.append_log("INFO", "系统", "NodePool 已停止")

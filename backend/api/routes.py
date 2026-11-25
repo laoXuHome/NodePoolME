@@ -18,12 +18,14 @@ from backend import config
 from backend.api import auth
 from backend.database import db
 from backend.models.schemas import (AirportIn, AirportPatch, GroupIn, GroupPatch, LoginIn,
-                                    NodeTestIn, PasswordIn, RunIn, SettingsIn, SubSettings)
+                                    NodeTestIn, PasswordIn, RunIn, SettingsIn, SubSettings,
+                                    SpeedSourcePatch, SpeedTestIn)
 from backend.scheduler import manager
 from backend.services import fetcher
 from backend.scoring import eligibility, sampler
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
+from backend.testers import speedtest
 
 api = APIRouter(prefix="/api")
 protected = [Depends(auth.require_auth)]
@@ -828,6 +830,7 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
     ceiling2 = db.get_int("sub_max_latency2", 1000)
     latency_labels = _latency_labels()
     idents = _node_names()
+    speeds = speedtest.latest_by_node()
     items = []
     for node in nodes:
         per_group = results.get(node["id"], {})
@@ -865,6 +868,7 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
             for gid, res in per_group.items() if gid in groups
         }
         node["passed_idents_count"] = len(passed_idents)
+        node["speed"] = speeds.get(node["id"])
         items.append(node)
 
     hit_mode = (passed or "").strip().lower() in ("0", "no", "fail", "miss", "missed")
@@ -963,6 +967,8 @@ async def node_detail(node_id: int):
               "short": latency_labels["W"]["short"]},
     }
     node["latency"] = summary.get("fastest_ms") or summary.get("latency_ms") or (node["latency"] or 0)
+    node["speed"] = (speedtest.latest_by_node().get(node_id) or None)
+    node["speed_history"] = speedtest.node_history(node_id, 10)
     good = all(node["latency_targets"][t]["best"] is not None for t in ("G", "W"))
     node["publishable"] = bool(good)
     if node["publishable"]:
@@ -1120,7 +1126,11 @@ SETTING_KEYS = ["global_concurrency", "group_concurrency", "ip_concurrency", "su
                 "latency_test_name2", "latency_test_status",
                 "latency_test_timeout", "sub_max_latency", "sub_max_latency2",
                 "sub_publish_enabled", "sub_publish_time", "sub_publish_mode",
-                "sub_publish_interval_minutes"]
+                "sub_publish_interval_minutes",
+                "speed_enabled", "speed_connections", "speed_warmup_seconds",
+                "speed_sample_seconds", "speed_connect_timeout", "speed_total_timeout",
+                "speed_retry", "speed_auto_enabled", "speed_auto_interval_minutes",
+                "speed_auto_nodes"]
 
 
 @api.get("/settings", dependencies=protected)
@@ -1171,6 +1181,77 @@ async def update_settings(payload: SettingsIn):
                       + (nxt.strftime("%Y-%m-%d %H:%M:%S") if nxt else "已清除"))
     db.append_log("INFO", "设置", f"设置已更新，共 {len(data)} 项")
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------- download speed
+@api.get("/speed/overview", dependencies=protected)
+async def speed_overview():
+    return {**speedtest.overview(), "items": speedtest.list_sources()}
+
+
+@api.get("/speed/sources", dependencies=protected)
+async def speed_sources():
+    return {"items": speedtest.list_sources(), "settings": speedtest._settings()}
+
+
+@api.patch("/speed/sources/{source_id}", dependencies=protected)
+async def speed_source_update(source_id: int, payload: SpeedSourcePatch):
+    source = db.row("SELECT * FROM speed_sources WHERE id=?", (source_id,))
+    if not source:
+        raise HTTPException(status_code=404, detail="测速源不存在")
+    data = payload.model_dump(exclude_unset=True)
+    if "url" in data and data["url"]:
+        if not data["url"].lower().startswith("https://"):
+            raise HTTPException(status_code=400, detail="测速源必须是 HTTPS 地址")
+        if db.row("SELECT id FROM speed_sources WHERE url=? AND id<>?",
+                  (data["url"], source_id)):
+            raise HTTPException(status_code=409, detail="该测速源地址已存在")
+    for key, value in data.items():
+        if value is None:
+            continue
+        db.execute(f"UPDATE speed_sources SET {key}=?, updated_at=? WHERE id=?",
+                   (int(value) if isinstance(value, bool) else value, db.now(), source_id))
+    if data.get("url") or data.get("enabled"):
+        # A changed or re-enabled source must pass a fresh health check.
+        db.execute("UPDATE speed_sources SET health='unknown', range_ok=0, last_error=NULL "
+                   "WHERE id=?", (source_id,))
+    db.append_log("INFO", "测速", f"测速源 #{source_id} 配置已更新")
+    return db.row("SELECT * FROM speed_sources WHERE id=?", (source_id,))
+
+
+@api.post("/speed/sources/check", dependencies=protected)
+async def speed_source_check(payload: dict | None = None):
+    ids = (payload or {}).get("source_ids") or []
+    checks = await speedtest.check_sources([int(x) for x in ids] if ids else None)
+    ok = len([c for c in checks if c["ok"]])
+    db.append_log("INFO", "测速", f"测速源健康检查完成：{ok}/{len(checks)} 正常")
+    return {"checks": checks, "ok": ok, "total": len(checks),
+            "items": speedtest.list_sources()}
+
+
+@api.post("/speed/test", dependencies=protected)
+async def speed_test_node(payload: SpeedTestIn):
+    if db.get("speed_enabled", "1") != "1":
+        raise HTTPException(status_code=403, detail="下载测速模块已停用")
+    if manager.state.running:
+        raise HTTPException(status_code=409, detail="检测批次正在运行，请结束后再测下载速度")
+    try:
+        run = await speedtest.run_node(payload.node_id, payload.source_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    if not run:
+        raise HTTPException(status_code=500, detail="测速结果写入失败")
+    db.append_log("INFO", "测速",
+                  f"节点 #{payload.node_id} 下载测速：{run.get('status')}，"
+                  f"{run.get('sources_ok')}/{run.get('sources_total')} 源有效")
+    return run
+
+
+@api.get("/speed/node/{node_id}", dependencies=protected)
+async def speed_node_history(node_id: int, limit: int = 10):
+    if not db.row("SELECT id FROM nodes WHERE id=?", (node_id,)):
+        raise HTTPException(status_code=404, detail="节点不存在")
+    return {"node_id": node_id, "items": speedtest.node_history(node_id, limit)}
 
 
 # ---------------------------------------------------------------------------- logs & backup

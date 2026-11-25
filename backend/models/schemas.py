@@ -91,10 +91,33 @@ class SettingsIn(BaseModel):
     sub_publish_time: Optional[str] = Field(default=None, pattern=r"^[0-2][0-9]:[0-5][0-9]$")
     sub_publish_mode: Optional[str] = Field(default=None, pattern=r"^(time|interval)$")
     sub_publish_interval_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
+    speed_enabled: Optional[bool] = None
+    speed_connections: Optional[int] = Field(default=None, ge=1, le=8)
+    speed_warmup_seconds: Optional[float] = Field(default=None, ge=0, le=5)
+    speed_sample_seconds: Optional[float] = Field(default=None, ge=3, le=30)
+    speed_connect_timeout: Optional[float] = Field(default=None, ge=3, le=30)
+    speed_total_timeout: Optional[float] = Field(default=None, ge=8, le=60)
+    speed_retry: Optional[int] = Field(default=None, ge=0, le=2)
+    speed_auto_enabled: Optional[bool] = None
+    speed_auto_interval_minutes: Optional[int] = Field(default=None, ge=15, le=1440)
+    speed_auto_nodes: Optional[int] = Field(default=None, ge=1, le=20)
 
 
 class RunIn(BaseModel):
     force: bool = False
+
+
+class SpeedSourcePatch(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=60)
+    region: Optional[str] = Field(default=None, max_length=12)
+    url: Optional[str] = Field(default=None, min_length=8, max_length=2048)
+    priority: Optional[int] = Field(default=None, ge=0, le=1)
+    enabled: Optional[bool] = None
+
+
+class SpeedTestIn(BaseModel):
+    node_id: int = Field(ge=1)
+    source_ids: Optional[list[int]] = None
 
 
 class NodeTestIn(BaseModel):
