@@ -408,7 +408,7 @@ onUnmounted(() => {
             <b style="color:#DC2626">危</b><i>低于「差」阈值</i>
           </span>
           <span class="speed-status">
-            <span class="np-speed-dot is-tag" style="background:#D1D5DB"></span>
+            <span class="np-speed-dot is-tag" style="background:#9CA3AF"></span>
             <b>已排除</b><i>机场不参与测速</i>
           </span>
           <span class="speed-status">
@@ -420,7 +420,7 @@ onUnmounted(() => {
             <b style="color:#DC2626">全部源失败</b><i>所有测速源不可用</i>
           </span>
           <span class="speed-status">
-            <span class="np-speed-dot is-tag" style="background:#9CA3AF"></span>
+            <span class="np-speed-dot is-tag" style="background:#D1D5DB"></span>
             <b>待测速</b><i>尚无有效结果</i>
           </span>
         </div>
@@ -430,7 +430,7 @@ onUnmounted(() => {
         <div class="speed-table-block">
           <div class="speed-table-head">
             机场测速范围
-            <span class="np-muted">排除后不创建任务、不消耗流量，显示深灰点</span>
+            <span class="np-muted">排除后不创建任务、不消耗流量，显示中灰点</span>
           </div>
           <el-table :data="speedAirports" size="small">
             <el-table-column label="参与测速" width="110">
