@@ -42,6 +42,15 @@ def test_grade_boundaries_use_mb_per_s():
     assert speedtest.grade_for(None) == {}
 
 
+def test_speed_grade_visual_standard_is_global():
+    assert [(g["label"], g["emoji"], g["color"]) for g in speedtest.GRADE_DEFS.values()] == [
+        ("优", "🟢", "#10B981"),
+        ("良", "🔵", "#4682B4"),
+        ("差", "🟡", "#E9C46A"),
+        ("劣", "🔴", "#EF4444"),
+    ]
+
+
 def test_speed_tag_prefix_is_idempotent_and_exclusion_wins():
     airport_id, node_id = _node("香港01")
     assert speedtest.speed_map()[node_id]["status"] == "pending"
@@ -55,9 +64,11 @@ def test_speed_tag_prefix_is_idempotent_and_exclusion_wins():
     assert tagged == "🔵测速机场·香港01"
     db.execute("UPDATE airports SET speed_excluded=1 WHERE id=?", (airport_id,))
     state = speedtest.speed_map()[node_id]
-    assert state["status"] == "excluded" and state["marker"] == "●"
-    assert state["color"] == "#D1D5DB"
-    assert speedtest.apply_speed_prefix("🟢测速机场·香港01", state["marker"]) == "●测速机场·香港01"
+    assert state["status"] == "excluded" and state["marker"] == "⚪"
+    assert state["color"] == "#CBD5E1"
+    assert speedtest.apply_speed_prefix("🟢测速机场·香港01", state["marker"]) == "⚪测速机场·香港01"
+    assert speedtest.strip_speed_prefix("🟠测速机场·香港01") == "测速机场·香港01"
+    assert speedtest.strip_speed_prefix("🟡测速机场·香港01") == "测速机场·香港01"
 
 
 def test_failure_never_overwrites_last_valid_label():
@@ -356,13 +367,15 @@ def test_speed_label_exclusion_is_global_and_checked_means_drop():
         {"id": 999, "display_name": "⚠️测速机场·异常", "airport_id": 1,
          "speed": {"status": "error", "grade": "excellent"}},
     ]
-    db.set_setting("sub_filter_speed_levels", "优,危")
+    db.set_setting("sub_filter_speed_levels", "优,劣")
     try:
         assert builder.speed_filter_tags() == ["excellent", "danger"]
         kept, dropped = builder.apply_speed_filter(nodes)
         assert [n["id"] for n in kept] == [999]
         assert {d["grade"] for d in dropped} == {"excellent", "danger"}
         assert all(d["reason_type"] == "speed" for d in dropped)
+        assert builder.parse_speed_filter_tags("优,危") == {"excellent", "danger"}
+        assert builder.parse_speed_filter_tags("🟡") == {"poor"}
     finally:
         db.set_setting("sub_filter_speed_levels", "")
 

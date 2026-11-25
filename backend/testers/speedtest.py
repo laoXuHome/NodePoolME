@@ -91,14 +91,14 @@ def now() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
-SPEED_MARKERS = ("🟣", "🟢", "🔵", "🟠", "🔴", "●", "⚪", "⚠️", "🚫")
+SPEED_MARKERS = ("🟣", "🟢", "🔵", "🟠", "🟡", "🔴", "●", "⚪", "⚠️", "🚫")
 PENDING_PREFIX = "待测速"
 PENDING_MARKER = PENDING_PREFIX
 GRADE_DEFS = {
-    "excellent": {"label": "优", "emoji": "🟢", "color": "#16A34A", "key": "excellent"},
-    "good": {"label": "良", "emoji": "🔵", "color": "#2563EB", "key": "good"},
-    "poor": {"label": "差", "emoji": "🟠", "color": "#EA580C", "key": "poor"},
-    "danger": {"label": "危", "emoji": "🔴", "color": "#DC2626", "key": "danger"},
+    "excellent": {"label": "优", "emoji": "🟢", "color": "#10B981", "key": "excellent"},
+    "good": {"label": "良", "emoji": "🔵", "color": "#4682B4", "key": "good"},
+    "poor": {"label": "差", "emoji": "🟡", "color": "#E9C46A", "key": "poor"},
+    "danger": {"label": "劣", "emoji": "🔴", "color": "#EF4444", "key": "danger"},
 }
 
 
@@ -828,8 +828,8 @@ def speed_map() -> dict[int, dict]:
         node_id = node["id"]
         if excluded.get(node["airport_id"]):
             out[node_id] = {
-                "status": "excluded", "marker": "●", "label": "机场已排除测速",
-                "grade": None, "grade_label": "", "emoji": "●", "color": "#D1D5DB",
+                "status": "excluded", "marker": "⚪", "label": "机场已排除测速",
+                "grade": None, "grade_label": "", "emoji": "⚪", "color": "#CBD5E1",
                 "mb_per_s": None, "mbps": None,
             }
             continue
@@ -867,7 +867,7 @@ def speed_map() -> dict[int, dict]:
         elif last_status == "source_unavailable":
             base = {"status": "source_failed", "marker": "🚫",
                     "label": "本轮所有测速网址均失败", "grade": None,
-                    "grade_label": "", "emoji": "🚫", "color": "#DC2626",
+                    "grade_label": "", "emoji": "🚫", "color": "#EF4444",
                     "mb_per_s": None, "mbps": None}
         elif last_status in ("engine_error", "node_error", "failed"):
             base = {"status": "error", "marker": "⚠️",

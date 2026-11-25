@@ -32,10 +32,10 @@ function pick(paths) {
 const shownLinks = ref('queryless')
 const speedExcludeLevels = ref([])
 const SPEED_OPTIONS = [
-  { value: 'excellent', label: '优', color: '#16A34A' },
-  { value: 'good', label: '良', color: '#2563EB' },
-  { value: 'poor', label: '差', color: '#EA580C' },
-  { value: 'danger', label: '危', color: '#DC2626' },
+  { value: 'excellent', label: '优', color: '#10B981' },
+  { value: 'good', label: '良', color: '#4682B4' },
+  { value: 'poor', label: '差', color: '#E9C46A' },
+  { value: 'danger', label: '劣', color: '#EF4444' },
   { value: 'error', label: '异常', color: '#F59E0B', symbol: '!' }
 ]
 const LOON_REASON = {
@@ -210,7 +210,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
           <div class="np-filter-row">
             <div class="np-filter-head">
               <b>测速标签排除</b>
-              <span class="np-muted">勾选即排除带该标签的节点；未勾选不排除。可选优、良、差、危、异常。</span>
+              <span class="np-muted">勾选即排除带该标签的节点；未勾选不排除。可选优、良、差、劣、异常。</span>
             </div>
             <el-checkbox-group v-model="speedExcludeLevels" class="speed-filter-grid">
               <el-checkbox v-for="opt in SPEED_OPTIONS" :key="opt.value" :value="opt.value">

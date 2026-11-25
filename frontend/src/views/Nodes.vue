@@ -126,22 +126,22 @@ const SPEED_FILTER_OPTIONS = [
   { value: 'excellent', label: '优' },
   { value: 'good', label: '良' },
   { value: 'poor', label: '差' },
-  { value: 'danger', label: '危' },
+  { value: 'danger', label: '劣' },
   { value: 'pending', label: '待测速' },
   { value: 'excluded', label: '已排除' },
   { value: 'error', label: '异常' },
   { value: 'source_failed', label: '全源失败' }
 ]
 const SPEED_META = {
-  excellent: { label: '优', emoji: '🟢', color: '#16A34A' },
-  good: { label: '良', emoji: '🔵', color: '#2563EB' },
-  poor: { label: '差', emoji: '🟠', color: '#EA580C' },
-  danger: { label: '危', emoji: '🔴', color: '#DC2626' }
+  excellent: { label: '优', emoji: '🟢', color: '#10B981' },
+  good: { label: '良', emoji: '🔵', color: '#4682B4' },
+  poor: { label: '差', emoji: '🟡', color: '#E9C46A' },
+  danger: { label: '劣', emoji: '🔴', color: '#EF4444' }
 }
 function speedText(row) {
   const s = row?.speed
   if (!s) return '待测速'
-  if (s.status === 'excluded') return '● 排除'
+  if (s.status === 'excluded') return '⚪ 排除'
   if (s.status === 'ok') {
     return s.mb_per_s == null ? '无数据' : `${s.emoji} ${Number(s.mb_per_s).toFixed(2)} MB/s`
   }
@@ -170,6 +170,12 @@ function speedType(row) {
 function speedColor(row) {
   if (row?.speed?.color) return row.speed.color
   return SPEED_META[row?.speed?.grade]?.color || '#64748b'
+}
+function speedTextColor(row) {
+  const s = row?.speed
+  if (s?.status === 'excluded') return '#64748b'
+  if (s?.grade === 'poor') return '#A16207'
+  return speedColor(row)
 }
 function fmtTraffic(bytes) {
   if (bytes == null) return '—'
@@ -365,7 +371,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
         <el-table-column label="下载速度" width="132">
           <template #default="{ row }">
             <el-tooltip :content="speedSub(row)" placement="top">
-              <span class="np-speed-chip" :style="{ color: speedColor(row), borderColor: speedColor(row) + '55' }">
+              <span class="np-speed-chip" :style="{ color: speedTextColor(row), borderColor: speedColor(row) + '55' }">
                 {{ speedText(row) }}
               </span>
             </el-tooltip>

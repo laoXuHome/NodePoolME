@@ -151,8 +151,8 @@ SPEED_FILTER_ALIASES = {
     "excellent": "excellent", "优": "excellent", "🟣": "excellent", "🟢": "excellent",
     "good": "good", "良": "good", "🔵": "good",
     "medium": "poor", "中": "poor",
-    "poor": "poor", "差": "poor", "🟠": "poor",
-    "danger": "danger", "危": "danger", "🔴": "danger",
+    "poor": "poor", "差": "poor", "🟠": "poor", "🟡": "poor",
+    "danger": "danger", "劣": "danger", "危": "danger", "🔴": "danger",
     "pending": "pending", "待测速": "pending", "待测": "pending", "❓": "pending",
     "excluded": "excluded", "已排除": "excluded", "机场排除": "excluded", "●": "excluded", "⚪": "excluded",
     "error": "error", "异常": "error", "测速异常": "error", "⚠": "error", "⚠️": "error",
@@ -160,7 +160,7 @@ SPEED_FILTER_ALIASES = {
     "全部源失败": "source_failed", "🚫": "source_failed",
 }
 SPEED_FILTER_LABELS = {
-    "excellent": "优", "good": "良", "poor": "差", "danger": "危",
+    "excellent": "优", "good": "良", "poor": "差", "danger": "劣",
     "pending": "待测速", "excluded": "已排除", "error": "异常", "source_failed": "全源失败",
 }
 
@@ -172,7 +172,7 @@ def parse_speed_filter_tags(value: str | None) -> set[str]:
     tokens = [t.strip().lower() for t in re.split(r"[,\s，]+", str(value)) if t.strip()]
     tags = {SPEED_FILTER_ALIASES[t] for t in tokens if t in SPEED_FILTER_ALIASES}
     if not tags:
-        raise ValueError("测速标签无效；可用 优/良/差/危/待测速/已排除/异常/全源失败")
+        raise ValueError("测速标签无效；可用 优/良/差/劣/待测速/已排除/异常/全源失败")
     return tags
 
 
@@ -947,8 +947,8 @@ SPEED_LEVEL_ALIASES = {
     "excellent": "excellent", "优": "excellent", "🟣": "excellent", "🟢": "excellent", "purple": "excellent", "green": "excellent",
     "good": "good", "良": "good", "🔵": "good", "blue": "good",
     "medium": "poor", "中": "poor",
-    "poor": "poor", "差": "poor", "🟠": "poor", "orange": "poor",
-    "danger": "danger", "危": "danger", "🔴": "danger", "red": "danger",
+    "poor": "poor", "差": "poor", "🟠": "poor", "🟡": "poor", "orange": "poor", "gold": "poor",
+    "danger": "danger", "劣": "danger", "危": "danger", "🔴": "danger", "red": "danger",
 }
 
 

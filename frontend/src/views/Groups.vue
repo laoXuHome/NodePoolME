@@ -22,10 +22,10 @@ const speedNodeId = ref(null)
 const speedBusy = ref('')
 let speedTimer = null
 const GRADE_ROWS = [
-  { key: 'excellent', label: '优', emoji: '🟢', color: '#16A34A' },
-  { key: 'good', label: '良', emoji: '🔵', color: '#2563EB' },
-  { key: 'poor', label: '差', emoji: '🟠', color: '#EA580C' },
-  { key: 'danger', label: '危', emoji: '🔴', color: '#DC2626' }
+  { key: 'excellent', label: '优', emoji: '🟢', color: '#10B981' },
+  { key: 'good', label: '良', emoji: '🔵', color: '#4682B4' },
+  { key: 'poor', label: '差', emoji: '🟡', color: '#E9C46A' },
+  { key: 'danger', label: '劣', emoji: '🔴', color: '#EF4444' }
 ]
 const THRESHOLD_ROWS = GRADE_ROWS.slice(0, 3)
 let mq = null
@@ -406,11 +406,11 @@ onUnmounted(() => {
         </div>
         <div class="speed-status-queue">
           <span class="speed-status">
-            <span class="np-speed-dot is-tag" style="background:#DC2626"></span>
-            <b style="color:#DC2626">危</b><i>低于「差」阈值</i>
+            <span class="np-speed-dot is-tag" :style="{ background: GRADE_ROWS[3].color }"></span>
+            <b :style="{ color: GRADE_ROWS[3].color }">{{ GRADE_ROWS[3].label }}</b><i>低于「差」阈值</i>
           </span>
           <span class="speed-status">
-            <span class="np-speed-dot is-tag" style="background:#D1D5DB"></span>
+            <span class="np-speed-dot is-tag" style="background:#CBD5E1"></span>
             <b>已排除</b><i>机场不参与测速</i>
           </span>
           <span class="speed-status">
@@ -418,8 +418,8 @@ onUnmounted(() => {
             <b style="color:#F59E0B">异常</b><i>最近一次测速失败</i>
           </span>
           <span class="speed-status">
-            <span class="np-noentry"></span>
-            <b style="color:#DC2626">全部源失败</b><i>所有测速源不可用</i>
+            <span class="np-noentry" style="background:#EF4444"></span>
+            <b style="color:#EF4444">全部源失败</b><i>所有测速源不可用</i>
           </span>
           <span class="speed-status">
             <span class="np-speed-dot is-tag" style="background:#9CA3AF"></span>
@@ -439,7 +439,7 @@ onUnmounted(() => {
               <template #default="{ row }">
                 <el-switch :model-value="!row.speed_excluded"
                            style="margin-right:6px" @change="v => toggleAirportSpeed(row, v)" />
-                <span :style="{ color: row.speed_excluded ? '#EA580C' : '#64748b', fontSize: '12px' }">
+                <span :style="{ color: row.speed_excluded ? '#94A3B8' : '#64748b', fontSize: '12px' }">
                   {{ row.speed_excluded ? '排除' : '参与' }}
                 </span>
               </template>
