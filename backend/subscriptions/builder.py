@@ -145,35 +145,78 @@ def filter_keywords() -> list[str]:
     return keys
 
 
-def speed_filter_levels() -> list[str]:
-    """下发速度标签排除：返回规范化等级，空表示不排除。"""
+SPEED_FILTER_ORDER = ("excellent", "good", "medium", "poor", "danger",
+                      "pending", "excluded", "error", "source_failed")
+SPEED_FILTER_ALIASES = {
+    "excellent": "excellent", "优": "excellent", "🟣": "excellent",
+    "good": "good", "良": "good", "🟢": "good",
+    "medium": "medium", "中": "medium", "🔵": "medium",
+    "poor": "poor", "差": "poor", "🟠": "poor",
+    "danger": "danger", "危": "danger", "🔴": "danger",
+    "pending": "pending", "待测速": "pending", "待测": "pending", "❓": "pending",
+    "excluded": "excluded", "已排除": "excluded", "机场排除": "excluded", "⚪": "excluded",
+    "error": "error", "异常": "error", "测速异常": "error", "⚠": "error", "⚠️": "error",
+    "source_failed": "source_failed", "全源失败": "source_failed",
+    "全部源失败": "source_failed", "🚫": "source_failed",
+}
+SPEED_FILTER_LABELS = {
+    "excellent": "优", "good": "良", "medium": "中", "poor": "差", "danger": "危",
+    "pending": "待测速", "excluded": "已排除", "error": "异常", "source_failed": "全源失败",
+}
+
+
+def parse_speed_filter_tags(value: str | None) -> set[str]:
+    """解析下发标签过滤：支持五级速度 + 待测速/已排除/异常/全源失败。"""
+    if value is None or not str(value).strip():
+        return set()
+    tokens = [t.strip().lower() for t in re.split(r"[,\s，]+", str(value)) if t.strip()]
+    tags = {SPEED_FILTER_ALIASES[t] for t in tokens if t in SPEED_FILTER_ALIASES}
+    if not tags:
+        raise ValueError("测速标签无效；可用 优/良/中/差/危/待测速/已排除/异常/全源失败")
+    return tags
+
+
+def speed_filter_tags() -> list[str]:
+    """返回规范化的下发排除标签，空表示不排除。"""
     raw = db.get("sub_filter_speed_levels") or ""
     if not str(raw).strip():
         return []
     try:
-        levels = parse_speed_levels(raw) or set()
+        tags = parse_speed_filter_tags(raw)
     except ValueError:
         return []
-    return [g for g in speedtest.GRADE_DEFS if g in levels]
+    return [t for t in SPEED_FILTER_ORDER if t in tags]
+
+
+def _speed_tag(state: dict) -> str | None:
+    status = state.get("status")
+    if status == "ok":
+        grade = state.get("grade")
+        return grade if grade in speedtest.GRADE_DEFS else None
+    if not status or status in ("pending", "stale"):
+        return "pending"
+    if status in ("excluded", "error", "source_failed"):
+        return status
+    return None
 
 
 def apply_speed_filter(nodes: list[dict]) -> tuple[list[dict], list[dict]]:
-    """勾选等级即排除对应速度标签的节点；仅作用于最近一次有效测速结果。"""
-    levels = set(speed_filter_levels())
-    if not levels:
+    """勾选标签即排除带该标签的节点；包含五级速度与测速状态标签。"""
+    tags = set(speed_filter_tags())
+    if not tags:
         return nodes, []
     kept: list[dict] = []
     dropped: list[dict] = []
     for node in nodes:
         state = node.get("speed") or {}
-        grade = state.get("grade") if state.get("status") == "ok" else None
-        if grade in levels:
-            meta = speedtest.GRADE_DEFS.get(grade) or {}
-            label = f"{meta.get('emoji', '')} {meta.get('label', grade)}".strip()
+        tag = _speed_tag(state)
+        if tag in tags:
             dropped.append({
                 "id": node.get("id"), "name": node.get("display_name"),
                 "airport_id": node.get("airport_id"), "keyword": None,
-                "reason_type": "speed", "reason": label, "grade": grade,
+                "reason_type": "speed", "reason": SPEED_FILTER_LABELS.get(tag, tag),
+                "grade": state.get("grade") if tag not in ("pending", "excluded", "error", "source_failed") else None,
+                "speed_tag": tag,
             })
         else:
             kept.append(node)

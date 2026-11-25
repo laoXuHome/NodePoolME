@@ -236,7 +236,7 @@ def test_speed_label_exclusion_is_global_and_checked_means_drop():
     ]
     db.set_setting("sub_filter_speed_levels", "优,危")
     try:
-        assert builder.speed_filter_levels() == ["excellent", "danger"]
+        assert builder.speed_filter_tags() == ["excellent", "danger"]
         kept, dropped = builder.apply_speed_filter(nodes)
         assert [n["id"] for n in kept] == [999]
         assert {d["grade"] for d in dropped} == {"excellent", "danger"}
@@ -272,5 +272,28 @@ def test_publish_applies_speed_exclusion(monkeypatch, tmp_path):
         assert result["stats"]["speed_filtered"] == 1
         assert result["stats"]["keyword_filtered"] == 0
         assert result["stats"]["after_filter"] == 0
+    finally:
+        db.set_setting("sub_filter_speed_levels", "")
+
+
+def test_status_tags_can_be_excluded_individually():
+    nodes = [
+        {"id": 1, "display_name": "⚪已排除", "airport_id": 1,
+         "speed": {"status": "excluded"}},
+        {"id": 2, "display_name": "⚠️异常", "airport_id": 1,
+         "speed": {"status": "error"}},
+        {"id": 3, "display_name": "🚫全源失败", "airport_id": 1,
+         "speed": {"status": "source_failed"}},
+        {"id": 4, "display_name": "待测速", "airport_id": 1,
+         "speed": {"status": "pending"}},
+        {"id": 5, "display_name": "🟢良", "airport_id": 1,
+         "speed": {"status": "ok", "grade": "good"}},
+    ]
+    db.set_setting("sub_filter_speed_levels", "已排除,异常,全源失败,待测速")
+    try:
+        assert builder.speed_filter_tags() == ["pending", "excluded", "error", "source_failed"]
+        kept, dropped = builder.apply_speed_filter(nodes)
+        assert [n["id"] for n in kept] == [5]
+        assert {d["speed_tag"] for d in dropped} == {"excluded", "error", "source_failed", "pending"}
     finally:
         db.set_setting("sub_filter_speed_levels", "")

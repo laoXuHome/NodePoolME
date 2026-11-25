@@ -1064,7 +1064,7 @@ async def subscription_info(request: Request):
     token = auth.sub_token()
     # 只读提示：当前关键词过滤命中了多少个已筛选出的合格节点（不影响检测与评分）
     keywords = builder.filter_keywords()
-    speed_levels = builder.speed_filter_levels()
+    speed_levels = builder.speed_filter_tags()
     eligible, _ = builder.collect_nodes()
     keyword_kept, keyword_dropped = builder.apply_name_filter(eligible)
     kept, speed_dropped = builder.apply_speed_filter(keyword_kept)
@@ -1094,7 +1094,7 @@ async def subscription_info(request: Request):
             "sub_name": db.get("sub_name"),
             "sub_token": token,
             "sub_filter_keywords": db.get("sub_filter_keywords") or "",
-            "sub_filter_speed_levels": ",".join(builder.speed_filter_levels()),
+            "sub_filter_speed_levels": ",".join(builder.speed_filter_tags()),
         },
         "meta": builder.meta(),
         "links": {
@@ -1130,11 +1130,11 @@ async def update_subscription(payload: SubSettings):
     if "sub_filter_speed_levels" in payload.model_fields_set:
         raw = (payload.sub_filter_speed_levels or "").strip()
         try:
-            levels = builder.parse_speed_levels(raw) or set()
+            tags = builder.parse_speed_filter_tags(raw)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        order = ("excellent", "good", "medium", "poor", "danger")
-        db.set_setting("sub_filter_speed_levels", ",".join(g for g in order if g in levels))
+        db.set_setting("sub_filter_speed_levels",
+                       ",".join(t for t in builder.SPEED_FILTER_ORDER if t in tags))
     return {"ok": True}
 
 

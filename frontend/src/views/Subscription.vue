@@ -32,11 +32,15 @@ function pick(paths) {
 const shownLinks = ref('queryless')
 const speedExcludeLevels = ref([])
 const SPEED_OPTIONS = [
-  { value: 'excellent', label: '优', desc: '≥ 5 MB/s', color: '#8B5CF6' },
-  { value: 'good', label: '良', desc: '≥ 2 MB/s', color: '#16A34A' },
-  { value: 'medium', label: '中', desc: '≥ 1 MB/s', color: '#2563EB' },
-  { value: 'poor', label: '差', desc: '≥ 256 KB/s', color: '#EA580C' },
-  { value: 'danger', label: '危', desc: '< 256 KB/s', color: '#DC2626' }
+  { value: 'excellent', label: '优', color: '#8B5CF6' },
+  { value: 'good', label: '良', color: '#16A34A' },
+  { value: 'medium', label: '中', color: '#2563EB' },
+  { value: 'poor', label: '差', color: '#EA580C' },
+  { value: 'danger', label: '危', color: '#DC2626' },
+  { value: 'excluded', label: '已排除', color: '#94A3B8', ring: true },
+  { value: 'error', label: '异常', color: '#D97706', symbol: '!' },
+  { value: 'source_failed', label: '全源失败', color: '#B91C1C', symbol: '×' },
+  { value: 'pending', label: '待测速', color: '#64748B', symbol: '…' }
 ]
 const LOON_REASON = {
   protocol: '协议不支持',
@@ -201,7 +205,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
               <span v-else>
                 排除 <b>{{ filterHint.dropped }}</b> 个 / 合格 {{ filterHint.eligible }} 个，实际下发 {{ filterHint.kept }} 个
                 <span class="np-muted" style="margin-left:6px">
-                  关键词 {{ filterHint.keywordDropped }} · 速度 {{ filterHint.speedDropped }}
+                  关键词 {{ filterHint.keywordDropped }} · 标签 {{ filterHint.speedDropped }}
                 </span>
               </span>
             </el-descriptions-item>
@@ -210,12 +214,13 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
           <div class="np-filter-row">
             <div class="np-filter-head">
               <b>测速标签排除</b>
-              <span class="np-muted">勾选即排除该等级节点；待测速、机场排除、测速异常、全源失败不参与等级排除</span>
+              <span class="np-muted">勾选即排除带该标签的节点；未勾选不排除，五级速度与四种测速状态都可单独排除</span>
             </div>
             <el-checkbox-group v-model="speedExcludeLevels" class="speed-filter-grid">
               <el-checkbox v-for="opt in SPEED_OPTIONS" :key="opt.value" :value="opt.value">
-                <span class="np-speed-dot" :style="{ background: opt.color }" />{{ opt.label }}
-                <span class="np-muted">{{ opt.desc }}</span>
+                <span class="np-speed-dot"
+                      :class="{ 'is-ring': opt.ring, 'has-symbol': opt.symbol }"
+                      :style="opt.ring ? { borderColor: opt.color } : { background: opt.color }">{{ opt.symbol || '' }}</span>{{ opt.label }}
               </el-checkbox>
             </el-checkbox-group>
           </div>
@@ -229,7 +234,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
                       class="np-filter-box np-filter-compact"
                       placeholder="例如：剩余流量 官网，过期 某机场" />
             <div class="np-filter-foot">
-              <span class="np-muted">命中机场名 / 节点名 / 服务器地址的节点，或勾选速度等级对应的节点，不会进入订阅；不影响机场检测与评分。保存后点「立即重新生成」或等下次定时下发生效。</span>
+              <span class="np-muted">命中机场名 / 节点名 / 服务器地址的节点，或勾选标签对应的节点，不会进入订阅；不影响机场检测与评分。保存后点「立即重新生成」或等下次定时下发生效。</span>
               <div class="np-flex" />
               <el-button size="small" :loading="saving" @click="save">保存过滤规则</el-button>
             </div>
@@ -271,8 +276,8 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
               <div class="np-node-item is-hit" v-for="(item, i) in filteredNodes" :key="'f' + i">
                 <span class="np-node-idx">{{ i + 1 }}</span>
                 <span class="np-node-name" :title="item.name">{{ item.name }}</span>
-                <span class="np-node-kw" :title="(item.reason_type === 'speed' ? '速度等级：' : '命中关键词：') + item.reason">
-                  {{ item.reason_type === 'speed' ? '速度 ' + item.reason : '关键词 ' + item.reason }}
+                <span class="np-node-kw" :title="(item.reason_type === 'speed' ? '标签：' : '命中关键词：') + item.reason">
+                  {{ item.reason_type === 'speed' ? '标签 ' + item.reason : '关键词 ' + item.reason }}
                 </span>
               </div>
             </div>
