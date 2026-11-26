@@ -71,10 +71,23 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 )
 """
 
-# 由 structure_hash() 在生产实测结构上算出的常量（见 tests/test_migration_baseline.py）。
-# 列顺序、注释、空白均不参与摘要，因此"历史 ALTER 出来的库"与"全新 init_db 的库"
-# 得到同一个值；出现真实结构漂移才会不匹配。
-BASELINE_STRUCTURE_HASH = "eb5fd0ce54a87d6e748a144a35ce97903b71acfb5415eb9fd8e4cba28f88da0b"
+# 受支持的结构基准：**逐项登记**，不做"任意列顺序都合法"的宽松比较。
+#
+# 两组基准的差异仅来自历史 `ALTER TABLE` 追加列导致的列声明顺序不同（语义相同、
+# 物理列序不同）。列序会影响 `SELECT *` 与省略列名的 `INSERT`，因此不视为等价，
+# 必须区分登记；未登记的任何第三种结构（含其它列序）一律拒绝。
+#
+# 两值均由 structure_hash() 计算（含列 ordinal），见 tests/test_migration_baseline.py:
+#   alter_history = 生产同源的历史 ALTER 库形态（当前开发实例）
+#   fresh_init    = 全新 init_db() 建出的库形态
+SUPPORTED_STRUCTURE_PROFILES: dict[str, str] = {
+    "alter_history": "798c5d4be3db0885cf75421669d2872d9ec67e426f946ec5cc919f84acc3ca15",
+    "fresh_init": "e9feb0bb5028a38a082f1e2a75105cd15aa963c5562e15217ea80ff70c4eeb71",
+}
+
+# 兼容别名：默认取历史 ALTER 形态（生产端最可能的形态，但**仍待 NAS 只读实测确认**，
+# 不得据此宣称生产结构已验证）。
+BASELINE_STRUCTURE_HASH = SUPPORTED_STRUCTURE_PROFILES["alter_history"]
 
 
 class MigrationError(RuntimeError):
@@ -163,11 +176,12 @@ def _is_excluded(name: str, tbl_name: str) -> bool:
 
 def _table_signature(conn: sqlite3.Connection, name: str, ddl: str) -> dict[str, Any]:
     # 用位置索引读取 PRAGMA 行，兼容 sqlite3.Row 与原生 tuple。
-    cols = sorted(
-        ([row[1], row[2], int(row[3]), row[4], int(row[5])]
-         for row in conn.execute(f'PRAGMA table_info("{name}")')),
-        key=lambda item: item[0],
-    )
+    # 列按 **ordinal（cid）原序**保留：`SELECT *` 与省略列名的 `INSERT` 依赖列序，
+    # 列序变化必须被摘要捕获，不能用排序抹平。
+    cols = [
+        [int(row[0]), row[1], row[2], int(row[3]), row[4], int(row[5])]
+        for row in conn.execute(f'PRAGMA table_info("{name}")')
+    ]
     indexes = []
     for idx in conn.execute(f'PRAGMA index_list("{name}")'):
         cols_idx = [
@@ -190,7 +204,7 @@ def _table_signature(conn: sqlite3.Connection, name: str, ddl: str) -> dict[str,
 
 
 def structure_signature(conn: sqlite3.Connection) -> dict[str, Any]:
-    """结构签名：语义等价于 DDL、但对列顺序/注释/空白不敏感。
+    """结构签名：语义等价于 DDL、但对注释/空白不敏感，**保留列 ordinal**。
 
     只收录业务对象；`tasks` 与 `sqlite_%` 内部对象整体排除（前者单独记账，
     后者的存在只取决于 AUTOINCREMENT，不属业务结构）。
@@ -223,6 +237,19 @@ def _hash_signature(signature: dict[str, Any]) -> str:
 
 def structure_hash(conn: sqlite3.Connection) -> str:
     return _hash_signature(structure_signature(conn))
+
+
+def supported_structure_hashes() -> dict[str, str]:
+    """受支持的结构基准（名称 → 摘要），用于报错与审计展示。"""
+    return dict(SUPPORTED_STRUCTURE_PROFILES)
+
+
+def structure_profile_for(actual_hash: str) -> str | None:
+    """把实际摘要映射到已登记的基准名；未登记的一律返回 None（拒绝）。"""
+    for name, expected in SUPPORTED_STRUCTURE_PROFILES.items():
+        if actual_hash == expected:
+            return name
+    return None
 
 
 def tasks_state(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -361,9 +388,10 @@ def ensure_schema_table_transactional(
 ) -> dict[str, Any]:
     """建表 + 基线登记 + 行数校验，同一 `BEGIN IMMEDIATE` 事务内完成。
 
-    - 表不存在：建表、插基线行、校验 `count == 1`、提交。
-    - 表存在且恰有本迁移成功行：幂等返回，不重复插入。
-    - 其它状态：抛 `MigrationStateError`（不猜测、不补写）。
+    - 表**原本不存在**：建表、插基线行、校验 `count == 1`、提交。
+    - 表原本存在且恰有本迁移成功行：幂等返回，不重复插入。
+    - 表原本存在但 0 行：`MigrationStateError("migration_table_empty")`，拒绝补写。
+    - 表原本存在且内容不符：`baseline_conflict` / `migration_table_not_pristine`。
     任一步异常 → `ROLLBACK`，因此不存在"表在、基线缺"的中间态。
     """
     _require_autocommit(conn)
@@ -371,9 +399,17 @@ def ensure_schema_table_transactional(
     created_at = _utc_now()
     conn.execute("BEGIN IMMEDIATE")
     try:
-        conn.execute(SCHEMA_MIGRATIONS_DDL)
-        count = _count_rows(conn)
-        if count == 0:
+        # 先在同一事务内判断"表原本是否存在"，绝不先建表再判断，避免把
+        # "已有空表"顺手补成基线（那会把迁移入口焊死）。
+        existed = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+        ).fetchone() is not None
+        if not existed:
+            conn.execute(SCHEMA_MIGRATIONS_DDL)
+            count = 0
+        else:
+            count = _count_rows(conn)
+        if not existed and count == 0:
             _insert_row(
                 conn,
                 migration_id=migration_id,
@@ -388,6 +424,11 @@ def ensure_schema_table_transactional(
                 raise MigrationStateError("baseline_count_mismatch", "基线行数校验失败")
             conn.execute("COMMIT")
             return {"status": "created", "migration_id": migration_id, "seq": seq, "version": version}
+        if existed and count == 0:
+            raise MigrationStateError(
+                "migration_table_empty",
+                "schema_migrations 已存在但 0 行：拒绝补写基线（不自动修复、不删除）",
+            )
         if count == 1:
             row = conn.execute(
                 "SELECT migration_id, seq, version, status FROM schema_migrations"
@@ -415,7 +456,6 @@ def record_baseline(
     image_digest: str | None = None,
     healthz_version: str | None = None,
     runtime_version: str | None = None,
-    expected_structure_hash: str | None = None,
     detail_extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """校验实际结构后登记基线；幂等，可重复调用。
@@ -454,11 +494,11 @@ def record_baseline(
                 ",".join(signature["missing_base_tables"]),
             )
         actual_hash = _hash_signature(signature)
-        expected_hash = expected_structure_hash or BASELINE_STRUCTURE_HASH
-        if expected_hash and actual_hash != expected_hash:
+        profile = structure_profile_for(actual_hash)
+        if profile is None:
             raise BaselineRefused(
                 "structure_mismatch",
-                f"actual={actual_hash} expected={expected_hash}",
+                f"actual={actual_hash} supported={supported_structure_hashes()}",
             )
         tasks = tasks_state(conn)
         if tasks["tasks_present"] and tasks["tasks_rows"] != 0:
@@ -474,6 +514,7 @@ def record_baseline(
             "image_digest": image_digest,
             "healthz_version": healthz_version,
             "structure_hash": actual_hash,
+            "structure_profile": profile,
             "tables": list(BASE_TABLES),
             "tables_count": len(signature["tables"]),
             "tasks_present": tasks["tasks_present"],
@@ -486,6 +527,7 @@ def record_baseline(
         result = ensure_schema_table_transactional(conn, detail=detail)
         result["version"] = BASELINE_VERSION
         result["structure_hash"] = actual_hash
+        result["structure_profile"] = profile
         result["tasks_present"] = tasks["tasks_present"]
         result["tasks_rows"] = tasks["tasks_rows"]
         return result
@@ -512,6 +554,8 @@ __all__ = [
     "record_baseline",
     "schema_table_exists",
     "structure_hash",
+    "structure_profile_for",
     "structure_signature",
+    "supported_structure_hashes",
     "tasks_state",
 ]

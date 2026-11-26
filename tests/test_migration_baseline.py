@@ -100,6 +100,8 @@ def test_pt06_baseline_idempotent_and_business_tables_unchanged(tmp_path):
             healthz_version="1.8.7",
         )
         assert first["status"] == "created"
+        assert first["structure_profile"] == "alter_history", \
+            "历史 ALTER 演化库必须归入 alter_history 基准，而不是被当作任意结构"
         assert first["version"] == migrate.BASELINE_VERSION == "1.8.7-baseline"
         assert first["seq"] == 1
         assert first["tasks_present"] is True and first["tasks_rows"] == 0
@@ -116,6 +118,7 @@ def test_pt06_baseline_idempotent_and_business_tables_unchanged(tmp_path):
         assert detail["baseline"] is True
         assert detail["structure_hash"] == migrate.BASELINE_STRUCTURE_HASH
         assert detail["app_version"] == "1.8.7"
+        assert detail["structure_profile"] == "alter_history"
         assert detail["healthz_version"] == "1.8.7"
         assert detail["image_digest"].startswith("sha256:")
         assert detail["tasks_present"] is True
@@ -193,21 +196,15 @@ def test_pt06c_count_verification_failure_rolls_back(tmp_path, monkeypatch):
     conn = migrate.open_connection(path)
     try:
         real_count = migrate._count_rows
-        state = {"calls": 0}
 
-        def flaky(connection):
-            state["calls"] += 1
-            if state["calls"] == 1:
-                return 0  # 让流程进入"插入基线"分支
-            raise RuntimeError("injected count verification failure")
-
-        monkeypatch.setattr(migrate, "_count_rows", flaky)
-        with pytest.raises(RuntimeError, match="count verification failure"):
+        # 注入：登记后的行数校验读到 0（模拟"插入未生效"或统计被破坏）
+        monkeypatch.setattr(migrate, "_count_rows", lambda connection: 0)
+        with pytest.raises(migrate.MigrationStateError) as exc:
             migrate.record_baseline(conn)
+        assert exc.value.reason == "baseline_count_mismatch"
         monkeypatch.setattr(migrate, "_count_rows", real_count)
 
-        assert migrate.schema_table_exists(conn) is False
-        assert state["calls"] == 2
+        assert migrate.schema_table_exists(conn) is False, "校验失败必须连同建表一起回滚"
     finally:
         conn.close()
 
@@ -289,19 +286,64 @@ def test_pt06d_missing_base_table_is_refused(tmp_path):
         conn.close()
 
 
-def test_pt06d_hash_ignores_alter_history_and_column_order(tmp_path):
-    """历史 ALTER 出来的库与全新 init_db 的库，结构摘要必须相同。"""
+def test_pt06d_two_structure_profiles_are_registered_and_distinct(tmp_path):
+    """历史 ALTER 库与全新 init_db 库列序不同 ⇒ 两个独立登记的结构基准，各自可登记。"""
     fresh = _fresh_db(tmp_path)
     fresh_conn = migrate.open_connection(fresh)
-    legacy_conn = migrate.open_connection(_copy_db(tmp_path, "legacy.db"))
+    legacy_path = _copy_db(tmp_path, "legacy.db")
+    legacy_conn = migrate.open_connection(legacy_path)
     try:
-        assert migrate.structure_hash(fresh_conn) == migrate.structure_hash(legacy_conn)
-        assert migrate.structure_hash(fresh_conn) == migrate.BASELINE_STRUCTURE_HASH
+        legacy_hash = migrate.structure_hash(legacy_conn)
+        fresh_hash = migrate.structure_hash(fresh_conn)
+        assert legacy_hash == migrate.SUPPORTED_STRUCTURE_PROFILES["alter_history"]
+        assert fresh_hash == migrate.SUPPORTED_STRUCTURE_PROFILES["fresh_init"]
+        assert legacy_hash != fresh_hash, "列序差异必须体现为不同的结构摘要"
         assert len(migrate.structure_signature(fresh_conn)["tables"]) == 17
         assert len(migrate.structure_signature(fresh_conn)["objects"]) == 13
+
+        legacy_result = migrate.record_baseline(legacy_conn)
+        assert legacy_result["structure_profile"] == "alter_history"
+        fresh_result = migrate.record_baseline(fresh_conn)
+        assert fresh_result["structure_profile"] == "fresh_init"
+        assert fresh_result["structure_hash"] == fresh_hash
+
+        detail = json.loads(migrate.migration_rows(legacy_conn)[0]["detail_json"])
+        assert detail["structure_profile"] == "alter_history"
+        assert detail["structure_hash"] == legacy_hash
     finally:
         fresh_conn.close()
         legacy_conn.close()
+
+
+def test_pt06d_column_order_drift_is_refused(tmp_path):
+    """列序被重排（语义看似相同，但 SELECT * / 省略列名 INSERT 会受影响）必须拒绝。"""
+    path = _copy_db(tmp_path)
+    conn = migrate.open_connection(path)
+    try:
+        before = migrate.structure_hash(conn)
+        # run_events 无索引无触发器，重建后只有列序变化
+        conn.execute(
+            "CREATE TABLE run_events_tmp ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " kind TEXT NOT NULL, ts TEXT NOT NULL, batch_id INTEGER, note TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO run_events_tmp (id, kind, ts, batch_id, note)"
+            " SELECT id, kind, ts, batch_id, note FROM run_events"
+        )
+        conn.execute("DROP TABLE run_events")
+        conn.execute("ALTER TABLE run_events_tmp RENAME TO run_events")
+        after = migrate.structure_hash(conn)
+        assert after != before
+        assert migrate.structure_profile_for(after) is None
+
+        with pytest.raises(migrate.BaselineRefused) as exc:
+            migrate.record_baseline(conn)
+        assert exc.value.reason == "structure_mismatch"
+        assert after in str(exc.value)
+        assert migrate.schema_table_exists(conn) is False
+    finally:
+        conn.close()
 
 
 # --- PT-06e --------------------------------------------------------------------
@@ -347,6 +389,53 @@ def test_pt06e_init_db_never_creates_schema_migrations(tmp_path):
         assert after["counts"] == before["counts"]
         assert after["structure_hash"] == before["structure_hash"]
         assert migrate.preflight(conn)["state"] == "ready"
+    finally:
+        conn.close()
+
+
+# --- PT-06f：已有空表必须拒绝（不得自动补写基线） ---------------------------------
+
+
+def test_pt06f_existing_empty_table_is_refused_not_repaired(tmp_path):
+    path = _copy_db(tmp_path)
+    conn = migrate.open_connection(path)
+    try:
+        # 模拟"普通初始化提前建出空表"的坏状态
+        conn.execute(migrate.SCHEMA_MIGRATIONS_DDL)
+        assert migrate.schema_table_exists(conn) is True
+        assert migrate.migration_rows(conn) == []
+
+        with pytest.raises(migrate.MigrationStateError) as exc:
+            migrate.record_baseline(conn)
+        assert exc.value.reason == "migration_table_empty"
+
+        # 不得自动修复、不得补写、不得删除
+        assert migrate.schema_table_exists(conn) is True
+        assert migrate.migration_rows(conn) == []
+        assert migrate.current_version(conn) is None
+        verdict = migrate.preflight(conn)
+        assert verdict["state"] == "empty" and verdict["allowed"] is False
+
+        # 直接调事务入口同样拒绝（错误码稳定）
+        with pytest.raises(migrate.MigrationStateError) as exc2:
+            migrate.ensure_schema_table_transactional(conn, detail={"baseline": True})
+        assert exc2.value.reason == "migration_table_empty"
+        assert migrate.migration_rows(conn) == []
+    finally:
+        conn.close()
+
+
+def test_pt06f_new_database_first_registration_still_works(tmp_path):
+    """表原本不存在时仍允许"建表+登记"；且幂等重复调用不受影响。"""
+    fresh = _fresh_db(tmp_path)
+    conn = migrate.open_connection(fresh)
+    try:
+        assert migrate.schema_table_exists(conn) is False
+        first = migrate.record_baseline(conn)
+        assert first["status"] == "created" and first["structure_profile"] == "fresh_init"
+        second = migrate.record_baseline(conn)
+        assert second["status"] == "already_present"
+        assert len(migrate.migration_rows(conn)) == 1
     finally:
         conn.close()
 
