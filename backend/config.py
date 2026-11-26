@@ -11,6 +11,14 @@ LOG_DIR = Path(os.getenv("NODEPOOL_LOG_DIR", str(DATA_DIR / "logs"))).resolve()
 BACKUP_DIR = Path(os.getenv("NODEPOOL_BACKUP_DIR", str(DATA_DIR / "backup"))).resolve()
 SUB_DIR = DATA_DIR / "sub"
 
+# 维护状态目录（v1.10 计划 §2.6）：存放 maintenance.json。
+# 必须与业务 SQLite 库**同文件系统**（启动自检校验 st_dev），但**不得**等于 DATA_DIR
+# ——维护文件与业务数据分离，避免清理 data 目录时误删维护文件。
+STATE_DIR = Path(os.getenv("NODEPOOL_STATE_DIR", str(DATA_DIR / "state"))).resolve()
+STATE_DIR_CONFIG_ERROR = (
+    "state_dir_equals_data_dir" if STATE_DIR == DATA_DIR else None
+)
+
 DB_PATH = Path(os.getenv("NODEPOOL_DB", str(DATA_DIR / "nodepool.db"))).resolve()
 
 ADMIN_PASSWORD = os.getenv("NODEPOOL_ADMIN_PASSWORD", "nodepool")
@@ -136,3 +144,8 @@ DEFAULT_SETTINGS = {
 
 for _d in (DATA_DIR, CONFIG_DIR, LOG_DIR, BACKUP_DIR, SUB_DIR):
     _d.mkdir(parents=True, exist_ok=True)
+
+# 合法配置：覆盖路径不存在时创建空目录（只建空目录，不写任何业务文件）。
+# 非法配置（STATE_DIR == DATA_DIR）**不建目录**：由启动自检拦下并只禁用迁移入口。
+if STATE_DIR_CONFIG_ERROR is None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)

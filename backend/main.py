@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from backend import config
 from backend.api import routes
 from backend.database import db
+from backend.database import maint
 from backend.scheduler import manager
 from backend.services import fetcher
 from backend.services.speed_queue import queue as speed_queue
@@ -38,6 +39,18 @@ def setup_logging() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    # 启动自检：STATE_DIR 同卷 + 原子写全链路。每次启动一次、结果缓存。
+    # 失败只禁用迁移入口（start_migration 拒绝执行），**不得**影响业务启动、
+    # 不得使全站 503、不得自动迁移或改动数据库。
+    try:
+        state_dir_check = maint.selfcheck_state_dir()
+    except Exception as exc:                      # 自检自身异常也只降级，不阻断启动
+        log.warning("STATE_DIR 自检异常，迁移入口禁用：%r", exc)
+        state_dir_check = None
+    app.state.state_dir_check = state_dir_check
+    if state_dir_check is not None and not state_dir_check.ok:
+        log.warning("STATE_DIR 自检未通过（%s）：迁移入口已禁用，业务照常启动（%s）",
+                    state_dir_check.code, state_dir_check.detail)
     db.init_db()
     migrated = fetcher.migrate_filter_defaults()
     if migrated:
