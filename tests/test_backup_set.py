@@ -713,3 +713,123 @@ def test_restore_normal_path_on_wal_database_keeps_wal_rows(tmp_path):
     for table, expected in manifest["tables"].items():
         assert _count(conn, table) == expected
     conn.close()
+
+
+# --- P-1.3 局部修复：隔离中途失败的回滚安全 -----------------------------------
+
+
+def _count_ro(db_path, table="logs"):
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        return _count(conn, table)
+    finally:
+        conn.close()
+
+
+def _wal_target_and_set(tmp_path):
+    target = _fresh_db_with_uncheckpointed_wal(tmp_path)
+    result = backup.snapshot_set("manual", src_db=target, backup_dir=tmp_path / "b", min_free_mb=0)
+    return target, Path(result["path"])
+
+
+def _install_replace_failure(monkeypatch, fail_sidecar):
+    """让隔离改名在指定 sidecar 上失败；还原方向（隔离副本→原名）保持可用。"""
+    real = backup.os.replace
+
+    def guarded(src, dst, *a, **k):
+        dst_name = Path(dst).name
+        if dst_name.endswith(f"{fail_sidecar}.restore-prev-" + dst_name.rsplit("restore-prev-", 1)[-1]):
+            raise OSError(f"inject: quarantine {fail_sidecar} 失败")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(backup.os, "replace", guarded)
+
+
+def test_quarantine_fails_on_wal_keeps_original_db_and_sidecars(tmp_path, monkeypatch):
+    """DB 改名成功、WAL 改名失败：只还原 DB，WAL/SHM 原样未动，不误删。"""
+    target, set_dir = _wal_target_and_set(tmp_path)
+    before = _side_state(target)
+    expected_rows = _fresh_db.last["logs"] + 5
+
+    real = backup.os.replace
+
+    def guarded(src, dst, *a, **k):
+        name = Path(dst).name
+        if name.endswith("-wal") or "-wal.restore-prev-" in name:
+            if ".restore-prev-" in name:
+                raise OSError("inject: WAL 改名失败")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(backup.os, "replace", guarded)
+    with pytest.raises(backup.BackupError) as exc:
+        backup.restore_set(set_dir, db_path=target, backup_dir=tmp_path / "b")
+    assert exc.value.reason == "restore_quarantine_failed"
+
+    after = _side_state(target)
+    assert after["db"] == before["db"], "DB 必须字节不变（改名后被还原）"
+    assert after["-wal"] == before["-wal"], "WAL 必须字节不变（尚未隔离，绝不能删）"
+    assert after["-shm"] == before["-shm"], "SHM 必须未被误删"
+    assert _count_ro(target) == expected_rows, "WAL 中的已提交数据必须仍可读"
+    assert [p.name for p in tmp_path.glob("*.restore-prev-*")] == [], "还原成功的隔离副本不得残留"
+
+
+def test_quarantine_fails_on_shm_keeps_wal_data_readable(tmp_path, monkeypatch):
+    """DB、WAL 改名成功、SHM 改名失败：db/wal 还原，shm 原样未动。"""
+    target, set_dir = _wal_target_and_set(tmp_path)
+    before = _side_state(target)
+    expected_rows = _fresh_db.last["logs"] + 5
+    real = backup.os.replace
+
+    def guarded(src, dst, *a, **k):
+        name = Path(dst).name
+        if "-shm.restore-prev-" in name:
+            raise OSError("inject: SHM 改名失败")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(backup.os, "replace", guarded)
+    with pytest.raises(backup.BackupError) as exc:
+        backup.restore_set(set_dir, db_path=target, backup_dir=tmp_path / "b")
+    assert exc.value.reason == "restore_quarantine_failed"
+
+    after = _side_state(target)
+    assert after["db"] == before["db"] and after["-wal"] == before["-wal"]
+    assert after["-shm"] == before["-shm"], "尚未隔离的 SHM 不得被删除"
+    assert _count_ro(target) == expected_rows
+    assert [p.name for p in tmp_path.glob("*.restore-prev-*")] == []
+
+
+def test_quarantine_rollback_failure_keeps_quarantine_copy(tmp_path, monkeypatch):
+    """部分隔离后回滚改名再次失败：保留隔离副本，不静默删除，错误里能定位文件。"""
+    target, set_dir = _wal_target_and_set(tmp_path)
+    before = _side_state(target)
+    real = backup.os.replace
+
+    def guarded(src, dst, *a, **k):
+        name = Path(dst).name
+        src_name = Path(src).name
+        if "-wal.restore-prev-" in name:
+            raise OSError("inject: WAL 改名失败")
+        # 还原方向：隔离副本 → 原名，对 db 的还原再次失败
+        if ".restore-prev-" in src_name and "-wal.restore-prev-" not in src_name \
+                and "-shm.restore-prev-" not in src_name:
+            raise OSError("inject: DB 还原失败")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(backup.os, "replace", guarded)
+    with pytest.raises(backup.BackupError) as exc:
+        backup.restore_set(set_dir, db_path=target, backup_dir=tmp_path / "b")
+    assert exc.value.reason == "restore_quarantine_failed"
+    message = str(exc.value)
+    assert ".restore-prev-" in message, "错误信息必须列出残留隔离副本路径"
+
+    leftovers = sorted(p.name for p in tmp_path.glob("*.restore-prev-*"))
+    assert len(leftovers) == 1
+    assert leftovers[0].startswith("live.db.restore-prev-"), "残留的应是原 DB 的隔离副本"
+    qpath = tmp_path / leftovers[0]
+    assert qpath.exists(), "未能还原的隔离副本必须保留，不得静默删除"
+    assert hashlib.sha256(qpath.read_bytes()).hexdigest() == before["db"][2], "保留的隔离副本必须是原始 DB 内容"
+    # 尚未隔离的 sidecar 仍是原文件，内容不变
+    assert _side_state(target)["-wal"] == before["-wal"]
+    assert _side_state(target)["-shm"] == before["-shm"]
+    # 不产生无法识别的半库：原路径上不得出现新的 db 文件（还原失败，未做替换）
+    assert not Path(target).exists(), "未替换前原路径不应出现新库文件"
