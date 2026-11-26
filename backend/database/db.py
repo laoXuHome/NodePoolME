@@ -439,6 +439,14 @@ _INFLIGHT_LOCK = threading.Lock()
 
 
 def _register_txn(conn: sqlite3.Connection) -> dict:
+    """登记一条在途写事务。
+
+    正常路径由 :func:`transaction` 在 :func:`pool.commit_slot` 临界区内调用（与
+    ``block_writes()`` 互斥）。这里再做一次兜底：已封锁 / 已声明封锁意图时拒绝
+    登记，保证封锁完成后不会凭空出现一条"可提交"的在途事务。
+    """
+    if pool.block_pending():
+        raise pool.WriteRefused("writes_blocked")
     entry = {"conn": conn, "aborted": False}
     with _INFLIGHT_LOCK:
         _INFLIGHT[id(conn)] = entry
@@ -452,8 +460,13 @@ def _unregister_txn(entry: dict) -> None:
 
 
 def _assert_txn_committable(entry: dict) -> None:
-    """提交前复核：写入闸已封锁或在途事务已被中止 ⇒ 拒绝提交。"""
-    if entry["aborted"] or pool.writes_blocked():
+    """提交前复核（在 :func:`pool.commit_slot` 临界区内调用）：闸门已封锁、
+    封锁意图已声明或在途事务已被中止 ⇒ 拒绝提交。
+
+    三条判据都必须在临界区内读，才能与 ``block_writes()`` 形成同步边界：
+    封锁要么整体先完成（这里必拒），要么整体后完成（commit 已在同一临界区内落库）。
+    """
+    if entry["aborted"] or pool.writes_blocked() or pool.block_pending():
         raise pool.WriteRefused("writes_blocked")
 
 
@@ -476,19 +489,29 @@ def active_write_transactions() -> int:
 def transaction():
     """正式批量写入入口：``write_guard()``（维护态 + PRAGMA）→ 登记在途事务 → 事务。
 
-    封锁可以在事务体执行期间发生：此时连接被关闭、登记项被标记 aborted，
-    提交前的 :func:`_assert_txn_committable` 会抛 ``WriteRefused("writes_blocked")``，
-    因此封锁返回后不存在仍能提交的业务写入。
+    同步边界（P-1.5 提交原子性）：
+
+    * **登记**在 :func:`pool.commit_slot` 的临界区内完成——与 ``block_writes()``
+      互斥，因此不会出现"封锁已中止并关闭连接之后，又冒出一条在途登记"；
+    * **提交许可复核 + ``conn.commit()``** 在同一个 :func:`pool.commit_slot`
+      临界区内完成——两者之间不可能插入一次封锁。
+
+    封锁可以在事务体执行期间发生：连接被关闭、登记项被标记 aborted、封锁意图置位，
+    提交前复核会抛 ``WriteRefused("writes_blocked")``，因此 ``block_writes()``
+    返回后不存在仍能提交的业务写入。
     """
     from backend.database import gate
 
     with gate.write_guard() as conn:
-        entry = _register_txn(conn)
+        entry: dict | None = None
         try:
+            with pool.commit_slot():      # 登记与封锁互斥
+                entry = _register_txn(conn)
             conn.execute("BEGIN IMMEDIATE")
             yield conn
-            _assert_txn_committable(entry)
-            conn.commit()
+            with pool.commit_slot():      # 复核 + commit 原子化，封锁不可穿插
+                _assert_txn_committable(entry)
+                conn.commit()
         except Exception:
             try:
                 conn.rollback()
@@ -496,7 +519,8 @@ def transaction():
                 pass          # 连接已被封锁关闭时回滚失败是预期结果，异常以上抛的原因为准
             raise
         finally:
-            _unregister_txn(entry)
+            if entry is not None:
+                _unregister_txn(entry)
 
 
 def reset_connection() -> None:

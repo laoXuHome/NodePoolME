@@ -235,13 +235,19 @@ def test_pool_dead_after_block_and_readonly_still_serves(maint_file):
 
 
 def _fake_halt_migration():
-    """模拟 P-1.6：定义在 backend.database.migrate 里的 halt_migration 可调用对象。"""
+    """模拟 P-1.6：在 backend.database.migrate 的模块命名空间里定义 halt_migration。
 
-    def halt_migration():
-        return None
+    真实 P-1.6 会把函数写在 migrate.py 里；这里用 ``exec(..., module.__dict__)``
+    复刻同一事实——函数对象的 ``__globals__`` 就是该模块的 ``__dict__``。
+    只改 ``__module__`` 字符串的伪造函数不会被接受（见对应反向测试）。
+    """
+    import importlib
 
-    halt_migration.__module__ = pool._TRUSTED_ISSUER_MODULE
-    return halt_migration
+    module = importlib.import_module(pool._TRUSTED_ISSUER_MODULE)
+    code = compile(f"def {pool._TRUSTED_ISSUER_FUNC}():\n    return None\n",
+                   module.__file__ or "<migrate>", "exec")
+    exec(code, module.__dict__)              # noqa: S102 - 测试内构造可信发射器
+    return getattr(module, pool._TRUSTED_ISSUER_FUNC)
 
 
 def _register_fake_issuer() -> object:
@@ -600,7 +606,7 @@ def test_halt_tail_accepts_only_confirmation_from_halt_migration():
     token = _register_fake_issuer()
     rec = pool.mint_confirmation(token, "mig-42", True, True)
     assert rec.source == "halt_migration"
-    assert rec._issuer == pool._TRUSTED_ISSUER_MODULE
+    assert rec._issuer == pool._ISSUER_ID == "backend.database.migrate:halt_migration"
     assert pool.halt_tail(rec) == pool.HALT_TAIL_OK
 
 
@@ -729,3 +735,289 @@ def test_inflight_transaction_cannot_commit_after_block(maint_file, pause_point)
     with pytest.raises((pool.WriteRefused, pool.PoolClosed)):
         with db.transaction():
             pass                                      # 封锁后新事务也拿不到写权
+
+
+# ================== P-1.5 最终安全修复：提交原子性 + 可信令牌身份绑定
+# ------------------------------------------------- 问题 1：提交与封锁原子化
+def test_block_cannot_interleave_between_commit_check_and_commit(maint_file, monkeypatch):
+    """关键竞争窗口：会话 1 已在"复核 + commit"临界区内、``conn.commit()`` 尚未执行。
+
+    时序：
+    T0 会话 1：transaction() 取写连接 → 登记在途事务 → BEGIN IMMEDIATE → 写入 →
+      进入 pool.commit_slot()（持 _blocking_lock），停在复核之前（暂停点 P）。
+    T1 主线程：确认暂停（in_critical 已置位、active_write_transactions()==1）。
+    T2 会话 2（独立线程）：pool.block_writes() —— 先置位封锁意图（不取锁），再等锁。
+    T3 主线程：断言 block_writes 0.3 秒内**没有返回**（临界区与封锁互斥），
+       且此刻 block_pending()=True（意图已声明）、writes_blocked()=False（尚未落闸）。
+    T4 主线程放行 → 会话 1 的复核读到封锁意图 → WriteRefused("writes_blocked")，
+       事务回滚、登记注销、释放临界区。
+    T5 会话 2 取得锁，中止/关闭并返回。
+    """
+    in_critical = threading.Event()
+    resume = threading.Event()
+    blocked_done = threading.Event()
+    outcome: dict = {}
+    real_assert = db._assert_txn_committable
+
+    def pausing_assert(entry):
+        in_critical.set()                 # 已进入临界区；复核尚未完成
+        assert resume.wait(5.0), "会话 1 未被放行"
+        return real_assert(entry)         # 此刻封锁意图已置位 ⇒ 应拒绝
+
+    monkeypatch.setattr(db, "_assert_txn_committable", pausing_assert)
+
+    def session1():
+        try:
+            with db.transaction() as conn:
+                conn.execute("INSERT INTO logs (ts, level, source, message) "
+                             "VALUES ('x','I','t','t')")
+            outcome["commit"] = "ok"
+        except BaseException as exc:                      # noqa: BLE001 - 记录真实异常
+            outcome["commit"] = type(exc).__name__
+        finally:
+            outcome["finished"] = True
+
+    def session2():
+        pool.block_writes(pool.REASON_MAINTENANCE)
+        blocked_done.set()
+
+    worker = threading.Thread(target=session1, daemon=True)
+    worker.start()
+    assert in_critical.wait(5.0), "会话 1 未进入提交临界区"
+    assert db.active_write_transactions() == 1          # 事务确实在途、尚未提交
+
+    blocker = threading.Thread(target=session2, daemon=True)
+    blocker.start()
+    assert blocked_done.wait(0.3) is False, "提交临界区未能挡住封锁：两者没有互斥"
+    assert pool.block_pending() is True                 # 封锁意图已声明
+    assert pool.writes_blocked() is False               # 但闸门尚未落下（仍在等锁）
+
+    resume.set()
+    worker.join(10)
+    blocker.join(10)
+    assert outcome["commit"] == "WriteRefused"          # 检查通过后仍被封锁拦下
+    assert blocked_done.is_set() is True
+    assert pool.writes_blocked() is True
+    assert db.open_write_connections() == 0
+    assert db.active_write_transactions() == 0
+    assert pool.confirm_writes_blocked()[0] is True
+    with pytest.raises(pool.PoolClosed):
+        db.connect()                                    # 新会话 checkout 被拒
+    assert db.rows("SELECT 1 AS x")[0]["x"] == 1        # 只读会话仍可用
+    assert db.rows("SELECT COUNT(*) AS c FROM logs WHERE message='t'")[0]["c"] == 0
+    with pytest.raises((pool.WriteRefused, pool.PoolClosed)):
+        with db.transaction():
+            pass                                        # 封锁后新事务拿不到写权
+    assert db.rows("SELECT COUNT(*) AS c FROM logs WHERE message='t'")[0]["c"] == 0
+
+
+def test_commit_inside_critical_section_serializes_before_block_return(maint_file, monkeypatch):
+    """同一临界区的另一半：提交先到（复核已通过），封锁必须等 commit 落库才返回。
+
+    验证"封锁返回 = 静默点"：block_writes 在 commit 进行中无法返回；它返回之后
+    数据库中只有那次"封锁返回之前"完成的提交，且此后不可能再有任何写入落库。
+    """
+    checked = threading.Event()
+    resume = threading.Event()
+    blocked_done = threading.Event()
+    outcome: dict = {}
+    real_assert = db._assert_txn_committable
+
+    def pausing_assert(entry):
+        real_assert(entry)                # 复核通过（此刻尚未封锁）
+        checked.set()
+        assert resume.wait(5.0), "会话 1 未被放行"
+
+    monkeypatch.setattr(db, "_assert_txn_committable", pausing_assert)
+
+    def session1():
+        try:
+            with db.transaction() as conn:
+                conn.execute("INSERT INTO logs (ts, level, source, message) "
+                             "VALUES ('x','I','t','t')")
+            outcome["commit"] = "ok"
+        except BaseException as exc:                      # noqa: BLE001
+            outcome["commit"] = type(exc).__name__
+
+    def session2():
+        pool.block_writes(pool.REASON_MAINTENANCE)
+        blocked_done.set()
+
+    worker = threading.Thread(target=session1, daemon=True)
+    worker.start()
+    assert checked.wait(5.0), "会话 1 未通过提交复核"
+    assert db.active_write_transactions() == 1
+
+    blocker = threading.Thread(target=session2, daemon=True)
+    blocker.start()
+    assert blocked_done.wait(0.3) is False, "封锁抢进了提交临界区"
+    assert pool.block_pending() is True
+
+    resume.set()
+    worker.join(10)
+    blocker.join(10)
+    assert outcome["commit"] == "ok"                    # 提交在封锁返回之前完成
+    assert blocked_done.is_set() is True
+    assert pool.writes_blocked() is True
+    assert pool.confirm_writes_blocked()[0] is True
+    assert db.active_write_transactions() == 0
+
+    # 封锁返回后的静默点：唯一一行是"封锁返回之前"那次提交，之后不能再写
+    count_at_quiesce = db.rows("SELECT COUNT(*) AS c FROM logs WHERE message='t'")[0]["c"]
+    assert count_at_quiesce == 1
+    with pytest.raises(pool.PoolClosed):
+        db.connect()
+    assert db.rows("SELECT 1 AS x")[0]["x"] == 1
+    with pytest.raises((pool.WriteRefused, pool.PoolClosed)):
+        with db.transaction():
+            pass
+    assert db.rows("SELECT COUNT(*) AS c FROM logs WHERE message='t'")[0]["c"] == 1
+
+
+def test_inflight_registration_cannot_slip_past_block(maint_file):
+    """登记也必须在临界区内：封锁完成后不会凭空出现一条"可提交"的在途事务。"""
+    pool.block_writes(pool.REASON_MAINTENANCE)
+    with pytest.raises(pool.WriteRefused):
+        with pool.commit_slot():
+            pass
+    assert db.active_write_transactions() == 0
+
+    raw = db.sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(pool.WriteRefused):
+            db._register_txn(raw)          # 绕过 transaction() 直接登记也不行
+        assert db.active_write_transactions() == 0
+    finally:
+        raw.close()
+
+
+# --------------------------------------------- 问题 2：可信令牌身份绑定
+def test_forged_module_attribute_cannot_register_issuer():
+    """只改 ``__module__`` 字符串的普通函数不能拿到可信令牌。"""
+
+    def foreign():
+        return None
+
+    foreign.__module__ = pool._TRUSTED_ISSUER_MODULE          # 伪造模块名
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.register_confirmation_issuer(foreign)
+    assert exc.value.code == "untrusted_issuer_identity"      # __globals__ 身份不符
+    assert pool._ISSUERS == {}
+
+    # 同一模块命名空间但函数名不是 halt_migration，同样不认
+    import importlib
+
+    module = importlib.import_module(pool._TRUSTED_ISSUER_MODULE)
+    exec(compile("def run():\n    return None\n", module.__file__ or "<migrate>", "exec"),
+         module.__dict__)                                     # noqa: S102
+    with pytest.raises(pool.HaltPreconditionFailed) as exc2:
+        pool.register_confirmation_issuer(module.run)
+    assert exc2.value.code == "untrusted_issuer_identity"
+
+    # 非函数（内建/实例）一律拒绝
+    for candidate in (len, object(), "backend.database.migrate"):
+        with pytest.raises(pool.HaltPreconditionFailed):
+            pool.register_confirmation_issuer(candidate)
+    assert pool._ISSUERS == {}
+
+
+def test_registry_stores_token_object_identity():
+    """注册表保留令牌对象本身，重复注册是幂等的（不会产生第二个可用令牌）。"""
+    token = _register_fake_issuer()
+    record = pool._ISSUERS[id(token)]
+    assert record.token is token                             # 存的是对象，不是只存 id
+    assert record.issuer == pool._ISSUER_ID
+    assert len(pool._ISSUERS) == 1
+
+    again = pool.register_confirmation_issuer(_fake_halt_migration())
+    assert again is token                                    # 同一发射器 → 同一令牌对象
+    assert len(pool._ISSUERS) == 1
+    assert pool._lookup_token(again) is record
+
+
+def test_unregistered_and_replaced_token_cannot_mint():
+    """未注册令牌、以及"id 复用/登记项被替换"的令牌都不能签发。"""
+    token = _register_fake_issuer()
+    stranger = object()
+    assert pool._lookup_token(stranger) is None
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.mint_confirmation(stranger, "m", True, True)
+    assert exc.value.code == "untrusted_issuer"
+
+    # 身份混淆 1：同一 id 位置上的登记项被换成另一个令牌对象（真实令牌被替换）
+    pool._ISSUERS[id(token)] = pool._IssuerRecord(token=object(),
+                                                  issuer=pool._ISSUER_ID,
+                                                  registered_at=1.0)
+    assert pool._lookup_token(token) is None                 # 同 id 但非同一对象
+    with pytest.raises(pool.HaltPreconditionFailed) as exc2:
+        pool.mint_confirmation(token, "m", True, True)
+    assert exc2.value.code == "untrusted_issuer"
+
+    # 身份混淆 2：登记表被清空后另一个对象占位 ⇒ 旧令牌同样失效
+    replacement = object()
+    pool._ISSUERS.clear()
+    pool._ISSUERS[id(replacement)] = pool._IssuerRecord(token=replacement,
+                                                        issuer=pool._ISSUER_ID,
+                                                        registered_at=2.0)
+    with pytest.raises(pool.HaltPreconditionFailed) as exc3:
+        pool.mint_confirmation(token, "m", True, True)
+    assert exc3.value.code == "untrusted_issuer"
+    with pytest.raises(pool.HaltPreconditionFailed) as exc4:
+        pool.mint_confirmation(replacement, "m", True, True)  # 替换后的令牌本体已注册
+    assert exc4.value.code == "unconfirmed_state"             # 但此刻尚未封锁
+
+
+def test_confirmation_is_bound_to_issuer_token_not_issuer_string(maint_file):
+    """凭据绑定具体发射器令牌身份，不只是 issuer 字符串出现在注册表里。"""
+    pool.block_writes(pool.REASON_MAINTENANCE)
+    token = _register_fake_issuer()
+    rec = pool.mint_confirmation(token, "mig-9", True, True)
+    assert pool.halt_tail(rec) == pool.HALT_TAIL_OK
+
+    # 1) 字段全对、只缺真实令牌对象（即便拿到模块哨兵也无效）
+    forged = pool.MaintConfirmation("mig-9", True, True, 1.0,
+                                    _token=pool._ISSUER_TOKEN,
+                                    _issuer=pool._ISSUER_ID,
+                                    _issuer_token=object())
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.halt_tail(forged)
+    assert exc.value.code == "unconfirmed"
+
+    # 2) 同 issuer 字符串、换掉令牌对象 ⇒ 旧凭据立即失效
+    replacement = object()
+    pool._ISSUERS.clear()
+    pool._ISSUERS[id(replacement)] = pool._IssuerRecord(replacement, pool._ISSUER_ID, 2.0)
+    with pytest.raises(pool.HaltPreconditionFailed) as exc2:
+        pool.halt_tail(rec)
+    assert exc2.value.code == "unconfirmed"
+
+    # 3) 冒用另一个已注册令牌的对象身份（换 issuer 身份字符串也不认）
+    other = pool.mint_confirmation(replacement, "mig-9", True, True)
+    object.__setattr__(other, "_issuer", "someone.else:halt_migration")
+    with pytest.raises(pool.HaltPreconditionFailed) as exc3:
+        pool.halt_tail(other)
+    assert exc3.value.code == "unconfirmed"
+
+
+def test_p16_issuer_handoff_contract(maint_file):
+    """P-1.6 可信交接契约（P-1.5 只提供接口，不实现状态机）。
+
+    时序：migrate.py 内 ``_TOKEN = register_confirmation_issuer(halt_migration)``
+    → halt_migration 置位封锁、回读维护文件得 maintenance_ok、用
+    ``pool.confirm_writes_blocked()[0]`` 得 writes_blocked
+    → ``mint_confirmation(_TOKEN, mid, maintenance_ok, writes_blocked)``
+    → ``halt_tail(rec)``。
+    """
+    issuer = _fake_halt_migration()
+    token = pool.register_confirmation_issuer(issuer)
+    # 封锁尚未成立时不能签发出"已封锁"的凭据
+    with pytest.raises(pool.HaltPreconditionFailed) as early:
+        pool.mint_confirmation(token, "mig-p16", True, True)
+    assert early.value.code == "unconfirmed_state"
+
+    pool.block_writes(pool.REASON_MAINTENANCE)               # halt_migration 第一步
+    blocked, detail = pool.confirm_writes_blocked()
+    assert blocked is True and detail["active_write_transactions"] == 0
+    rec = pool.mint_confirmation(token, "mig-p16", True, blocked)
+    assert pool.halt_tail(rec) == pool.HALT_TAIL_OK
+    assert rec.migration_id == "mig-p16" and rec._issuer == pool._ISSUER_ID
