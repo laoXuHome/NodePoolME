@@ -11,6 +11,8 @@ import hashlib
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -265,15 +267,30 @@ def test_import_blocks_writes_before_replace(env):
     assert seen["blocked"] is True
 
 
-def test_import_handles_stale_wal_and_shm(env):
+def test_preimport_captures_committed_wal_data(env):
+    """WAL 里存在已提交但未 checkpoint 的数据时，preimport 必须完整包含它。"""
     info = backup.export_backup(label="wal")
-    backup_rows = _counts(env.live)
-    _add_airports(2, prefix="stale-")
-    db.reset_connection()
-    # 伪造"上次异常退出遗留"的 -wal/-shm（真实内容不可解析也必须被移走）
-    Path(str(env.live) + "-wal").write_bytes(b"stale-wal-bytes")
-    Path(str(env.live) + "-shm").write_bytes(b"stale-shm-bytes")
+    label = f"wal-proof-{time.time_ns()}"
+    code = (
+        "import os, sqlite3, sys\n"
+        "db = sys.argv[1]\n"
+        "conn = sqlite3.connect(db, isolation_level=None)\n"
+        "conn.execute('PRAGMA journal_mode=WAL')\n"
+        "conn.execute(\"INSERT INTO airports (name, url, enabled, interval_minutes,\"\n"
+        "             \" daily_time, filter_keywords, created_at, updated_at)\"\n"
+        "             \" VALUES (?,?,?,?,?,?,?,?)\",\n"
+        "             (sys.argv[2], 'https://wal.example/sub', 1, 60, None, '[]',\n"
+        "              '2026-11-26 20:00:00', '2026-11-26 20:00:00'))\n"
+        "os._exit(0)  # 不 close：留下未 checkpoint 的已提交 WAL\n"
+    )
+    subprocess.run([sys.executable, "-c", code, str(env.live), label], check=True,
+                   env={**os.environ, "NODEPOOL_DB": str(env.live)})
+    wal = Path(str(env.live) + "-wal")
+    assert wal.exists() and wal.stat().st_size > 0, "前置条件：WAL 必须存在"
+    live_counts = _counts(env.live)                    # 只读连接能看到 WAL 内已提交行
+    assert live_counts["airports"] == 3
 
+    db.reset_connection()
     db.close_all_connections()
     pool.block_writes("test-wal")
     try:
@@ -281,10 +298,17 @@ def test_import_handles_stale_wal_and_shm(env):
     finally:
         pool.unblock_writes()
     assert result["ok"] is True
-    wal = Path(str(env.live) + "-wal")
-    assert (not wal.exists()) or wal.stat().st_size == 0, "不得残留旧 WAL 帧"
-    assert _counts(env.live) == backup_rows
-    assert Path(result["preimport_copy"]).exists()          # 原库副本留存供人工确认
+    assert result["preimport_tables"] == live_counts      # 副本逐表计数 = 含 WAL 的真实原库
+    preimport = Path(result["preimport_copy"])
+    conn = sqlite3.connect(f"file:{preimport}?mode=ro", uri=True)
+    try:
+        names = {row[0] for row in conn.execute("SELECT name FROM airports")}
+    finally:
+        conn.close()
+    assert label in names, "preimport 丢失 WAL 中已提交的数据"
+    assert _counts(env.live)["airports"] == 2             # 目标已换成旧备份
+    assert not Path(str(env.live) + "-wal").exists() or \
+        Path(str(env.live) + "-wal").stat().st_size == 0
 
 
 def test_import_failure_reports_scene_and_keeps_original(env):
@@ -292,7 +316,7 @@ def test_import_failure_reports_scene_and_keeps_original(env):
     _add_airports(2, prefix="keep-")
     db.reset_connection()
     db.close_all_connections()
-    digest = _sha(env.live)
+    before_counts = _counts(env.live)
     pool.block_writes("test-fail")
 
     def boom(_target: Path) -> None:
@@ -304,7 +328,7 @@ def test_import_failure_reports_scene_and_keeps_original(env):
     finally:
         pool.unblock_writes()
     assert exc.value.reason == "import_failed"
-    assert _sha(env.live) == digest                        # 原库已复原
+    assert _counts(env.live) == before_counts               # 原库已复原（内容等价）
     leftovers = list(Path(env.live.parent).glob("nodepool.db.preimport-*"))
     assert leftovers and leftovers[0].stat().st_size > 0
 
@@ -328,11 +352,125 @@ def test_import_failure_keeps_maintenance_and_block(env, monkeypatch):
 # --- 命令与迁移边界 -----------------------------------------------------------
 
 
+# --- 验收修正专项 -------------------------------------------------------------
+
+
+def test_close_report_keeps_failed_connection(monkeypatch):
+    """关闭失败的连接不得从登记表移除，也不得被计为成功。"""
+
+    class BadConn:
+        def close(self):
+            raise sqlite3.OperationalError("simulated close failure")
+
+    key = 987654
+    monkeypatch.setattr(db, "_WRITE_CONNS", {key: BadConn()})
+    report = db.close_all_connections_report()
+    assert report["ok"] is False
+    assert report["failed"] and report["failed"][0]["label"] == f"write:{key}"
+    assert report["remaining"] == [f"write:{key}"]
+    assert key in db._WRITE_CONNS
+
+
+def test_close_failure_aborts_import(env, monkeypatch):
+    """关闭确认失败 ⇒ 中止导入；不得替换库、不得清维护态。"""
+    _fast_gate(monkeypatch)
+    info = backup.export_backup(label="closefail")
+    counts = _counts(env.live)
+    monkeypatch.setattr(db, "close_all_connections_report", lambda: {
+        "closed": 0, "failed": [{"label": "write:1", "error": "simulated"}],
+        "remaining": ["write:1"], "ok": False})
+    rc = cli.main(["import", "--file", info["path"], "--json"])
+    assert rc == cli.EXIT_HALTED
+    assert _counts(env.live) == counts
+    assert Path(maint.MAINT_FILE).exists()
+    assert pool.writes_blocked() is True
+    pool.reset_for_tests()
+    db.reset_connection()
+
+
+def test_self_handles_block_import(env):
+    """当前进程自己持有的库文件句柄不能被忽略。"""
+    info = backup.export_backup(label="selfhandle")
+    digest = _sha(env.live)
+    db.close_all_connections()
+    pool.block_writes("self-handle-test")
+    handle = open(env.live, "rb")
+    try:
+        with pytest.raises(backup.BackupError) as exc:
+            backup.import_backup(info["path"])
+        assert exc.value.reason == "import_self_handles_present"
+    finally:
+        handle.close()
+        pool.unblock_writes()
+    assert _sha(env.live) == digest
+
+
+def test_verify_and_import_require_strict_meta(env, monkeypatch):
+    _fast_gate(monkeypatch)
+    info = backup.export_backup(label="meta-strict")
+    path = Path(info["path"])
+    meta_path = Path(info["meta_path"])
+    good_meta = meta_path.read_text(encoding="utf-8")
+
+    # 1) 缺 .json
+    meta_path.unlink()
+    report = backup.verify_backup(path)
+    assert report["ok"] is False and "meta_missing" in report["errors"]
+    rc = cli.main(["import", "--file", str(path), "--json"])
+    assert rc == cli.EXIT_REFUSED
+    assert not Path(maint.MAINT_FILE).exists()
+
+    # 2) .json 损坏
+    meta_path.write_text("{not json", encoding="utf-8")
+    report = backup.verify_backup(path)
+    assert report["ok"] is False and "meta_unreadable" in report["errors"]
+
+    # 3) 字段缺失
+    meta_path.write_text(good_meta, encoding="utf-8")
+    meta = json.loads(good_meta)
+    meta.pop("tables")
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    report = backup.verify_backup(path)
+    assert report["ok"] is False
+    assert any(e.startswith("meta_fields_missing:") for e in report["errors"])
+
+
+def test_same_second_exports_never_overwrite(env, monkeypatch):
+    monkeypatch.setattr(backup, "_stamp", lambda: "20260101-000000")
+    paths = [backup.export_backup(label="same")["path"] for _ in range(3)]
+    assert len(set(paths)) == 3
+    for path in paths:
+        assert backup.verify_backup(path)["ok"] is True
+    assert len(list(env.backups.glob("nodepool-20260101-000000-same-*.db"))) == 3
+
+
+def test_concurrent_exports_never_overwrite(env, monkeypatch):
+    monkeypatch.setattr(backup, "_stamp", lambda: "20260101-000000")
+    results: list[str] = []
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            results.append(backup.export_backup(label="conc")["path"])
+        except BaseException as exc:                            # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert not errors
+    assert len(set(results)) == 6
+    for path in results:
+        assert backup.verify_backup(path)["ok"] is True
+
+
 def test_cli_backup_and_verify(env):
     out = env.root / "manual-out"
     rc = cli.main(["backup", "--out", str(out), "--label", "offline", "--json"])
     assert rc == cli.EXIT_OK
-    files = sorted(out.glob("nodepool-*-offline.db"))
+    files = sorted(out.glob("nodepool-*-offline-*.db"))
     assert len(files) == 1
     rc2 = cli.main(["verify", "--file", str(files[0]), "--json"])
     assert rc2 == cli.EXIT_OK

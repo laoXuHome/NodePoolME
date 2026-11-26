@@ -388,28 +388,73 @@ def close_write_connections() -> int:
     for key, conn in list(_WRITE_CONNS.items()):
         try:
             conn.close()
-            closed += 1
-        except Exception:
-            pass
+        except Exception:            # 关闭失败的连接**留在登记表**，交由上层判定中止
+            continue
         _WRITE_CONNS.pop(key, None)
+        closed += 1
     if isinstance(getattr(_local, "conn", None), sqlite3.Connection):
+        if id(_local.conn) in _WRITE_CONNS:
+            return closed              # 关闭失败：保留线程本地引用
         _local.conn = None
     return closed
 
 
-def close_all_connections() -> int:
-    """关闭全部写连接与只读连接（迁移替换数据库文件前使用）。"""
-    closed = close_write_connections()
-    for key, conn in list(_READ_CONNS.items()):
+def close_all_connections_report() -> dict[str, object]:
+    """关闭全部写连接与只读连接，并**逐条报告**结果。
+
+    规则（P-1.7 验收修正）：
+
+    * 只有 ``conn.close()`` 真正成功才从登记表移除并计入 ``closed``；
+    * 抛异常的连接**留在登记表**（``remaining`` 会包含它），计入 ``failed``；
+    * 线程本地引用（``_local.conn``/``_local.ro``）同样要关闭，关闭成功才置空；
+    * ``ok`` 只在"无失败 ∧ 登记表为空 ∧ 无未关闭的线程本地连接"时为 True。
+
+    调用方（导入流程）必须用 ``ok`` 决定是否允许替换数据库文件，不得用关闭个数。
+    """
+    global _GENERATION
+    _GENERATION += 1
+    report: dict[str, object] = {"closed": 0, "failed": [], "remaining": []}
+
+    def _close_one(conn: sqlite3.Connection, label: str) -> bool:
         try:
             conn.close()
-            closed += 1
-        except Exception:
-            pass
-        _READ_CONNS.pop(key, None)
-    if isinstance(getattr(_local, "ro", None), sqlite3.Connection):
-        _local.ro = None
-    return closed
+        except Exception as exc:                                  # noqa: BLE001
+            report["failed"].append({"label": label,
+                                     "error": f"{type(exc).__name__}: {exc}"})
+            return False
+        report["closed"] += 1
+        return True
+
+    for key, conn in list(_WRITE_CONNS.items()):
+        if _close_one(conn, f"write:{key}"):
+            _WRITE_CONNS.pop(key, None)
+    for key, conn in list(_READ_CONNS.items()):
+        if _close_one(conn, f"read:{key}"):
+            _READ_CONNS.pop(key, None)
+
+    local_write = getattr(_local, "conn", None)
+    if isinstance(local_write, sqlite3.Connection):
+        if _close_one(local_write, "thread-local:write"):
+            _local.conn = None
+    local_ro = getattr(_local, "ro", None)
+    if isinstance(local_ro, sqlite3.Connection):
+        if _close_one(local_ro, "thread-local:read"):
+            _local.ro = None
+
+    report["remaining"] = [f"write:{k}" for k in _WRITE_CONNS] + \
+                          [f"read:{k}" for k in _READ_CONNS]
+    local_left = [name for name, value in (("thread-local:write", getattr(_local, "conn", None)),
+                                          ("thread-local:read", getattr(_local, "ro", None)))
+                  if isinstance(value, sqlite3.Connection)]
+    report["remaining"] += local_left
+    report["ok"] = not report["failed"] and not report["remaining"]
+    return report
+
+
+def close_all_connections() -> int:
+    """兼容入口：返回关闭成功个数；调用方要判定"是否全部关闭"必须用
+    :func:`close_all_connections_report` 的 ``ok``。"""
+    return int(close_all_connections_report()["closed"])
 
 
 def readonly_query_only_ok() -> bool:

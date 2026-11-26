@@ -41,6 +41,13 @@ TMP_PREFIX = ".tmp-"
 
 KEY_TABLES = ("airports", "nodes", "settings", "test_groups")
 
+# 正式备份必须字段（缺任一即判无效；verify 与 import 用同一份规则）
+REQUIRED_META_FIELDS = (
+    "format", "created_at", "app_version", "sqlite_version", "db_bytes", "sha256",
+    "integrity_check", "structure_hash", "structure_profile", "schema_version",
+    "tasks", "tables",
+)
+
 PROBE_TIMEOUT = 30
 
 
@@ -101,10 +108,19 @@ def _sqlite_uri(path: Path, *, ro: bool = True, immutable: bool = False) -> str:
 
 
 def _open_ro(path: Path, *, immutable: bool = False) -> sqlite3.Connection:
-    """只读打开。`immutable=True` 用于冻结的备份文件：不创建 `-wal/-shm`。"""
-    conn = sqlite3.connect(_sqlite_uri(path, immutable=immutable), uri=True,
-                           timeout=PROBE_TIMEOUT)
+    """打开数据库做**只读语义**的读取。
+
+    * `immutable=True`：冻结的备份文件，`mode=ro&immutable=1`，不创建 `-wal/-shm`；
+    * `immutable=False`：**仍在使用的库**，必须 `mode=rw` + `PRAGMA query_only=1`。
+      纯 `mode=ro` 在 WAL 有未 checkpoint 页时可能读不到已提交数据（本机实测：
+      同一库 ro 读到 airports=1，归档备份读到 2）。`query_only` 保证本连接不写。
+    """
+    conn = sqlite3.connect(_sqlite_uri(path, ro=immutable, immutable=immutable),
+                           uri=True, timeout=PROBE_TIMEOUT)
     conn.row_factory = sqlite3.Row
+    if not immutable:
+        conn.execute("PRAGMA query_only=1")
+        conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 
@@ -179,6 +195,23 @@ def holders_of(db_path: Path) -> list[str]:
     return held
 
 
+def self_handles_of(db_path: Path) -> list[str]:
+    """列出**当前进程**仍持有的目标库（含 -wal/-shm）文件描述符。"""
+    names = {Path(db_path).name, Path(db_path).name + "-wal", Path(db_path).name + "-shm"}
+    held: list[str] = []
+    fd_dir = Path("/proc/self/fd")
+    if not fd_dir.exists():
+        return held
+    for fd in fd_dir.iterdir():
+        try:
+            link = Path(os.readlink(fd)).name
+        except OSError:
+            continue
+        if link in names:
+            held.append(str(fd.name))
+    return held
+
+
 # --- 校验 --------------------------------------------------------------------
 
 
@@ -222,6 +255,11 @@ def _probe_file(path: Path, *, immutable: bool = True) -> dict[str, Any]:
     return report
 
 
+def inspect_db(path: str | Path) -> dict[str, Any]:
+    """只读检查一个库文件本身（不要求同名元信息）；导入后复核用。"""
+    return _probe_file(Path(path), immutable=False)
+
+
 def verify_backup(path: str | Path) -> dict[str, Any]:
     """校验备份文件：完整性 + 表集合 + 结构摘要 + 元信息 sha（若有元信息）。"""
     db_file = Path(path)
@@ -229,14 +267,28 @@ def verify_backup(path: str | Path) -> dict[str, Any]:
     errors: list[str] = report["errors"]
     meta = _read_meta(db_file)
     report["meta"] = meta
-    if meta and db_file.exists():
-        if meta.get("db_bytes") and int(meta["db_bytes"]) != db_file.stat().st_size:
-            errors.append("meta_size_mismatch")
-        if meta.get("sha256") and _sha256(db_file) != meta["sha256"]:
-            errors.append("meta_sha256_mismatch")
-        if meta.get("structure_hash") and report.get("structure_hash") \
-                and meta["structure_hash"] != report["structure_hash"]:
-            errors.append("meta_structure_mismatch")
+    if not _meta_path(db_file).exists():
+        errors.append("meta_missing")                       # 正式备份必须成对出现
+    elif meta is None:
+        errors.append("meta_unreadable")
+    else:
+        missing = [k for k in REQUIRED_META_FIELDS if k not in meta]
+        if missing:
+            errors.append("meta_fields_missing:" + ",".join(missing))
+        if meta.get("format") != 2:
+            errors.append("meta_format_unsupported")
+        if db_file.exists():
+            try:
+                if int(meta.get("db_bytes")) != db_file.stat().st_size:
+                    errors.append("meta_size_mismatch")
+            except (TypeError, ValueError):
+                errors.append("meta_size_invalid")
+            if meta.get("sha256") != _sha256(db_file):
+                errors.append("meta_sha256_mismatch")
+            if meta.get("structure_hash") != report.get("structure_hash"):
+                errors.append("meta_structure_mismatch")
+            if meta.get("integrity_check") != "ok":
+                errors.append("meta_integrity_not_ok")
     report["sha256"] = _sha256(db_file) if db_file.exists() else None
     report["db_bytes"] = db_file.stat().st_size if db_file.exists() else 0
     report["ok"] = not errors
@@ -244,6 +296,22 @@ def verify_backup(path: str | Path) -> dict[str, Any]:
 
 
 # --- 导出 --------------------------------------------------------------------
+
+
+def _publish_unique(tmp: Path, out: Path, label: str) -> Path:
+    """把临时文件发布为**唯一文件名**：硬链接 + EEXIST 重试，绝不覆盖任何已有备份。
+
+    文件名里带 48 bit 随机段，同秒并发也只会撞名后自动换名，不会覆盖。
+    """
+    for _ in range(64):
+        candidate = out / f"{PREFIX}{_stamp()}-{label}-{secrets.token_hex(3)}{BACKUP_EXT}"
+        try:
+            os.link(tmp, candidate)          # 目标已存在 ⇒ FileExistsError，不覆盖
+        except FileExistsError:
+            continue
+        tmp.unlink()
+        return candidate
+    raise BackupError("backup_name_collision", "连续 64 次生成的备份文件名均已存在")
 
 
 def _check_free_space(target_dir: Path, need_bytes: int) -> None:
@@ -287,8 +355,7 @@ def export_backup(dest_dir: str | Path | None = None, *, db_path: str | Path | N
             Path(str(tmp) + suffix).unlink(missing_ok=True)
         raise
 
-    final = out / f"{PREFIX}{_stamp()}-{label}{BACKUP_EXT}"
-    os.replace(tmp, final)
+    final = _publish_unique(tmp, out, label)
     _fsync_dir(out)
 
     meta = {
@@ -357,11 +424,33 @@ def _restore_scene(target: Path, stamp: str) -> str:
     return ""
 
 
+def _snapshot_original(src: Path, copy_to: Path) -> dict[str, Any]:
+    """用 SQLite 在线备份 API 给**原库**留一份完整副本（含 WAL 中已提交数据）。
+
+    不能只 `copyfile` 主库：WAL 里有已提交但未 checkpoint 的页时，单文件副本会缺数据。
+    """
+    source = _open_ro(src)
+    dest = sqlite3.connect(str(copy_to), timeout=PROBE_TIMEOUT)
+    try:
+        source.backup(dest, pages=1024)
+    finally:
+        dest.close()
+        source.close()
+    _fsync_file(copy_to)
+    report = _probe_file(copy_to, immutable=True)
+    if not report["ok"]:
+        raise BackupError("preimport_invalid", str(report["errors"]))
+    return report
+
+
 def import_backup(source: str | Path, *, db_path: str | Path | None = None,
                   before_replace: Callable[[Path], None] | None = None) -> dict[str, Any]:
     """把指定备份文件安全导入目标库。
 
-    调用方必须先完成：写入封锁、排空、关闭全部业务连接。本函数只负责文件级安全。
+    调用方必须先完成：写封锁、排空、关闭全部业务连接（并确认 `ok`）。本函数只负责
+    文件级安全：复核句柄（含**本进程自身**）→ 原库完整副本 → 隔离 WAL/SHM →
+    同卷临时文件 → fsync → `os.replace` → 目录 fsync → 复核；失败保留现场尽力复原。
+
     `before_replace(target)` 是测试注入点（断言替换前封锁仍生效）。
     成功后原库副本保留在 `*.preimport-<stamp>.db`，由人工确认后删除。
     """
@@ -376,14 +465,23 @@ def import_backup(source: str | Path, *, db_path: str | Path | None = None,
     held = holders_of(target)
     if held:
         raise BackupError("import_handles_present", f"仍有进程持有库文件：{held[:5]}")
+    mine = self_handles_of(target)
+    if mine:
+        raise BackupError("import_self_handles_present",
+                          f"当前进程仍持有库文件描述符：{mine[:5]}")
 
     target.parent.mkdir(parents=True, exist_ok=True)
     stamp = _stamp()
     preimport: Path | None = None
+    pre_counts: dict[str, int] | None = None
     if target.exists():
         preimport = _sidecar(target, "", stamp)
-        shutil.copyfile(target, preimport)
-        _fsync_file(preimport)
+        pre_report = _snapshot_original(target, preimport)
+        pre_counts = pre_report.get("tables")
+        live = _probe_file(target)
+        if live.get("tables") != pre_counts:
+            raise BackupError("preimport_incomplete",
+                              "原库副本逐表计数与当前库不一致（WAL 数据可能未纳入）")
 
     moved: list[tuple[Path, Path]] = []
     for suffix in ("-wal", "-shm"):
@@ -406,14 +504,16 @@ def import_backup(source: str | Path, *, db_path: str | Path | None = None,
         _fsync_dir(target.parent)
     except Exception as exc:                                       # noqa: BLE001
         Path(str(tmp)).unlink(missing_ok=True)
-        for side, dst in moved:
-            try:
-                os.replace(dst, side)
-            except OSError:
-                pass
+        for side in (Path(str(target) + "-wal"), Path(str(target) + "-shm")):
+            side.unlink(missing_ok=True)
         if preimport is not None:
             restored = _restore_scene(target, stamp)
             if restored:
+                for side_old, dst in moved:
+                    try:
+                        os.replace(dst, side_old)
+                    except OSError:
+                        pass
                 raise BackupError(
                     "import_failed_leftover",
                     f"导入失败（{exc}）；原库未复原（{restored}），留存：{preimport}") from exc
@@ -433,10 +533,15 @@ def import_backup(source: str | Path, *, db_path: str | Path | None = None,
         if problems:
             raise BackupError("import_verify_failed", str(problems))
     except Exception as exc:                                       # noqa: BLE001
-        for _side, dst in moved:
-            Path(str(dst)).unlink(missing_ok=True)
+        for side in (Path(str(target) + "-wal"), Path(str(target) + "-shm")):
+            side.unlink(missing_ok=True)
         restored = _restore_scene(target, stamp) if preimport is not None else "target_missing"
         if restored:
+            for side_old, dst in moved:
+                try:
+                    os.replace(dst, side_old)
+                except OSError:
+                    pass
             raise BackupError(
                 "import_failed_leftover",
                 f"导入后校验失败（{exc}）；原库未复原（{restored}），留存：{preimport}") from exc
@@ -454,6 +559,7 @@ def import_backup(source: str | Path, *, db_path: str | Path | None = None,
         "source": str(src),
         "target": str(target),
         "preimport_copy": str(preimport) if preimport and preimport.exists() else None,
+        "preimport_tables": pre_counts,
         "tables": after.get("tables"),
         "structure_hash": after.get("structure_hash"),
         "structure_profile": after.get("structure_profile"),
@@ -480,6 +586,8 @@ __all__ = [
     "export_backup",
     "holders_of",
     "import_backup",
+    "inspect_db",
     "latest_backup",
+    "self_handles_of",
     "verify_backup",
 ]

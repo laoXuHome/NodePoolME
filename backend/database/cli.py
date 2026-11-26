@@ -177,8 +177,17 @@ def _import(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 "detail": "仍有写入活动，导入中止；维护态与写封锁保持"}, EXIT_HALTED
     steps.append("drain")
 
-    closed = db.close_all_connections()
-    result["connections_closed"] = closed
+    close_report = db.close_all_connections_report()
+    result["connections"] = close_report
+    if not close_report["ok"]:
+        # 任一连接关闭失败 ⇒ 不得替换文件；维护态与写封锁保持
+        result.update({"ok": False, "code": "connections_not_closed",
+                       "detail": {"failed": close_report["failed"],
+                                  "remaining": close_report["remaining"]},
+                       "maintenance_kept": True,
+                       "writes_blocked": bool(pool.writes_blocked())})
+        steps.append("close_connections_failed")
+        return result, EXIT_HALTED
     steps.append("close_connections")
 
     try:
@@ -192,12 +201,13 @@ def _import(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         result["writes_blocked"] = bool(pool.writes_blocked())
         return result, EXIT_HALTED
     result.update({"ok": True, "code": "imported", "preimport_copy": info.get("preimport_copy"),
+                   "preimport_tables": info.get("preimport_tables"),
                    "tables": info.get("tables"),
                    "structure_profile": info.get("structure_profile")})
     steps.append("import_atomic")
 
     # 导入后复核一次（独立只读连接，不与业务连接复用）
-    after = backup.verify_backup(target)
+    after = backup.inspect_db(target)
     result["post_check"] = {"ok": after.get("ok"), "errors": after.get("errors")}
     if not after.get("ok"):
         result["ok"] = False
