@@ -115,7 +115,8 @@ docker run -d --name nodepool --restart unless-stopped \
 | 来源 | 地址 |
 | --- | --- |
 | GHCR（GitHub Actions 构建，多架构） | `ghcr.io/laoxuhome/nodepoolme:latest` |
-| 版本标签 | `ghcr.io/laoxuhome/nodepoolme:v1.8.7`、`sha-xxxxxxx` |
+| 提交标签（每次 main 推送） | `ghcr.io/laoxuhome/nodepoolme:sha-<short-sha>` |
+| 版本标签（推送 `v*` 标签时） | `ghcr.io/laoxuhome/nodepoolme:<tag>` |
 
 支持 `linux/amd64` 与 `linux/arm64`（含 Mihomo 内核）。
 
