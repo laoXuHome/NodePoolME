@@ -173,8 +173,6 @@ def test_pt09b_migration_entry_closed_when_disabled(env, monkeypatch):
     before = _row_counts(env.copy)
     with pytest.raises(migrate.MigrationDisabled):
         migrate.run(db_path=env.copy, **_fast_drain())
-    with pytest.raises(migrate.MigrationDisabled):
-        migrate.rollback_to_snapshot(db_path=env.copy)
     assert _row_counts(env.copy) == before
 
 
@@ -636,76 +634,6 @@ def test_unregistered_token_cannot_mint(env):
     with pytest.raises(pool.HaltPreconditionFailed) as exc:
         pool.mint_confirmation(object(), "m-x", True, True)
     assert exc.value.code == "untrusted_issuer"
-
-
-# --- rollback_to_snapshot：受维护态 / 排空约束 --------------------------------
-
-def _file_digest(path: Path) -> str:
-    import hashlib
-    h = hashlib.sha256()
-    for suffix in ("", "-wal", "-shm"):
-        candidate = Path(str(path) + suffix)
-        if candidate.exists():
-            h.update(candidate.read_bytes())
-    return h.hexdigest()
-
-
-def test_rollback_requires_active_maintenance(env):
-    with pytest.raises(migrate.MigrationRefused) as exc:
-        migrate.rollback_to_snapshot(None, db_path=env.copy)
-    assert exc.value.reason == "maintenance_required"
-
-
-def test_rollback_missing_set_refused(env):
-    _activate()
-    with pytest.raises(migrate.MigrationRefused) as exc:
-        migrate.rollback_to_snapshot(None, db_path=env.copy)
-    assert exc.value.reason == "no_backup_set"
-
-
-def test_rollback_requires_valid_set_without_touching_target(env, monkeypatch):
-    """P-1.7：回滚入口只接受 L1/L2 通过的备份集；无效备份集 ⇒ 拒绝且目标库字节不变。"""
-    _activate()
-    info = backup.snapshot_set(stage="pre-migrate", src_db=env.copy,
-                               backup_dir=env.backups, stop_write=True)
-    assert backup.verify_set(info["path"])["ok"] is True
-    (Path(info["path"]) / backup.COMPLETE_FILE).unlink()      # 三件缺一 ⇒ 判无效
-    calls = {"n": 0}
-
-    def forbidden(*_a, **_k):
-        calls["n"] += 1
-        raise AssertionError("备份集无效时不得调用 backup.restore_set()")
-
-    monkeypatch.setattr(backup, "restore_set", forbidden)
-    digest_before = _file_digest(env.copy)
-
-    with pytest.raises(migrate.MigrationRefused) as exc:
-        migrate.rollback_to_snapshot(info["path"], db_path=env.copy)
-    assert exc.value.reason == "backup_invalid"
-    assert calls["n"] == 0
-    assert _file_digest(env.copy) == digest_before
-    assert _row_counts(env.copy) == 1
-
-
-def test_cli_rollback_restores_only_named_target(env, monkeypatch):
-    """P-1.7：CLI `rollback --db <副本> --set <集>` 只动指定目标；主库字节与行数不变。"""
-    from backend.database import cli
-
-    _activate()
-    info = backup.snapshot_set(stage="pre-migrate", src_db=env.copy,
-                               backup_dir=env.backups, stop_write=True)
-    live_rows_before = _rows(env.live)
-
-    rc = cli.main(["rollback", "--db", str(env.copy), "--set", str(info["path"]), "--json"])
-    assert rc == cli.EXIT_OK
-    # 主库未被回滚（WAL checkpoint 会改写 -wal/-shm，故按迁移行与结构判等）
-    assert _rows(env.live) == live_rows_before
-    assert _row_counts(env.copy) == 1
-
-    # 无 --set 时取最新可用集（此处是恢复时自动生成的 pre-restore），同样只动 --db 指定的库
-    rc2 = cli.main(["rollback", "--db", str(env.copy), "--json"])
-    assert rc2 == cli.EXIT_OK
-    assert _rows(env.live) == live_rows_before
 
 
 # --- 修正 2：事务失败分支（BEGIN / ROLLBACK / 只读复核） ----------------------

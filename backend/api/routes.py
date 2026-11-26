@@ -5,8 +5,6 @@ import json
 import math
 import os
 import secrets
-import shutil
-import sqlite3
 from datetime import datetime, timedelta
 import urllib.parse
 import urllib.request
@@ -1415,64 +1413,37 @@ async def logs(limit: int = 100, level: str | None = None, source: str | None = 
 
 @api.post("/system/backup", dependencies=protected)
 async def create_backup():
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = config.BACKUP_DIR / f"nodepool-{stamp}.db"
-    source = sqlite3.connect(str(config.DB_PATH))
-    backup = sqlite3.connect(str(target))
+    """在线导出独立备份文件（SQLite 在线备份 + 完整性校验）。"""
+    from backend.database import backup as backup_store
     try:
-        source.backup(backup)
-    finally:
-        backup.close()
-        source.close()
-    with open(config.BACKUP_DIR / "nodepool-latest.db", "wb") as fh:
-        fh.write(target.read_bytes())
-    db.append_log("INFO", "备份", f"已创建备份：{target.name}")
-    return {"ok": True, "file": target.name, "size": target.stat().st_size}
+        info = backup_store.export_backup(label="api")
+    except backup_store.BackupError as exc:
+        raise HTTPException(status_code=400, detail=f"{exc.reason}: {exc}")
+    db.append_log("INFO", "备份", f"已导出备份：{info['file']}（{info['size']} B，已校验）")
+    return {"ok": True, "file": info["file"], "size": info["size"],
+            "sha256": info["sha256"], "integrity_check": info["integrity_check"]}
 
 
 @api.get("/system/backup/download", dependencies=protected)
 async def download_backup():
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = config.BACKUP_DIR / f"nodepool-{stamp}.db"
-    source = sqlite3.connect(str(config.DB_PATH))
-    backup = sqlite3.connect(str(target))
+    """下载当前数据库的一份已校验导出。"""
+    from backend.database import backup as backup_store
     try:
-        source.backup(backup)
-    finally:
-        backup.close()
-        source.close()
-    return FileResponse(target, filename=target.name, media_type="application/octet-stream")
+        info = backup_store.export_backup(label="download")
+    except backup_store.BackupError as exc:
+        raise HTTPException(status_code=400, detail=f"{exc.reason}: {exc}")
+    return FileResponse(info["path"], filename=info["file"],
+                        media_type="application/octet-stream")
 
 
 @api.post("/system/restore", dependencies=protected)
 async def restore_backup(file: UploadFile = File(...)):
-    tmp = config.BACKUP_DIR / "restore-upload.db"
-    content = await file.read()
-    if len(content) < 4096:
-        raise HTTPException(status_code=400, detail="上传的备份文件过小")
-    tmp.write_bytes(content)
-    try:
-        probe = sqlite3.connect(str(tmp))
-        tables = {r[0] for r in probe.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        probe.close()
-    except sqlite3.DatabaseError as exc:
-        tmp.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="文件不是有效的 SQLite 数据库")
-    if "nodes" not in tables or "airports" not in tables:
-        tmp.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="这不是 NodePool 的备份文件")
-    safety = config.BACKUP_DIR / f"pre-restore-{datetime.now():%Y%m%d-%H%M%S}.db"
-    shutil.copy2(config.DB_PATH, safety)
-    db.reset_connection()
-    shutil.copy2(tmp, config.DB_PATH)
-    tmp.unlink(missing_ok=True)
-    db.init_db()
-    try:
-        builder.publish(reason="restore")
-    except Exception as exc:
-        db.append_log("WARN", "恢复", f"恢复后重建订阅失败：{exc}")
-    db.append_log("WARN", "恢复", f"已从上传文件恢复数据库，原库备份在 {safety.name}")
-    return {"ok": True, "safety_copy": safety.name}
+    """导入已下线到 CLI：运行中进程不得在连接/写入活动时覆盖数据库文件。"""
+    raise HTTPException(
+        status_code=409,
+        detail={"code": "manual_import_required",
+                "message": "请停机后用 CLI 手动导入："
+                           "python -m backend.database.cli import --file <备份文件>"})
 
 
 # ---------------------------------------------------------------------------- public subscription

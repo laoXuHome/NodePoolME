@@ -137,13 +137,12 @@ def test_scheduler_round_stops_without_reading_twice(maint_file, monkeypatch):
 
 
 # ----------------------------------------------------------------- PT-15 入口 3
-def test_cli_write_refused_and_allow_write_cannot_bypass(maint_file, capsys):
+def test_cli_import_refused_when_maintenance_active(maint_file, capsys):
+    """简化版 CLI：维护态在跑时拒绝 import；备份导出是只读操作，不受维护态限制。"""
     _write_active(maint_file)
-    assert cli.main(["snapshot"]) == cli.EXIT_REFUSED
+    assert cli.main(["import", "--file", "x.db"]) == cli.EXIT_REFUSED
     payload = json.loads(capsys.readouterr().out)
-    assert payload["reason"] == "maintenance"
-
-    assert cli.main(["snapshot", "--allow-write"]) == cli.EXIT_REFUSED
+    assert payload["code"] == "maintenance_not_inactive"
 
 
 def test_cli_read_command_allowed_when_active(maint_file, capsys):

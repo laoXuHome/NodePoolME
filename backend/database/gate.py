@@ -284,8 +284,8 @@ def drain(*, rounds: int = DRAIN_MIN_ROUNDS, min_interval: float = DRAIN_MIN_INT
 def assert_drain_ok(result: DrainResult) -> DrainResult:
     """调用方在推进迁移前的硬断言：失败结果一律抛 :class:`DrainFailed`。
 
-    P-1.6 ``run()``/``rollback_to_snapshot()`` 必须在快照或迁移前调用本函数，
-    或在 ``except DrainFailed`` 内调用 ``halt_migration(exc.code)``。
+    P-1.6 ``run()`` 与 CLI ``import`` 必须在迁移/替换前调用本函数，或在
+    ``except DrainFailed`` 内调用 ``halt_migration(exc.code)``。
     """
     if not result.continue_allowed:
         raise DrainFailed(result)

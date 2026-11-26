@@ -1,30 +1,31 @@
-"""迁移 CLI：A 类入口 3（写命令受维护态封锁）。
+"""运维 CLI（P-1 v1.10 简化版）。
 
-用法（P-1.5 只接线维护态约束，不实现迁移状态机）::
+用法::
 
-    python -m backend.database.cli status      # 只读
-    python -m backend.database.cli verify      # 只读
-    python -m backend.database.cli snapshot    # 写：维护态下拒绝
-    python -m backend.database.cli run --db <副本库>   # P-1.6：空迁移 dry-run
-    python -m backend.database.cli rollback --set <备份集>  # P-1.7：停写/排空/原子替换
-    python -m backend.database.cli restore-set --set <备份集> --db <目标库>  # 内部：恢复子进程
+    python -m backend.database.cli status                  # 只读：维护态/迁移摘要
+    python -m backend.database.cli verify [--file X.db]    # 只读：校验备份文件
+    python -m backend.database.cli backup [--out DIR]      # 手动导出独立备份（可在线执行）
+    python -m backend.database.cli import --file X.db      # 手动导入（自动进维护态）
+    python -m backend.database.cli run --db <副本库>       # P-1.6 空迁移 dry-run
 
-``--allow-write`` 仅为兼容计划里的命令形态而存在，**不能**绕过维护态封锁。
+设计边界：没有 rollback / restore-set 子命令，也不自动寻找备份；导入必须显式给文件。
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
-from typing import Sequence
+import time
+from pathlib import Path
+from typing import Any, Sequence
 
 from backend import config
-from backend.database import backup, gate, migrate
+from backend.database import backup, db, gate, maint, migrate, pool
 
-READ_COMMANDS = ("status", "verify")
-WRITE_COMMANDS = ("snapshot",)
-MIGRATE_COMMANDS = ("run", "rollback")
-INTERNAL_COMMANDS = ("restore-set",)   # 仅由 `migrate.rollback_to_snapshot` 的子进程调用
+READ_COMMANDS = ("status", "verify", "backup")
+WRITE_COMMANDS = ("import",)
+MIGRATE_COMMANDS = ("run",)
 
 EXIT_OK = 0
 EXIT_REFUSED = 2
@@ -34,54 +35,62 @@ _RUN_ARGS: argparse.Namespace | None = None
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="backend.database.cli",
-                                     description="NodePoolME 迁移 CLI（维护态受约束）")
+    parser = argparse.ArgumentParser(
+        prog="backend.database.cli",
+        description="NodePoolME 数据库运维 CLI：状态 / 备份 / 校验 / 导入 / 迁移演练")
     parser.add_argument("command",
-                        choices=READ_COMMANDS + WRITE_COMMANDS + MIGRATE_COMMANDS
-                        + INTERNAL_COMMANDS)
-    parser.add_argument("--db", help="run：dry-run 的副本数据库路径（必填，且不得等于主库）；"
-                                     "rollback/restore-set：目标库（rollback 缺省为主库）")
-    parser.add_argument("--set", dest="set_dir", help="rollback：备份集目录（缺省用最新集）")
-    parser.add_argument("--allow-write", action="store_true",
-                        help="保留参数：不能绕过维护态封锁")
+                        choices=READ_COMMANDS + WRITE_COMMANDS + MIGRATE_COMMANDS)
+    parser.add_argument("--db", help="run：dry-run 的副本库（必填，且不得等于主库）；"
+                                     "import：目标库（缺省为主库）")
+    parser.add_argument("--file", dest="file", help="import/verify：备份文件路径")
+    parser.add_argument("--out", dest="out", help="backup：导出目录（缺省 BACKUP_DIR）")
+    parser.add_argument("--label", default="manual", help="backup：文件名标签（默认 manual）")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出结果")
     return parser
 
 
-def _status() -> dict:
+def _status() -> dict[str, Any]:
     state = gate.judge()[0]
-    latest = backup.latest_set()
+    latest = backup.latest_backup()
     return {
         "command": "status",
         "maintenance": state.name,
         "db_path": str(config.DB_PATH),
         "db_exists": config.DB_PATH.exists(),
         "state_dir": str(config.STATE_DIR),
-        "latest_set": (latest or {}).get("name"),
+        "latest_backup": str(latest) if latest else None,
         "migration_enabled": bool(config.MIGRATION_ENABLED),
+        "writes_blocked": bool(pool.writes_blocked()),
         "migrate_state": migrate.migration_state_summary(),
     }
 
 
-def _verify() -> dict:
-    latest = backup.latest_set()
-    if not latest:
-        return {"command": "verify", "ok": False, "code": "no_backup_set"}
-    report = backup.verify_set(latest["path"])
-    return {"command": "verify", "set": latest["name"], "ok": bool(report.get("ok")),
-            "detail": report}
+def _verify(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    target = Path(args.file) if args.file else backup.latest_backup()
+    if target is None:
+        return {"command": "verify", "ok": False, "code": "no_backup_file"}, EXIT_REFUSED
+    report = backup.verify_backup(target)
+    report["command"] = "verify"
+    report["file"] = target.name
+    return report, (EXIT_OK if report.get("ok") else EXIT_REFUSED)
 
 
-def _snapshot() -> dict:
-    info = backup.snapshot_set(stage="cli")
-    return {"command": "snapshot", "ok": True, "set": info.get("name"), "detail": info}
-
-
-def _run(dry_run: bool = True) -> tuple[dict, int]:
-    """P-1.6：空迁移 dry-run（只允许副本库；开关未开即拒绝）。"""
-    db = getattr(_RUN_ARGS, "db", None)
+def _backup(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    """在线导出：只读源库，不参与写入闸；维护态下也可导出（用于停机前留档）。"""
     try:
-        result = migrate.run(db_path=db, dry_run=dry_run)
+        info = backup.export_backup(args.out or None, label=args.label)
+    except backup.BackupError as exc:
+        return {"command": "backup", "ok": False, "code": exc.reason,
+                "detail": str(exc)}, EXIT_REFUSED
+    info["command"] = "backup"
+    return info, EXIT_OK
+
+
+def _run(dry_run: bool = True) -> tuple[dict[str, Any], int]:
+    """P-1.6：空迁移 dry-run（只允许副本库；开关未开即拒绝）。"""
+    db_path = getattr(_RUN_ARGS, "db", None)
+    try:
+        result = migrate.run(db_path=db_path, dry_run=dry_run)
     except migrate.MigrationDisabled as exc:
         return {"command": "run", "ok": False, "code": "migration_disabled",
                 "detail": str(exc)}, EXIT_REFUSED
@@ -98,37 +107,127 @@ def _run(dry_run: bool = True) -> tuple[dict, int]:
     return result, (EXIT_OK if result.get("ok") else EXIT_HALTED)
 
 
-def _rollback() -> tuple[dict, int]:
-    """P-1.7：从备份集回滚（停写/排空/关连接/句柄复核/原子替换由 rollback_to_snapshot 保证）。"""
+def _clear_maintenance_and_release() -> dict[str, Any]:
+    """导入成功后解除维护态：删 maintenance 文件 → 目录 fsync → 复核 → 解除写封锁。"""
+    path = Path(maint.MAINT_FILE)
+    detail: dict[str, Any] = {}
+    if path.exists():
+        path.unlink()
+        fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    state = maint.maintenance_state()
+    detail["maintenance_after"] = state.name
+    if state is not maint.MaintState.INACTIVE:
+        # 删文件不足以代表不处于维护态（比如库内仍有非 success 迁移行）⇒ 不解封
+        detail["code"] = "maintenance_not_clear"
+        return detail
+    gate.release()
+    detail["writes_blocked_after"] = bool(pool.writes_blocked())
+    detail["code"] = "ok"
+    return detail
+
+
+def _import(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    """手动导入：校验 → 维护态 → 停写/排空/关连接 → 文件级安全替换 → 解除维护。"""
+    if not args.file:
+        return {"command": "import", "ok": False, "code": "file_required",
+                "detail": "必须用 --file 指定备份文件"}, EXIT_REFUSED
+    source = Path(args.file)
+    target = Path(args.db) if args.db else config.DB_PATH
+
+    # 0) 维护态先行：已在维护中（可能有迁移未收尾）绝不写第二个维护记录
+    state, _reason = gate.judge()
+    if state is not maint.MaintState.INACTIVE:
+        return {"command": "import", "ok": False, "code": "maintenance_not_inactive",
+                "detail": f"当前维护态 {state.name}；导入只允许从 INACTIVE 发起"}, EXIT_REFUSED
+
+    # 1) 再校验源：无效就拒绝，绝不进入维护态、绝不动目标库
+    report = backup.verify_backup(source)
+    if not report.get("ok"):
+        return {"command": "import", "ok": False, "code": "backup_invalid",
+                "detail": report.get("errors"), "file": source.name}, EXIT_REFUSED
+
+    rec = migrate.MigrationRecord(migration_id=f"import-{time.strftime('%Y%m%d-%H%M%S')}")
+    steps: list[str] = ["source_verified"]
+    result: dict[str, Any] = {"command": "import", "file": source.name,
+                              "target": str(target), "steps": steps}
     try:
-        result = migrate.rollback_to_snapshot(
-            getattr(_RUN_ARGS, "set_dir", None),
-            db_path=getattr(_RUN_ARGS, "db", None) or None)
-    except migrate.MigrationDisabled as exc:
-        return {"command": "rollback", "ok": False, "code": "migration_disabled",
+        maint.set_maintenance(rec, reason="manual_import")
+    except Exception as exc:                                      # noqa: BLE001
+        return {**result, "ok": False, "code": "maintenance_write_failed",
                 "detail": str(exc)}, EXIT_REFUSED
-    except migrate.MigrationRefused as exc:
-        return {"command": "rollback", "ok": False, "code": exc.reason,
-                "detail": str(exc)}, EXIT_REFUSED
-    except migrate.AlreadyRunning as exc:
-        return {"command": "rollback", "ok": False, "code": "already_running",
-                "detail": str(exc)}, EXIT_REFUSED
-    except migrate.FatalExit as exc:
-        return {"command": "rollback", "ok": False, "code": exc.reason,
-                "detail": str(exc), "halt_tail": "not_confirmed"}, exc.exit_code
-    result.setdefault("command", "rollback")
-    return result, (EXIT_OK if result.get("ok") else EXIT_HALTED)
+    steps.append("maintenance")
+
+    gate.apply_state(maint.MaintState.ACTIVE)
+    pool.block_writes("手动导入备份")
+    ok, detail = pool.confirm_writes_blocked()
+    result["block_confirm"] = detail
+    if not ok:
+        return {**result, "ok": False, "code": "writes_block_unconfirmed"}, EXIT_HALTED
+    steps.append("stop_writes")
+
+    drained = gate.drain(rounds=2, min_interval=10.0)
+    result["drain"] = {"ok": bool(drained.ok), "detail": drained.detail,
+                       "rounds": len(drained.rounds), "interval": drained.interval}
+    if not drained.continue_allowed:
+        return {**result, "ok": False, "code": "drain_failed",
+                "detail": "仍有写入活动，导入中止；维护态与写封锁保持"}, EXIT_HALTED
+    steps.append("drain")
+
+    closed = db.close_all_connections()
+    result["connections_closed"] = closed
+    steps.append("close_connections")
+
+    try:
+        info = backup.import_backup(source, db_path=target)
+    except backup.BackupError as exc:
+        result["code"] = exc.reason
+        result["detail"] = str(exc)
+        result["ok"] = False
+        steps.append("import_failed")
+        result["maintenance_kept"] = True
+        result["writes_blocked"] = bool(pool.writes_blocked())
+        return result, EXIT_HALTED
+    result.update({"ok": True, "code": "imported", "preimport_copy": info.get("preimport_copy"),
+                   "tables": info.get("tables"),
+                   "structure_profile": info.get("structure_profile")})
+    steps.append("import_atomic")
+
+    # 导入后复核一次（独立只读连接，不与业务连接复用）
+    after = backup.verify_backup(target)
+    result["post_check"] = {"ok": after.get("ok"), "errors": after.get("errors")}
+    if not after.get("ok"):
+        result["ok"] = False
+        result["code"] = "post_check_failed"
+        result["maintenance_kept"] = True
+        return result, EXIT_HALTED
+    steps.append("verify_imported")
+
+    release = _clear_maintenance_and_release()
+    result["release"] = release
+    if release.get("code") != "ok":
+        result["ok"] = False
+        result["code"] = "maintenance_not_clear"
+        result["maintenance_kept"] = True
+        return result, EXIT_HALTED
+    steps.append("release")
+    result["ok"] = True
+    result["code"] = "imported"
+    return result, EXIT_OK
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     command = args.command
 
-    if command in MIGRATE_COMMANDS:
+    if command == "run":
         global _RUN_ARGS
         _RUN_ARGS = args
         try:
-            result, code = _run(True) if command == "run" else _rollback()
+            result, code = _run(True)
         except Exception as exc:          # noqa: BLE001 - CLI 边界统一转非零退出
             print(json.dumps({"command": command, "ok": False, "code": "error",
                               "detail": str(exc)}, ensure_ascii=False, default=str))
@@ -136,50 +235,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, default=str))
         return code
 
-    if command in INTERNAL_COMMANDS:
-        from pathlib import Path
-        target = Path(args.db) if args.db else config.DB_PATH
-        set_dir = Path(args.set_dir) if args.set_dir else None
-        if set_dir is None:
-            print(json.dumps({"ok": False, "command": command, "code": "set_required"},
-                             ensure_ascii=False))
-            return EXIT_REFUSED
-        try:
-            report = backup.restore_set(set_dir, db_path=target,
-                                        close_connections=lambda: None)
-        except Exception as exc:          # noqa: BLE001
-            print(json.dumps({"ok": False, "command": command,
-                              "code": getattr(exc, "reason", "error"),
-                              "detail": str(exc)}, ensure_ascii=False, default=str))
-            return EXIT_REFUSED
-        print(json.dumps({"ok": True, "command": command, "set": set_dir.name,
-                          "target": str(target),
-                          "report": report if isinstance(report, dict) else str(report)},
-                         ensure_ascii=False, default=str))
-        return EXIT_OK
-
-    if command in WRITE_COMMANDS:
-        state, reason = gate.judge()
-        if reason is not None:
-            # --allow-write 不得绕过维护态封锁
-            print(json.dumps({"ok": False, "command": command, "reason": reason,
-                              "maintenance": state.name,
-                              "detail": "维护态下拒绝写命令（--allow-write 无效）"},
-                             ensure_ascii=False))
-            return EXIT_REFUSED
-        try:
-            with gate.write_guard():
-                result = _snapshot()
-        except Exception as exc:
-            print(json.dumps({"ok": False, "command": command, "code": getattr(exc, "reason", "error"),
-                              "detail": str(exc)}, ensure_ascii=False))
-            return EXIT_REFUSED
-        print(json.dumps(result, ensure_ascii=False, default=str))
-        return EXIT_OK
-
-    result = _status() if command == "status" else _verify()
+    if command == "backup":
+        result, code = _backup(args)
+    elif command == "verify":
+        result, code = _verify(args)
+    elif command == "import":
+        result, code = _import(args)
+    else:
+        result, code = _status(), EXIT_OK
     print(json.dumps(result, ensure_ascii=False, default=str))
-    return EXIT_OK
+    return code
 
 
 if __name__ == "__main__":
