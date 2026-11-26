@@ -182,8 +182,9 @@ jobs:
           docker pull --platform linux/amd64 "$IMG"
           docker save "$IMG" -o "$OUT/nodepoolme-${TAG}-amd64.tar"
 
-          cp docker-compose.yml .env.example README.md Dockerfile "$OUT/"
+          cp docker-compose.yml .env.example README.md Dockerfile upgrade.sh "$OUT/"
           sed "s/<tag>/${TAG}/g" docs/离线部署.md > "$OUT/INSTALL.md"
+          cp upgrade.sh /tmp/npup
 
           tar -C "$OUT" -czf "/tmp/nodepoolme-${TAG}-offline-amd64.tar.gz" .
           (
@@ -204,4 +205,5 @@ jobs:
           gh release upload "${GITHUB_REF_NAME}" \
             /tmp/nodepoolme-*-offline-amd64.tar.gz \
             /tmp/nodepoolme-*-sha256sums.txt \
+            /tmp/npup \
             --clobber

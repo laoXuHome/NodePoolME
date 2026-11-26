@@ -3,8 +3,8 @@
 #
 # Usage:
 #   sudo npup                   upgrade to the image tag already in .env
-#   sudo npup v2.001            pin that version in .env, then upgrade
-#   sudo npup --offline v2.001  skip registry pull and use the release bundle
+#   sudo npup v2.002            pin that version in .env, then upgrade
+#   sudo npup --offline v2.002  skip registry pull and use the release bundle
 #   sudo npup /path/to/dir      upgrade a project living elsewhere
 #
 # The release bundle contains:
@@ -29,7 +29,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ $# -gt 0 ] && printf '%s' "$1" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
+if [ $# -gt 0 ] && printf '%s' "$1" | grep -Eq '^v?[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
   case "$1" in
     v*) TARGET_TAG="$1" ;;
     *)  TARGET_TAG="v$1" ;;
@@ -109,7 +109,7 @@ latest_release_tag() {
 BUNDLE_TAG="$TAG"
 if [ "$TAG" = "latest" ]; then
   BUNDLE_TAG="$(latest_release_tag)"
-  if ! printf '%s' "$BUNDLE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+  if ! printf '%s' "$BUNDLE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
     echo "!! cannot resolve latest release tag; pass the version explicitly or retry later" >&2
     exit 2
   fi
