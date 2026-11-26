@@ -23,6 +23,7 @@ import secrets
 import shutil
 import sqlite3
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -702,15 +703,17 @@ def restore_set(
         _silent_unlink(tmp)
         first_error = exc
         try:
-            leftover = _unquarantine(quarantine)
+            outcome = _unquarantine(quarantine)
         except Exception as quarantine_exc:  # noqa: BLE001
-            leftover = [dst for _src, dst in quarantine]
-            first_error = f"{first_error} / 隔离副本还原失败：{quarantine_exc}"
-        if leftover:
+            outcome = _RestoreOutcome(
+                leftover=[dst for _src, dst in quarantine],
+                persist_error=f"{type(quarantine_exc).__name__}: {quarantine_exc}",
+            )
+            first_error = f"{first_error} / 隔离副本还原异常：{quarantine_exc}"
+        if not outcome.ok():
             raise BackupError(
                 "restore_rolled_back_leftover",
-                f"恢复失败（{first_error}）；原库未完全还原，以下隔离副本已保留、未删除："
-                f"{[str(p) for p in leftover]}",
+                f"恢复失败（{first_error}）；原库未确认还原：{outcome.detail()}",
             ) from exc
         if not replaced:
             raise BackupError("restore_replace_failed", str(first_error)) from exc
@@ -803,12 +806,11 @@ def _quarantine_target(target: Path, nonce: str) -> list[tuple[Path, Path]]:
             pairs.append((src, dst))
         _fsync_dir(target.parent)
     except Exception as exc:  # noqa: BLE001 - 隔离失败必须原路退回
-        leftover = _restore_moved(pairs, remove_new=False)
-        if leftover:
+        outcome = _restore_moved(pairs, remove_new=False)
+        if not outcome.ok():
             raise BackupError(
                 "restore_quarantine_failed",
-                f"隔离中断（{exc}）；以下隔离副本未能还原，已保留待人工处置："
-                f"{[str(p) for p in leftover]}",
+                f"隔离中断（{exc}）；原库未确认完整还原：{outcome.detail()}",
             ) from exc
         raise BackupError(
             "restore_quarantine_failed", f"隔离中断，已将已隔离文件原样退回：{exc}"
@@ -816,44 +818,72 @@ def _quarantine_target(target: Path, nonce: str) -> list[tuple[Path, Path]]:
     return pairs
 
 
-def _restore_moved(pairs: list[tuple[Path, Path]], *, remove_new: bool) -> list[Path]:
-    """把隔离副本改回原名，返回**未能还原**的隔离副本路径（空列表=全部还原）。
+@dataclass
+class _RestoreOutcome:
+    """隔离副本还原结果。`ok()` 为真才代表"原库已完整还原且持久化已确认"。"""
+
+    leftover: list[Path] = field(default_factory=list)
+    missing: list[Path] = field(default_factory=list)
+    persist_error: str | None = None
+    target_dir: Path | None = None
+
+    def ok(self) -> bool:
+        return not self.leftover and not self.missing and self.persist_error is None
+
+    def detail(self) -> str:
+        parts: list[str] = []
+        if self.missing:
+            parts.append(f"隔离副本缺失（无法还原）：{[str(p) for p in self.missing]}")
+        if self.leftover:
+            parts.append(f"隔离副本改名还原失败，已保留：{[str(p) for p in self.leftover]}")
+        if self.persist_error:
+            parts.append(f"目录 fsync 失败，还原持久化未确认（{self.target_dir}）：{self.persist_error}")
+        return "；".join(parts)
+
+
+def _restore_moved(pairs: list[tuple[Path, Path]], *, remove_new: bool) -> _RestoreOutcome:
+    """把隔离副本改回原名，返回完整结果（不是简单 bool）。
 
     `remove_new=True` 仅用于"隔离已全部完成、目标路径上现在只可能是新库文件"的场景；
     部分隔离（隔离未完成）时传 `remove_new=False`，**不删除任何原路径文件**，
     以免误删尚未隔离的原始 db/-wal/-shm。
 
-    还原顺序为 `-wal` / `-shm` → `db`，避免出现"有 wal 无 db"的中间态；
-    单个还原失败时保留其隔离副本（`*.restore-prev-*`）供人工处置，不删除。
+    - `pairs` 中每一项都代表**已经成功隔离**的原始文件，因此 `dst` 必须存在；
+      `dst` 缺失记为 `missing`，绝不当作还原成功。
+    - `os.replace` 失败时，只要隔离副本仍在，就记录完整路径为 `leftover`。
+    - 还原后目录 `fsync` 失败记为 `persist_error`，不得宣称回滚完全成功；
+      此时不清理任何隔离副本。
     """
-    leftover: list[Path] = []
+    outcome = _RestoreOutcome()
     if not pairs:
-        return leftover
+        return outcome
     base = next((src for src, _ in pairs if not str(src).endswith(("-wal", "-shm"))), None)
+    outcome.target_dir = (base or pairs[0][0]).parent
     if remove_new and base is not None:
         for suffix in ("-wal", "-shm"):
             _silent_unlink(Path(str(base) + suffix))
         _silent_unlink(base)
     ordered = sorted(pairs, key=lambda p: 1 if (base is not None and p[0] == base) else 0)
     for src, dst in ordered:
+        if not dst.exists():
+            outcome.missing.append(dst)
+            continue
         try:
-            if dst.exists():
-                os.replace(dst, src)
+            os.replace(dst, src)
         except OSError:
             if dst.exists():
-                leftover.append(dst)
+                outcome.leftover.append(dst)
+            else:
+                outcome.missing.append(dst)
     try:
-        _fsync_dir((base or pairs[0][0]).parent)
-    except OSError:
-        pass
-    return leftover
+        _fsync_dir(outcome.target_dir)
+    except OSError as exc:
+        outcome.persist_error = f"{type(exc).__name__}: {exc}"
+    return outcome
 
 
-def _unquarantine(pairs: list[tuple[Path, Path]]) -> list[Path]:
-    """隔离已全部完成后的回滚：清掉替换产生的新库与 sidecar，再还原隔离副本。
-
-    返回未能还原的隔离副本路径（非空表示原库未完全还原，调用方必须明确报错）。
-    """
+def _unquarantine(pairs: list[tuple[Path, Path]]) -> _RestoreOutcome:
+    """隔离已全部完成后的回滚：清掉替换产生的新库与 sidecar，再还原隔离副本。"""
     return _restore_moved(pairs, remove_new=True)
 
 
@@ -902,14 +932,14 @@ def _rollback_to_pre_restore(target: Path, pre_restore_dir: str) -> None:
     try:
         os.replace(tmp, target)
         _fsync_dir(target.parent)
-    except Exception:
-        leftover = _unquarantine(pairs)
+    except Exception as exc:
+        outcome = _unquarantine(pairs)
         _silent_unlink(tmp)
-        if leftover:
+        if not outcome.ok():
             raise BackupError(
                 "rollback_leftover",
-                f"回退未能还原原库，以下隔离副本已保留：{[str(p) for p in leftover]}",
-            )
+                f"回退未能确认还原原库：{outcome.detail()}",
+            ) from exc
         raise
     _drop_quarantine(pairs)
 

@@ -833,3 +833,91 @@ def test_quarantine_rollback_failure_keeps_quarantine_copy(tmp_path, monkeypatch
     assert _side_state(target)["-shm"] == before["-shm"]
     # 不产生无法识别的半库：原路径上不得出现新的 db 文件（还原失败，未做替换）
     assert not Path(target).exists(), "未替换前原路径不应出现新库文件"
+
+
+# --- P-1.3 最后局部修复：隔离副本缺失与目录持久化 ------------------------------
+
+
+def test_missing_quarantine_copy_reports_leftover_not_success(tmp_path, monkeypatch):
+    """隔离副本在回滚前丢失：必须报告缺失，绝不当成还原成功。"""
+    target, set_dir = _wal_target_and_set(tmp_path)
+    before = _side_state(target)
+    real = backup.os.replace
+
+    def guarded(src, dst, *a, **k):
+        name = Path(dst).name
+        if "-wal.restore-prev-" in name:
+            raise OSError("inject: WAL 改名失败")
+        real(src, dst, *a, **k)
+        # DB 改名成功后立刻删掉隔离副本，模拟副本丢失
+        if name.startswith("live.db.restore-prev-") and "-wal.restore-prev-" not in name:
+            Path(dst).unlink()
+
+    monkeypatch.setattr(backup.os, "replace", guarded)
+    with pytest.raises(backup.BackupError) as exc:
+        backup.restore_set(set_dir, db_path=target, backup_dir=tmp_path / "b")
+    assert exc.value.reason == "restore_quarantine_failed"
+    message = str(exc.value)
+    assert "隔离副本缺失" in message, f"必须明确报告缺失：{message}"
+    assert ".restore-prev-" in message, "错误信息必须给出缺失副本路径"
+    # 原路径没有 db（未被误报为已还原），WAL/SHM 原样未动
+    assert not Path(target).exists(), "不得宣称已还原（原路径不应出现 db）"
+    assert _side_state(target)["-wal"] == before["-wal"]
+    assert _side_state(target)["-shm"] == before["-shm"]
+
+
+def test_restore_rename_failure_reports_full_path(tmp_path, monkeypatch):
+    """隔离副本改名还原失败：保留副本并报告完整路径。"""
+    target, set_dir = _wal_target_and_set(tmp_path)
+    before = _side_state(target)
+    real = backup.os.replace
+
+    def guarded(src, dst, *a, **k):
+        dn, sn = Path(dst).name, Path(src).name
+        if "-wal.restore-prev-" in dn:
+            raise OSError("inject: WAL 改名失败")
+        if ".restore-prev-" in sn and "-wal.restore-prev-" not in sn and "-shm.restore-prev-" not in sn:
+            raise OSError("inject: DB 还原失败")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(backup.os, "replace", guarded)
+    with pytest.raises(backup.BackupError) as exc:
+        backup.restore_set(set_dir, db_path=target, backup_dir=tmp_path / "b")
+    assert exc.value.reason == "restore_quarantine_failed"
+    message = str(exc.value)
+    assert "改名还原失败" in message and str(tmp_path) in message, message
+    kept = [p for p in tmp_path.glob("*.restore-prev-*")]
+    assert kept, "隔离副本必须保留"
+    assert hashlib.sha256(kept[0].read_bytes()).hexdigest() == before["db"][2]
+    assert _side_state(target)["-wal"] == before["-wal"]
+
+
+def test_fsync_failure_reports_persistence_unconfirmed(tmp_path, monkeypatch):
+    """还原后目录 fsync 失败：必须报告持久化未确认，不得静默成功。"""
+    target, set_dir = _wal_target_and_set(tmp_path)
+    before = _side_state(target)
+    real_replace = backup.os.replace
+    real_fsync_dir = backup._fsync_dir
+
+    def guarded_replace(src, dst, *a, **k):
+        if "-wal.restore-prev-" in Path(dst).name:
+            raise OSError("inject: WAL 改名失败")
+        return real_replace(src, dst, *a, **k)
+
+    def failing_fsync_dir(path, *a, **k):
+        # 只在目标库所在目录注入失败，避免影响 pre-restore 快照发布
+        if Path(path) == tmp_path:
+            raise OSError("inject: fsync dir 失败")
+        return real_fsync_dir(path, *a, **k)
+
+    monkeypatch.setattr(backup.os, "replace", guarded_replace)
+    monkeypatch.setattr(backup, "_fsync_dir", failing_fsync_dir)
+    with pytest.raises(backup.BackupError) as exc:
+        backup.restore_set(set_dir, db_path=target, backup_dir=tmp_path / "b")
+    assert exc.value.reason == "restore_quarantine_failed"
+    message = str(exc.value)
+    assert "fsync" in message and "持久化未确认" in message, message
+    assert str(tmp_path) in message, "错误信息必须包含相关目录"
+    # DB 内容已改名还原（字节与原始一致），但整体不得被称为成功
+    assert _side_state(target)["db"] == before["db"]
+    assert _side_state(target)["-wal"] == before["-wal"]
