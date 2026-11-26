@@ -186,7 +186,7 @@ jobs:
           docker save "$IMG" -o "$OUT/nodepoolme-${TAG}-amd64.tar"
 
           cp docker-compose.yml .env.example README.md Dockerfile "$OUT/"
-          cp docs/离线部署.md "$OUT/INSTALL.md"
+          sed "s/<tag>/${TAG}/g" docs/离线部署.md > "$OUT/INSTALL.md"
 
           tar -C "$OUT" -czf "/tmp/nodepoolme-${TAG}-offline-amd64.tar.gz" .
           (
@@ -202,6 +202,8 @@ jobs:
         run: |
           gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
             gh release create "${GITHUB_REF_NAME}" --title "NodePoolME ${GITHUB_REF_NAME}" --notes "NodePoolME ${GITHUB_REF_NAME}"
+          gh release edit "${GITHUB_REF_NAME}" \
+            --notes "NodePoolME ${GITHUB_REF_NAME} 离线包（linux/amd64）：nodepoolme-${GITHUB_REF_NAME}-offline-amd64.tar.gz"
           gh release upload "${GITHUB_REF_NAME}" \
             /tmp/nodepoolme-*-offline-amd64.tar.gz \
             /tmp/nodepoolme-*-sha256sums.txt \
