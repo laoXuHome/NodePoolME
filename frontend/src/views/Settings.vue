@@ -16,7 +16,10 @@ async function load() {
   loading.value = true
   try {
     const res = await api.get('/api/settings')
-    form.value = res.settings
+    const settings = { ...res.settings }
+    settings.test_on_start = String(settings.test_on_start ?? '0')
+    settings.sub_publish_enabled = String(settings.sub_publish_enabled ?? '0')
+    form.value = settings
     system.value = res.system
   } catch (e) { ElMessage.error(e.message) }
   finally { loading.value = false }
@@ -97,13 +100,37 @@ onMounted(load)
 <template>
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">系统设置</h2>
-    <div class="np-page-desc">全局并发优先于单组并发；请求间隔由统一调度器管理，多组同时运行不会突破全局上限。</div>
+    <div v-if="form.global_concurrency" class="np-settings-overview">
+      <div class="np-setting-stat">
+        <span>调度并发</span>
+        <strong>{{ form.global_concurrency }}</strong>
+        <small>全局上限，多组共享</small>
+      </div>
+      <div class="np-setting-stat">
+        <span>下发延迟门槛</span>
+        <strong>{{ form.sub_max_latency || '0' }} / {{ form.sub_max_latency2 || '0' }}<em>ms</em></strong>
+        <small>两个目标阈值，都达标才下发</small>
+      </div>
+      <div class="np-setting-stat">
+        <span>检测批次</span>
+        <strong>{{ form.test_interval_minutes }}<em>min</em></strong>
+        <small>定时自动检测周期</small>
+      </div>
+      <div class="np-setting-stat">
+        <span>历史保留</span>
+        <strong>{{ form.history_days }}<em>天</em></strong>
+        <small>趋势与评分回溯窗口</small>
+      </div>
+    </div>
 
     <el-row :gutter="16">
       <el-col :md="14" :xs="24">
         <div class="np-card" style="padding:20px;margin-bottom:16px">
           <div class="np-section-title">
-            延迟检测（决定是否下发订阅）
+            <div class="np-section-heading">
+              <span>下发门槛 · 延迟检测</span>
+              <small>两个检测目标各 3 轮，全部达标才进入订阅</small>
+            </div>
             <div class="np-flex" />
             <el-button type="primary" size="small" :loading="saving" @click="save">保存设置</el-button>
           </div>
@@ -173,7 +200,10 @@ onMounted(load)
 
         <div class="np-card" style="padding:20px">
           <div class="np-section-title">
-            调度与检测
+            <div class="np-section-heading">
+              <span>调度与检测</span>
+              <small>控制检测速度、重试节奏与历史数据的保留范围</small>
+            </div>
             <div class="np-flex" />
             <el-button type="primary" size="small" :loading="saving" @click="save">保存设置</el-button>
           </div>
@@ -235,11 +265,15 @@ onMounted(load)
 
       <el-col :md="10" :xs="24">
         <div class="np-card" style="padding:20px">
-          <div class="np-section-title">运行信息</div>
+          <div class="np-section-title">
+            <div class="np-section-heading">
+              <span>运行信息</span>
+              <small>当前版本、检测引擎与数据目录</small>
+            </div>
+          </div>
           <el-descriptions :column="1" size="small" border>
             <el-descriptions-item label="版本">
-              {{ system.version }} ·
-              <a href="https://github.com/laoXuHome/NodePoolME" target="_blank" rel="noopener">GitHub 仓库 ↗</a>
+              {{ system.version }}
             </el-descriptions-item>
             <el-descriptions-item label="检测引擎">{{ system.engine }}</el-descriptions-item>
             <el-descriptions-item label="调度器">{{ system.scheduler ? '运行中' : '已停止' }}</el-descriptions-item>
@@ -256,7 +290,12 @@ onMounted(load)
         </div>
 
         <div class="np-card" style="padding:20px;margin-top:16px">
-          <div class="np-section-title">备份与恢复</div>
+          <div class="np-section-title">
+            <div class="np-section-heading">
+              <span>备份与恢复</span>
+              <small>恢复前自动保留旧库，并重建统一订阅</small>
+            </div>
+          </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap">
             <el-button :loading="backupBusy" @click="backup">创建备份</el-button>
             <el-button @click="downloadBackup">下载数据库</el-button>
@@ -275,7 +314,12 @@ onMounted(load)
         </div>
 
         <div class="np-card" style="padding:20px;margin-top:16px">
-          <div class="np-section-title">修改管理密码</div>
+          <div class="np-section-title">
+            <div class="np-section-heading">
+              <span>修改管理密码</span>
+              <small>仅影响控制台登录，不影响订阅访问</small>
+            </div>
+          </div>
           <el-form label-width="90px">
             <el-form-item label="当前密码"><el-input v-model="password.old_password" type="password" show-password /></el-form-item>
             <el-form-item label="新密码"><el-input v-model="password.new_password" type="password" show-password /></el-form-item>

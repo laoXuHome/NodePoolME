@@ -12,7 +12,6 @@ RUN npm run build
 FROM python:3.12-slim AS runtime
 
 ARG MIHOMO_VERSION=v1.19.34
-ARG TARGETARCH=amd64
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -28,9 +27,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl tzdata \
- && case "${TARGETARCH}" in \
-      arm64) MIHOMO_ARCH=linux-arm64 ;; \
-      *)     MIHOMO_ARCH=linux-amd64-compatible ;; \
+ && case "$(dpkg --print-architecture)" in \
+      amd64) MIHOMO_ARCH=linux-amd64-compatible ;; \
+      *) echo "unsupported build architecture" >&2; exit 1 ;; \
     esac \
  && curl -fsSL "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-${MIHOMO_ARCH}-${MIHOMO_VERSION}.gz" -o /tmp/mihomo.gz \
  && gunzip -c /tmp/mihomo.gz > /usr/local/bin/mihomo \

@@ -146,9 +146,6 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 <template>
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">订阅输出</h2>
-    <div class="np-page-desc">
-      系统只生成一个统一订阅 <span class="np-mono">/sub/all</span>；访问需要 Token，内容不暴露机场原始 URL。下发关键词与测速标签过滤是输出层的手动口子；测速标签勾选即排除。
-    </div>
 
     <el-row :gutter="16">
       <el-col :md="14" :xs="24">

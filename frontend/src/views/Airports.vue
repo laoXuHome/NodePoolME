@@ -223,10 +223,6 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 <template>
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">机场管理</h2>
-    <div class="np-page-desc">
-      每个机场独立拉取、独立周期；拉取或解析失败时保留旧缓存，只有完整解析成功才事务性更新。
-      拉取统一使用固定 UA <span class="np-mono">{{ fetchUa || 'clash-verge/v1.19.6' }}</span>（不轮换客户端身份，避免触发机场风控），每次拉取的历史记录里都会写明。
-    </div>
 
     <div class="np-toolbar">
       <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>添加机场</el-button>

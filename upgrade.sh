@@ -3,8 +3,8 @@
 #
 # Usage:
 #   sudo npup                   upgrade to the image tag already in .env
-#   sudo npup v2.0.0            pin that version in .env, then upgrade
-#   sudo npup --offline v2.0.0  skip registry pull and use the release bundle
+#   sudo npup v2.001            pin that version in .env, then upgrade
+#   sudo npup --offline v2.001  skip registry pull and use the release bundle
 #   sudo npup /path/to/dir      upgrade a project living elsewhere
 #
 # The release bundle contains:
@@ -142,8 +142,8 @@ if [ "$pull_ok" -eq 0 ]; then
   case "$ARCH" in
     x86_64|amd64) BUNDLE_ARCH="amd64" ;;
     *)
-      echo "!! no offline bundle for $ARCH; the release only publishes linux/amd64" >&2
-      echo "   retry with registry access, or pull the arm64 image manually" >&2
+      echo "!! no offline bundle for $ARCH; releases only publish linux/amd64" >&2
+      echo "   retry with registry access on an amd64 host" >&2
       exit 2
       ;;
   esac

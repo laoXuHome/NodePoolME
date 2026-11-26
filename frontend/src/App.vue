@@ -11,7 +11,6 @@ const router = useRouter()
 const authed = computed(() => state.loggedIn)
 const ready = ref(false)
 const version = computed(() => state.version || '1.0.0')
-const repoUrl = 'https://github.com/laoXuHome/NodePoolME'
 
 const isLogin = computed(() => route.name === 'login')
 const isMobile = ref(false)
@@ -19,25 +18,25 @@ let mq = null
 function syncMobile(e) {
   isMobile.value = e.matches
 }
-const title = computed(() => route.meta.title || 'NodePoolME')
+const routeMeta = computed(() => route.meta || {})
 
 const menus = [
   { path: '/dashboard', label: '仪表盘', short: '概览', icon: 'Odometer' },
   { path: '/airports', label: '机场管理', short: '机场', icon: 'OfficeBuilding' },
   { path: '/nodes', label: '缓存池', short: '缓存', icon: 'Connection' },
-  { path: '/groups', label: '节点标签', short: '标签', icon: 'Aim' },
+  { path: '/groups', label: '检测标签', short: '标签', icon: 'Aim' },
   { path: '/subscription', label: '订阅输出', short: '订阅', icon: 'Link' },
   { path: '/settings', label: '系统设置', short: '设置', icon: 'Setting' }
 ]
 
 async function refresh() {
-  if (isLogin.value) { ready.value = true; return }
+  if (isLogin.value) { document.title = '登录 · NodePoolME'; ready.value = true; return }
   await checkAuth()
   ready.value = true
-  if (!state.loggedIn) router.replace('/login')
+  if (!state.loggedIn) { router.replace('/login'); return }
+  document.title = `${routeMeta.value.title || '控制台'} · NodePoolME`
 }
 
-const update = ref(null)
 async function doLogout() {
   await ElMessageBox.confirm('确定退出登录吗？', '提示', { type: 'warning' })
   await logout()
@@ -54,7 +53,8 @@ onMounted(async () => {
 onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 
 router.afterEach((to) => {
-  if (to.name !== 'login' && ready.value && !state.loggedIn) router.replace('/login')
+  if (to.name !== 'login' && ready.value && !state.loggedIn) { router.replace('/login'); return }
+  document.title = to.name === 'login' ? '登录 · NodePoolME' : `${to.meta.title || '控制台'} · NodePoolME`
 })
 
 function onMenu(path) {
@@ -85,11 +85,10 @@ function onMenu(path) {
         </nav>
         <div class="np-flex" />
         <div v-if="isMobile" class="np-mobile-tools">
-          <span class="np-ver is-mobile" :title="verTitle">
-            <i class="np-ver-dot" :class="{ 'is-new': update && update.has_update }" />
+          <span class="np-ver is-mobile" title="当前版本">
+            <i class="np-ver-dot" />
             <span class="np-ver-text">v{{ version }}</span>
           </span>
-          <a class="np-gh is-mobile" :href="repoUrl" target="_blank" rel="noopener">GitHub ↗</a>
         </div>
         <HeaderTools v-if="!isMobile" compact />
         <button v-if="isMobile" class="np-icon-btn" aria-label="退出登录" @click="doLogout">
@@ -97,6 +96,17 @@ function onMenu(path) {
         </button>
       </header>
       <main class="np-main">
+        <section v-if="route.name !== 'dashboard' && routeMeta.title" class="np-route-masthead">
+          <div class="np-route-mast-copy">
+            <span class="np-route-eyebrow">{{ routeMeta.eyebrow || 'NODEPOOL CONTROL' }}</span>
+            <h1>{{ routeMeta.title }}</h1>
+            <p>{{ routeMeta.desc }}</p>
+          </div>
+          <div class="np-route-mast-side">
+            <span class="np-route-dot"></span>
+            <span>{{ routeMeta.side || 'OPERATIONS' }}</span>
+          </div>
+        </section>
         <router-view />
       </main>
     </section>

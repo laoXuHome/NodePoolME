@@ -129,11 +129,11 @@ docker compose up -d --pull never
 
 | 来源 | 地址 |
 | --- | --- |
-| GHCR（GitHub Actions 构建，多架构） | `ghcr.io/laoxuhome/nodepoolme:latest` |
+| GHCR（GitHub Actions 构建，linux/amd64） | `ghcr.io/laoxuhome/nodepoolme:latest` |
 | 提交标签（每次 main 推送） | `ghcr.io/laoxuhome/nodepoolme:sha-<short-sha>` |
 | 版本标签（推送 `v*` 标签时） | `ghcr.io/laoxuhome/nodepoolme:<tag>` |
 
-支持 `linux/amd64` 与 `linux/arm64`（含 Mihomo 内核）。
+仅构建 `linux/amd64`（含 Mihomo 内核），离线包也只发布 amd64。
 
 ## 环境变量
 
@@ -225,8 +225,8 @@ sudo chmod +x /usr/local/bin/npup
 sudo ln -sf /usr/local/bin/npup /usr/local/bin/nodepool-upgrade   # 想要个更好记的名字
 
 sudo npup            # 默认更新到 .env 里指定的镜像（填 latest 即为最新版）
-sudo npup v2.0.0     # 也可以直接指定版本，脚本会改写 .env 再升级
-sudo npup --offline v2.0.0  # 完全不走 registry，只用 Release 离线包
+sudo npup v2.001     # 也可以直接指定版本，脚本会改写 .env 再升级
+sudo npup --offline v2.001  # 完全不走 registry，只用 Release 离线包
 ```
 
 脚本行为：`docker compose pull` 成功就直接重建容器；失败（或加 `--offline`）则下载对应 Release 的 `nodepoolme-v<版本>-offline-amd64.tar.gz`，先校验 `sha256sums.txt`，再解包并 `docker load` 其中的镜像 tar（离线包只提供 amd64），最后 `docker compose up -d` 并打印实际镜像与 revision。
@@ -249,7 +249,8 @@ sudo npup --offline v2.0.0  # 完全不走 registry，只用 Release 离线包
 - 只在检测进行中每 2 秒轮询 `/api/runtime` 刷新检测卡，不重绘曲线；空闲时没有定时刷新，检测结束再整页刷新一次。
 - 版本号、检测更新、GitHub、退出四项位于桌面顶栏最右侧，与右侧「检测任务」卡右缘对齐；手机端顶栏同样保留版本号与 GitHub 入口。
 - 这组工具包含：版本号（绿点=已最新，橙点=有新版）、「检测更新」（比对 GitHub Releases 最新版本与离线包，弹窗给出当前/最新版本、包名体积和下载直链）、「GitHub ↗」仓库入口与退出。
-- 桌面端取消左侧栏：导航改为顶栏内的胶囊标签（仪表盘 / 机场管理 / 缓存池 / 节点标签 / 订阅输出 / 系统设置），顶栏左端品牌、右端版本号与工具；整块工作区以 1680px 为上限居中。手机端为顶部品牌栏 + 固定底部 6 项标签栏。
+- 桌面端取消左侧栏：导航改为顶栏内的胶囊标签（仪表盘 / 机场管理 / 缓存池 / 检测标签 / 订阅输出 / 系统设置），顶栏左端品牌、右端版本号与工具；整块工作区以 1720px 为上限居中。手机端为顶部品牌栏 + 固定底部 6 项标签栏。
+- 仪表盘顶部新增「运营全景」：桌面为六节点 SVG 思维导图，按机场接入 → 全量缓存 → 双阶段检测 → 评分与成熟度 → 统一订阅 → 客户端消费展开；手机自动改为六步纵向链路，节点数值直接读取仪表盘与运行状态接口。
 - 手机端机场、缓存池、节点标签改为卡片列表：节点卡直接显示 G/W 最近 3 轮最低延迟、上限、标签数、最近检测与未下发原因；超过各自上限的数字标红。
 - 缓存池筛选在手机端默认收起，只保留搜索与「筛选」按钮；展开后为两列。
 - 表单在窄屏下标签置顶、所有分栏字段改为整行；弹窗在全屏或屏幕内展示，节点详情为全屏。
@@ -450,7 +451,7 @@ python tests/test_engine_live.py    # 需要 /tmp/mihomo 内核，验证真实 H
 
 ## 范围与限制
 
-**包含**：多机场管理、独立拉取、全量缓存、三种默认节点标签、自定义节点标签、随机化与分散、四层并发、连续失败保护、完整批次与原子发布、动态标识、唯一统一订阅、四种输出、下载测速、机场评分与数据成熟度、备份恢复、健康检查、多架构镜像。
+**包含**：多机场管理、独立拉取、全量缓存、三种默认节点标签、自定义节点标签、随机化与分散、四层并发、连续失败保护、完整批次与原子发布、动态标识、唯一统一订阅、四种输出、下载测速、机场评分与数据成熟度、备份恢复、健康检查、linux/amd64 镜像与离线包。
 
 **暂不包含**：ISP 与流媒体解锁检测、多订阅输出、第三方订阅转换、独立 Redis/MySQL、多用户权限体系。
 

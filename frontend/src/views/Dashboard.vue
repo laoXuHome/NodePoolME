@@ -1,8 +1,9 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { api, formatTs, logLevelLabel, logSourceLabel } from '../api'
+import { api, formatTs, logLevelLabel, logSourceLabel, state } from '../api'
 import TrendChart from '../components/TrendChart.vue'
+import OperationsMap from '../components/OperationsMap.vue'
 
 const data = ref(null)
 // 趋势图配色：前 5 个与评分等级同色（紫/绿/蓝/橙/红），其后按色相差距大者补充
@@ -358,7 +359,15 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
 <template>
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">仪表盘</h2>
-    <div class="np-page-desc">机场拉取、节点缓存与检测批次总览。检测只读取本地缓存，不会触发机场重新拉取。</div>
+    <OperationsMap v-if="data" :data="data" :runtime="runtime" :version="state.version" />
+
+    <div class="np-dash-band" v-if="data">
+      <div>
+        <span class="np-band-kicker">REALTIME CONTROL</span>
+        <h2>缓存池与检测脉冲</h2>
+      </div>
+      <p>左侧是当前缓存池结构与机场评价，右侧是检测任务和系统日志。所有检测只读取本地缓存。</p>
+    </div>
 
     <div class="np-dash-layout" v-if="data">
       <!-- 缓存池 + 机场拉取：合并成主统计卡 -->

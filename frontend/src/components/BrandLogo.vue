@@ -1,12 +1,13 @@
 <script setup>
 defineProps({
   size: { type: Number, default: 34 },
-  compact: { type: Boolean, default: false }
+  compact: { type: Boolean, default: false },
+  light: { type: Boolean, default: false }
 })
 </script>
 
 <template>
-  <div class="np-brand" :class="{ 'is-compact': compact }">
+  <div class="np-brand" :class="{ 'is-compact': compact, 'is-light': light }">
     <svg class="np-mark" :width="size" :height="size" viewBox="0 0 40 40" role="img" aria-label="NodePoolME">
       <defs>
         <linearGradient id="npBlueGrad" x1="0" y1="0" x2="0.9" y2="1">
@@ -75,6 +76,8 @@ defineProps({
   color: #2c6aee;
   letter-spacing: -.01em;
 }
+.np-brand.is-light .np-word-main { color: #f4f8ff; }
+.np-brand.is-light .np-word-accent { color: #8ec5ff; }
 .np-brand.is-compact .np-word-main,
 .np-brand.is-compact .np-word-accent { font-size: 13.5px; }
 </style>

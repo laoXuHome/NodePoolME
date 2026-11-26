@@ -209,10 +209,6 @@ onUnmounted(() => {
 <template>
   <div class="np-page" v-loading="loading">
     <h2 class="np-page-title">节点标签</h2>
-    <div class="np-page-desc">
-      每个标签对应一个检测目标与一个延迟上限（命中即打标）。超时统一走系统设置里的全局检测超时，标签本身不再单独配置超时和周期。「名称」只在本页面内部使用；真正进入节点名中间段的是「标识」（如「机场·GPTᐧTG·节点名」）。命中标签不影响是否下发，下发只看「系统设置 → 延迟检测」的延迟上限。
-      <br />标签不提供单独运行，所有启用标签随全局检测一起执行。
-    </div>
 
     <div class="np-quad">
       <div class="np-card np-quad-cell np-tags-cell">
