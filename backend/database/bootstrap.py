@@ -16,7 +16,7 @@ from typing import Any
 from backend import config
 from backend.database import gate, maint, pool
 from backend.database.maint import MaintRead, MaintState
-from backend.database.migrate import Phase
+from backend.database.migrate import BASELINE_VERSION, Phase
 
 KNOWN_PHASES = {p.value for p in Phase}
 FALLBACK_CODES = {
@@ -71,7 +71,7 @@ def _valid_phase(phase: str | None) -> bool:
     return phase is not None and phase in KNOWN_PHASES
 
 
-_BASELINE = f"{config.VERSION}-baseline"
+_BASELINE = BASELINE_VERSION
 
 
 def probe_db(path: str | Path | None = None) -> DbState:

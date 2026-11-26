@@ -34,8 +34,10 @@ from backend import config
 
 # --- 版本注册表（seq 唯一分配，禁止运行时自增猜测） ---------------------------
 
-BASELINE_VERSION = f"{config.VERSION}-baseline"
-BASELINE_APP_VERSION = config.VERSION
+# 数据库结构基线名固定为 1.8.7-baseline：它描述 schema 起点，不随应用版本号变化。
+# 应用版本升级到 2.x 后，已有库仍必须按同一基线识别；只有显式迁移才推进 schema。
+BASELINE_VERSION = "1.8.7-baseline"
+BASELINE_APP_VERSION = "1.8.7"
 VERSION_SEQ: dict[str, int] = {
     BASELINE_VERSION: 1,
     "1.10": 2,
@@ -308,8 +310,9 @@ def current_version(conn: sqlite3.Connection) -> str | None:
 
 def preflight(conn: sqlite3.Connection, runtime_version: str | None = None) -> dict[str, Any]:
     """只读判定矩阵（§2.2.5）。不创建表、不写任何行。"""
+    # 兼容保留 runtime_version 参数；结构基线名固定，不随应用版本推导。
     runtime_version = runtime_version or config.VERSION
-    expected = f"{runtime_version}-baseline"
+    expected = BASELINE_VERSION
     if not schema_table_exists(conn):
         return {
             "state": "absent",
@@ -479,11 +482,11 @@ def record_baseline(
         _require_autocommit(conn)
         runtime_version = runtime_version or config.VERSION
         app_version = app_version or config.VERSION
-        expected_version = f"{runtime_version}-baseline"
-        if expected_version not in VERSION_SEQ:
+        expected_version = BASELINE_VERSION
+        if runtime_version not in (BASELINE_APP_VERSION, config.VERSION):
             raise BaselineRefused(
                 "unsupported_runtime_version",
-                f"运行版本 {runtime_version} 未在 VERSION_SEQ 注册",
+                f"运行版本 {runtime_version} 不是当前或基线应用版本",
             )
         if app_version != runtime_version:
             raise BaselineRefused(

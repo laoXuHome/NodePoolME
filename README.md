@@ -110,6 +110,20 @@ docker run -d --name nodepool --restart unless-stopped \
   ghcr.io/laoxuhome/nodepoolme:latest
 ```
 
+### 离线部署（linux/amd64）
+
+GitHub Release 提供 `nodepoolme-<tag>-offline-amd64.tar.gz`，内含镜像归档、Compose、环境变量示例、README、Dockerfile 和 `INSTALL.md`。
+
+```bash
+tar -xzf nodepoolme-<tag>-offline-amd64.tar.gz
+docker load -i nodepoolme-<tag>-amd64.tar
+mkdir -p /opt/nodepool/{data,config,logs,backup,state}
+# 复制 docker-compose.yml 与 .env.example，修改 NODEPOOL_IMAGE 为同一 tag
+docker compose up -d --pull never
+```
+
+离线主机没有 GHCR 访问能力时，必须使用 `--pull never`，否则 Compose 会尝试联网拉取。
+
 ### 镜像
 
 | 来源 | 地址 |

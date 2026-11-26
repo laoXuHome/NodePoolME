@@ -101,7 +101,7 @@ def test_pt06_baseline_idempotent_and_business_tables_unchanged(tmp_path):
         first = migrate.record_baseline(
             conn,
             image_digest="sha256:ca97a56640ad5111449bd09e7d7f81cde570f7ac1ac14df588ea8a6f3dfb76d1",
-            healthz_version="1.8.7",
+            healthz_version=config.VERSION,
         )
         assert first["status"] == "created"
         assert first["structure_profile"] == "alter_history", \
@@ -121,9 +121,9 @@ def test_pt06_baseline_idempotent_and_business_tables_unchanged(tmp_path):
         detail = json.loads(migrate.migration_rows(conn)[0]["detail_json"])
         assert detail["baseline"] is True
         assert detail["structure_hash"] == migrate.BASELINE_STRUCTURE_HASH
-        assert detail["app_version"] == "1.8.7"
+        assert detail["app_version"] == config.VERSION
         assert detail["structure_profile"] == "alter_history"
-        assert detail["healthz_version"] == "1.8.7"
+        assert detail["healthz_version"] == config.VERSION
         assert detail["image_digest"].startswith("sha256:")
         assert detail["tasks_present"] is True
         assert detail["tables"] == list(migrate.BASE_TABLES)
