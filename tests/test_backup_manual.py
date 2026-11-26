@@ -509,3 +509,111 @@ def test_migration_does_not_auto_export(env, monkeypatch):
                 clock=fake_clock, sleeper=lambda _s: None,
                 checkpoint=lambda: (0, 0, 0), holders=lambda: [])
     assert calls["n"] == 0
+
+
+def _spawn_wal_writer(live: Path, label: str, ready: Path) -> subprocess.Popen:
+    """子进程写入并提交后**保持连接**，制造未 checkpoint 的已提交 WAL（不 close）。"""
+    code = (
+        "import sqlite3, sys, time\n"
+        "db, label, ready = sys.argv[1], sys.argv[2], sys.argv[3]\n"
+        "conn = sqlite3.connect(db, isolation_level=None)\n"
+        "conn.execute('PRAGMA journal_mode=WAL')\n"
+        "conn.execute(\"INSERT INTO airports (name, url, enabled, interval_minutes,\"\n"
+        "             \" daily_time, filter_keywords, created_at, updated_at)\"\n"
+        "             \" VALUES (?,?,?,?,?,?,?,?)\",\n"
+        "             (label, 'https://wal.example/sub', 1, 60, None, '[]',\n"
+        "              '2026-11-26 20:00:00', '2026-11-26 20:00:00'))\n"
+        "open(ready, 'w').write('1')\n"
+        "time.sleep(60)\n"
+    )
+    return subprocess.Popen([sys.executable, "-c", code, str(live), label, str(ready)],
+                            env={**os.environ, "NODEPOOL_DB": str(live)})
+
+
+def test_live_probe_sees_wal_but_immutable_does_not(env):
+    """`_probe_file(target)` 默认 immutable 会漏 WAL；活库必须 immutable=False。"""
+    label = f"wal-live-{time.time_ns()}"
+    ready = env.root / "writer-ready"
+    proc = _spawn_wal_writer(env.live, label, ready)
+    try:
+        for _ in range(100):
+            if ready.exists():
+                break
+            time.sleep(0.1)
+        assert ready.exists(), "子进程未完成写入"
+        wal = Path(str(env.live) + "-wal")
+        assert wal.exists() and wal.stat().st_size > 0, "前置：WAL 必须存在且非空"
+
+        frozen = backup._probe_file(env.live)                      # 默认 immutable=True
+        live = backup._probe_file(env.live, immutable=False)
+        assert frozen["tables"]["airports"] == 2, "冻结读法不应看到 WAL"
+        assert live["tables"]["airports"] == 3, "活库读法必须看到 WAL 已提交行"
+
+        copy = env.data / f"nodepool.db.preimport-probe-{time.time_ns()}"
+        report = backup._snapshot_original(env.live, copy)
+        assert report["ok"] is True
+        assert report["tables"] == live["tables"], "preimport 逐表计数必须等于含 WAL 的原库"
+        rows = sqlite3.connect(f"file:{copy}?mode=ro", uri=True)
+        try:
+            names = {r[0] for r in rows.execute("SELECT name FROM airports")}
+        finally:
+            rows.close()
+        assert label in names, "preimport 必须包含 WAL 中已提交的数据"
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+
+
+def test_import_compares_preimport_with_wal_aware_live_probe(env, monkeypatch):
+    """导入路径必须用 immutable=False 读活库，否则 WAL 数据会被误判为不一致。"""
+    calls: list[tuple[Path, bool]] = []
+    real = backup._probe_file
+
+    def spy(path, *, immutable=True):
+        calls.append((Path(path), immutable))
+        return real(path, immutable=immutable)
+
+    monkeypatch.setattr(backup, "_probe_file", spy)
+    info = backup.export_backup(label="probe")
+    pool.block_writes("test-probe")
+    try:
+        result = backup.import_backup(info["path"])
+    finally:
+        pool.unblock_writes()
+    assert result["ok"] is True
+    assert any(p == env.live and imm is False for p, imm in calls), \
+        "preimport 复核必须对活库使用 immutable=False"
+
+
+def test_meta_content_tampering_rejected(env, monkeypatch):
+    """tables/structure_profile/schema_version/tasks/key_digests 任一被篡改都必须拒绝。"""
+    _fast_gate(monkeypatch)
+    info = backup.export_backup(label="meta")
+    db_file = Path(info["path"])
+    meta_path = Path(info["meta_path"])
+    pristine = meta_path.read_text(encoding="utf-8")
+    counts = _counts(env.live)
+    mutations = {
+        "tables": lambda m: {"airports": 999},
+        "structure_profile": lambda m: "unregistered-profile",
+        "schema_version": lambda m: "9.9.9-does-not-exist",
+        "tasks": lambda m: {"legacy_tasks": True},
+        "key_digests": lambda m: {"airports": "0" * 64},
+    }
+    for field, mutate in mutations.items():
+        meta = json.loads(pristine)
+        value = mutate(meta)
+        assert value != meta[field], f"篡改值必须与真值不同：{field}"
+        meta[field] = value
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+
+        verdict = backup.verify_backup(db_file)
+        assert verdict["ok"] is False
+        assert f"meta_{field}_mismatch" in verdict["errors"]
+
+        rc = cli.main(["import", "--file", str(db_file), "--json"])
+        assert rc == cli.EXIT_REFUSED, f"{field} 篡改必须在进入维护态前拒绝"
+        assert not Path(maint.MAINT_FILE).exists()
+        assert _counts(env.live) == counts, "目标数据库必须零改动"
+
+        meta_path.write_text(pristine, encoding="utf-8")

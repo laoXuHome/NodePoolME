@@ -45,8 +45,11 @@ KEY_TABLES = ("airports", "nodes", "settings", "test_groups")
 REQUIRED_META_FIELDS = (
     "format", "created_at", "app_version", "sqlite_version", "db_bytes", "sha256",
     "integrity_check", "structure_hash", "structure_profile", "schema_version",
-    "tasks", "tables",
+    "tasks", "tables", "key_digests",
 )
+
+# 必须与数据库实际内容逐项比对（不能只查存在）
+META_CONTENT_FIELDS = ("tables", "structure_profile", "schema_version", "tasks", "key_digests")
 
 PROBE_TIMEOUT = 30
 
@@ -287,6 +290,10 @@ def verify_backup(path: str | Path) -> dict[str, Any]:
                 errors.append("meta_sha256_mismatch")
             if meta.get("structure_hash") != report.get("structure_hash"):
                 errors.append("meta_structure_mismatch")
+            # 可从数据库重算的内容字段必须逐项实配，不能只看字段存在
+            for field in META_CONTENT_FIELDS:
+                if field in meta and meta[field] != report.get(field):
+                    errors.append(f"meta_{field}_mismatch")
             if meta.get("integrity_check") != "ok":
                 errors.append("meta_integrity_not_ok")
     report["sha256"] = _sha256(db_file) if db_file.exists() else None
@@ -478,7 +485,7 @@ def import_backup(source: str | Path, *, db_path: str | Path | None = None,
         preimport = _sidecar(target, "", stamp)
         pre_report = _snapshot_original(target, preimport)
         pre_counts = pre_report.get("tables")
-        live = _probe_file(target)
+        live = _probe_file(target, immutable=False)   # 活库：mode=rw+query_only，必须看到 WAL 已提交页
         if live.get("tables") != pre_counts:
             raise BackupError("preimport_incomplete",
                               "原库副本逐表计数与当前库不一致（WAL 数据可能未纳入）")
