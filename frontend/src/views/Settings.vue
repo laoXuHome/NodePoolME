@@ -164,7 +164,7 @@ onMounted(load)
                               placeholder="04:30" style="width:200px" />
             </el-form-item>
             <div class="np-muted">
-              定时/间隔下发与仪表盘「立即检测并下发」走同一条流程：对全部节点跑延迟检测 + 全部节点标签标签，检测期间暂停机场拉取，完成后才原子替换订阅。
+              定时/间隔下发与仪表盘「立即检测并下发」走同一条流程：对全部节点跑延迟检测 + 全部节点标签检测，检测期间暂停机场拉取，完成后才原子替换订阅。
               <template v-if="form.sub_publish_mode === 'time'">固定时刻模式下 15 分钟内未成功会在下一分钟重试。</template>
               <template v-else>间隔模式从保存设置（或上一次下发完成）开始计时，失败会在下一分钟重试，成功后才重新计时。</template>
             </div>

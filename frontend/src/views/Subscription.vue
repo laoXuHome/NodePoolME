@@ -36,7 +36,10 @@ const SPEED_OPTIONS = [
   { value: 'good', label: '良', color: '#4682B4' },
   { value: 'poor', label: '差', color: '#E9C46A' },
   { value: 'danger', label: '劣', color: '#EF4444' },
-  { value: 'error', label: '异常', color: '#F59E0B', symbol: '!' }
+  { value: 'pending', label: '待测速', color: '#9CA3AF' },
+  { value: 'excluded', label: '已排除', color: '#CBD5E1' },
+  { value: 'error', label: '异常', color: '#F59E0B', symbol: '!' },
+  { value: 'source_failed', label: '全源失败', color: '#DC2626', symbol: '×' }
 ]
 const LOON_REASON = {
   protocol: '协议不支持',
@@ -185,7 +188,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             只输出 Loon 支持的协议、加密方式与传输方式，并对密码和节点名做转义。
           </div>
           <div class="np-muted" style="margin-top:10px">
-            反代转发会把 <span class="np-mono">&amp;</span> 转义坏，优先用「无参数」地址 <span class="np-mono">/sub/all/&lt;token&gt;/clash</span>；带 format 参数时按客户端 UA 自动选择。
+            反代转发会把 <span class="np-mono">&amp;</span> 转义坏，优先用「无参数」地址 <span class="np-mono">/sub/all/&lt;token&gt;/clash</span>；无参数地址按客户端 UA 自动选择，带 format 参数时按参数指定格式。
           </div>
         </div>
 
@@ -210,7 +213,7 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
           <div class="np-filter-row">
             <div class="np-filter-head">
               <b>测速标签排除</b>
-              <span class="np-muted">勾选即排除带该标签的节点；未勾选不排除。可选优、良、差、劣、异常。</span>
+              <span class="np-muted">勾选即排除带该标签的节点；未勾选不排除。可选优、良、差、劣、待测速、已排除、异常、全源失败。</span>
             </div>
             <el-checkbox-group v-model="speedExcludeLevels" class="speed-filter-grid">
               <el-checkbox v-for="opt in SPEED_OPTIONS" :key="opt.value" :value="opt.value">
