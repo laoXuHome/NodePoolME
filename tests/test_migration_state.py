@@ -260,8 +260,30 @@ def test_legal_transitions_are_exactly_eight_and_all_accepted(env):
     assert len(migrate.LEGAL_TRANSITIONS) == 8
     for old, new in migrate.LEGAL_TRANSITIONS:
         rec = _walk_to(old)
+        before = rec.phase_epoch
         assert migrate.set_phase_memory(rec, old, new) is migrate.PhaseResult.SUCCESS
         assert rec.phase is new
+        assert rec.phase_epoch == before + 1          # 每次成功转换只递增一次
+
+
+def test_phase_epoch_equals_number_of_successful_transitions(env):
+    for phase in (migrate.Phase.PREPARED, migrate.Phase.TX_OPEN,
+                  migrate.Phase.COMMIT_ATTEMPTED, migrate.Phase.COMMITTED,
+                  migrate.Phase.UNKNOWN, migrate.Phase.TX_ROLLED_BACK):
+        rec = _walk_to(phase)
+        assert rec.phase_epoch == _depth_of(phase)
+        assert rec.phase is phase
+
+
+def _depth_of(phase: migrate.Phase) -> int:
+    return {
+        migrate.Phase.PREPARED: 0,
+        migrate.Phase.TX_OPEN: 1,
+        migrate.Phase.COMMIT_ATTEMPTED: 2,
+        migrate.Phase.COMMITTED: 3,
+        migrate.Phase.UNKNOWN: 3,
+        migrate.Phase.TX_ROLLED_BACK: 2,
+    }[phase]
 
 
 def test_illegal_transitions_rejected(env):
@@ -278,27 +300,33 @@ def test_illegal_transitions_rejected(env):
     ]
     for old, new in illegal:
         rec = _walk_to(old)
+        epoch_before = rec.phase_epoch
         with pytest.raises(migrate.IllegalTransition):
             migrate.set_phase_memory(rec, old, new)
         assert rec.phase is old, f"{old.value} -> {new.value} 不得留下 phase 变化"
+        assert rec.phase_epoch == epoch_before, "拒绝路径不得递增 phase_epoch"
 
 
 def test_phase_mismatch_when_same_transition_written_twice(env):
     rec = _walk_to(migrate.Phase.PREPARED)
     migrate.set_phase_memory(rec, migrate.Phase.PREPARED, migrate.Phase.TX_OPEN)
+    assert rec.phase_epoch == 1
     with pytest.raises(migrate.PhaseMismatch):
         migrate.set_phase_memory(rec, migrate.Phase.PREPARED, migrate.Phase.TX_OPEN)
     assert rec.phase is migrate.Phase.TX_OPEN
+    assert rec.phase_epoch == 1                     # 重复转换不得递增
 
 
 def test_halted_record_rejects_phase_and_reason(env):
     rec = _walk_to(migrate.Phase.COMMIT_ATTEMPTED)
     rec.halted = True
+    epoch_before = rec.phase_epoch
     with pytest.raises(migrate.MigrationHalted):
         migrate.set_phase_memory(rec, migrate.Phase.COMMIT_ATTEMPTED, migrate.Phase.UNKNOWN)
     with pytest.raises(migrate.MigrationHalted):
         migrate.append_reason(rec, "after_halt", {})
     assert rec.phase is migrate.Phase.COMMIT_ATTEMPTED
+    assert rec.phase_epoch == epoch_before
 
 
 # --- run()：happy path / 拒绝路径 ----------------------------------------------
@@ -316,6 +344,7 @@ def test_run_dry_run_commits_empty_migration(env):
     assert result["ok"] is True
     assert result["code"] == "migration_committed"
     assert result["phase"] == migrate.Phase.COMMITTED.value
+    assert result["phase_epoch"] == 3          # T1 + T2 + T4
     assert result["statements"] == 0 and result["dry_run"] is True
 
     rows = _rows(env.copy)
@@ -391,7 +420,10 @@ def test_run_transaction_failure_writes_failed_row_and_blocks(env, monkeypatch):
 
     assert result["ok"] is False
     assert result["code"] == "migration_failed"
+    assert result["result"] == "known_failed"
     assert result["phase"] == migrate.Phase.TX_ROLLED_BACK.value
+    # 插入失败发生在 T2 之前 ⇒ T1 + T3 共两次成功转换（回滚与复核均明确成功）
+    assert result["phase_epoch"] == 2
     assert result["failed_row"] is True
     assert pool.writes_blocked() is True
 
@@ -431,6 +463,8 @@ def test_run_commit_exception_halts_without_advancing_phase(env, monkeypatch):
     assert result["ok"] is False
     assert result["code"] == "commit_outcome_unknown"
     assert result["phase"] == migrate.Phase.COMMIT_ATTEMPTED.value     # 不得冒充 UNKNOWN
+    assert result["phase_epoch"] == 2
+    assert result["connection_closed"] is True
     assert result["status"] == "halted"
     assert pool.writes_blocked() is True
     # 提交异常后不得出现 success/failed 行（无事件链 ⇒ 不伪造任何持久证据）
@@ -606,6 +640,16 @@ def test_unregistered_token_cannot_mint(env):
 
 # --- rollback_to_snapshot：受维护态 / 排空约束 --------------------------------
 
+def _file_digest(path: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    for suffix in ("", "-wal", "-shm"):
+        candidate = Path(str(path) + suffix)
+        if candidate.exists():
+            h.update(candidate.read_bytes())
+    return h.hexdigest()
+
+
 def test_rollback_requires_active_maintenance(env):
     with pytest.raises(migrate.MigrationRefused) as exc:
         migrate.rollback_to_snapshot(None, db_path=env.copy)
@@ -615,24 +659,268 @@ def test_rollback_requires_active_maintenance(env):
 def test_rollback_missing_set_refused(env):
     _activate()
     with pytest.raises(migrate.MigrationRefused) as exc:
-        migrate.rollback_to_snapshot(None, db_path=env.copy, **_fast_drain())
+        migrate.rollback_to_snapshot(None, db_path=env.copy)
     assert exc.value.reason == "no_backup_set"
 
 
-def test_rollback_failure_is_safe_and_halts(env):
-    """P-1.6 的进程内恢复边界：写封锁下 `init_db()` 后的校验无法取得写连接。
-
-    必须验证的是**失败安全**：返回 `restore_failed` + 停机收尾 + 原库仍可读且行数
-    不变（`restore_set` 内部已按隔离副本还原）。真实成功恢复属 P-1.7 停机窗口。
-    """
+def test_rollback_never_calls_restore_set(env, monkeypatch):
+    """P-1.6 不执行真实恢复：`restore_set` 一次都不许被调用，目标库字节不变。"""
     _activate()
     info = backup.snapshot_set(stage="pre-migrate", src_db=env.copy,
                                backup_dir=env.backups, stop_write=True)
     assert backup.verify_set(info["path"])["ok"] is True
-    result = migrate.rollback_to_snapshot(info["path"], db_path=env.copy, **_fast_drain())
+    calls = {"n": 0}
+
+    def forbidden(*_a, **_k):
+        calls["n"] += 1
+        raise AssertionError("P-1.6 不得调用 backup.restore_set()")
+
+    monkeypatch.setattr(backup, "restore_set", forbidden)
+    digest_before = _file_digest(env.copy)
+
+    with pytest.raises(migrate.MigrationRefused) as exc:
+        migrate.rollback_to_snapshot(info["path"], db_path=env.copy)
+    assert exc.value.reason == "p17_required"
+    assert calls["n"] == 0
+    assert _file_digest(env.copy) == digest_before
+    assert _row_counts(env.copy) == 1
+
+
+def test_cli_rollback_refuses_and_leaves_db_untouched(env, monkeypatch):
+    """CLI `rollback` 必须返回 p17_required，且不默认对主库执行恢复。"""
+    from backend.database import cli
+
+    _activate()
+    info = backup.snapshot_set(stage="pre-migrate", src_db=env.copy,
+                               backup_dir=env.backups, stop_write=True)
+    calls = {"n": 0}
+
+    def forbidden(*_a, **_k):
+        calls["n"] += 1
+        raise AssertionError("CLI rollback 不得调用 restore_set()")
+
+    monkeypatch.setattr(backup, "restore_set", forbidden)
+    live_digest = _file_digest(env.live)
+    copy_digest = _file_digest(env.copy)
+
+    rc = cli.main(["rollback", "--set", str(info["path"]), "--json"])
+    assert rc == cli.EXIT_REFUSED
+    assert calls["n"] == 0
+    assert _file_digest(env.live) == live_digest
+    assert _file_digest(env.copy) == copy_digest
+    assert _row_counts(env.live) == 1
+
+
+# --- 修正 2：事务失败分支（BEGIN / ROLLBACK / 只读复核） ----------------------
+
+class _SqlFail:
+    """包装迁移连接：指定语句前缀抛错，其余透传（模拟磁盘/事务错误）。"""
+
+    def __init__(self, conn: sqlite3.Connection, fail_on: tuple[str, ...]) -> None:
+        self._conn = conn
+        self._fail_on = tuple(token.upper() for token in fail_on)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def execute(self, sql, *args, **kwargs):
+        head = sql.strip().upper()
+        for token in self._fail_on:
+            if head.startswith(token):
+                raise sqlite3.OperationalError(f"simulated {token} failure")
+        return self._conn.execute(sql, *args, **kwargs)
+
+
+def _failing_connection(target: Path, tokens: tuple[str, ...]):
+    return lambda *_a, **_k: _SqlFail(
+        sqlite3.connect(str(target), timeout=30, isolation_level=None), tokens)
+
+
+def _fail_once_insert(monkeypatch):
+    """只让迁移事务内的那次 `_insert_row` 失败，`failed` 行仍能写入。"""
+    real_insert = migrate._insert_row
+    calls = {"n": 0}
+
+    def boom(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("simulated insert failure")
+        return real_insert(*args, **kwargs)
+
+    monkeypatch.setattr(migrate, "_insert_row", boom)
+    return calls
+
+
+def test_begin_failure_keeps_prepared_and_writes_nothing(env, monkeypatch):
+    _activate()
+    monkeypatch.setattr(migrate, "open_connection", _failing_connection(env.copy, ("BEGIN",)))
+    result = migrate.run(db_path=env.copy, **_fast_drain())
+
     assert result["ok"] is False
-    assert result["code"] == "restore_failed"
+    assert result["code"] == "begin_failed"
+    assert result["result"] == "no_transaction"
+    assert result["phase"] == migrate.Phase.PREPARED.value      # 不伪造 TX_OPEN
+    assert result["phase_epoch"] == 0
+    assert result["rows_written"] == 0
+    assert _row_counts(env.copy) == 1                           # 无 running / failed 行
     assert pool.writes_blocked() is True
-    assert _row_counts(env.copy) == 1                    # 原库未被破坏
+    logs = _fault_records(config.MIGRATION_FAULT_LOG)
+    assert logs[-1]["event"] == "migration_transaction_failed"
+    assert logs[-1]["begin_ok"] is False
+
+
+def test_known_failed_requires_rollback_and_recheck_success(env, monkeypatch):
+    _activate()
+    _fail_once_insert(monkeypatch)
+    result = migrate.run(db_path=env.copy, **_fast_drain())
+    assert result["result"] == "known_failed"
+    assert result["phase"] == migrate.Phase.TX_ROLLED_BACK.value
+    assert result["phase_epoch"] == 2
+    assert _rows(env.copy)[1]["status"] == "failed"
+    detail = json.loads(_rows(env.copy)[1]["detail_json"])
+    assert detail["known_failed"] is True
+
+
+def test_rollback_failure_is_outcome_unknown_and_halts(env, monkeypatch):
+    _activate()
+    _fail_once_insert(monkeypatch)
+    monkeypatch.setattr(migrate, "open_connection", _failing_connection(env.copy, ("ROLLBACK",)))
+    result = migrate.run(db_path=env.copy, **_fast_drain())
+
+    assert result["ok"] is False
+    assert result["code"] == "rollback_unverified"
+    assert result["result"] == "outcome_unknown"
+    assert result["phase"] == migrate.Phase.TX_OPEN.value        # 不伪造 TX_ROLLED_BACK
+    assert result["phase_epoch"] == 1                            # 只有 T1
+    assert _row_counts(env.copy) == 1                            # 不写误导性 failed 行
+    assert pool.writes_blocked() is True
     tail = [r for r in _fault_records(config.MIGRATION_FAULT_LOG) if r["event"] == "halt_tail"]
-    assert tail and tail[-1]["reason"] == "restore_failed"
+    assert tail and tail[-1]["reason"] == "rollback_unverified"
+
+
+def test_recheck_failure_is_outcome_unknown_and_halts(env, monkeypatch):
+    _activate()
+    _fail_once_insert(monkeypatch)
+    monkeypatch.setattr(migrate, "_recheck_structure_unchanged",
+                        lambda *_a, **_k: (False, "recheck_unavailable: simulated"))
+    result = migrate.run(db_path=env.copy, **_fast_drain())
+
+    assert result["code"] == "rollback_unverified"
+    assert result["result"] == "outcome_unknown"
+    # 回滚成功但复核不可用 ⇒ 不得认定 KNOWN_FAILED，phase 停在最后已知状态
+    assert result["phase"] in (migrate.Phase.TX_OPEN.value, migrate.Phase.COMMIT_ATTEMPTED.value)
+    assert result["phase_epoch"] in (1, 2)
+    assert _row_counts(env.copy) == 1
+    assert pool.writes_blocked() is True
+    log = [r for r in _fault_records(config.MIGRATION_FAULT_LOG)
+           if r["event"] == "migration_transaction_failed"][-1]
+    assert log["recheck_ok"] is False
+
+
+def test_structure_changed_is_outcome_unknown_not_known_failed(env, monkeypatch):
+    _activate()
+    _fail_once_insert(monkeypatch)
+    monkeypatch.setattr(migrate, "_recheck_structure_unchanged",
+                        lambda *_a, **_k: (False, "recheck_structure_changed"))
+    result = migrate.run(db_path=env.copy, **_fast_drain())
+    assert result["code"] == "rollback_unverified"
+    assert _row_counts(env.copy) == 1                  # 结构变了也不能写 failed 行冒充确认
+
+
+# --- 修正 4：COMMIT 异常时迁移连接必须先关闭 --------------------------------
+
+def test_commit_exception_closes_connection_before_halt(env, monkeypatch):
+    _activate()
+    monkeypatch.setattr(migrate, "open_connection", _failing_connection(env.copy, ("COMMIT",)))
+    result = migrate.run(db_path=env.copy, **_fast_drain())
+    assert result["connection_closed"] is True
+    logs = _fault_records(config.MIGRATION_FAULT_LOG)
+    events = [r["event"] for r in logs]
+    assert events.index("migration_commit_outcome_unknown") < events.index("halt_requested")
+    assert logs[[i for i, e in enumerate(events)
+                 if e == "migration_commit_outcome_unknown"][-1]]["connection_closed"] is True
+
+
+def test_commit_exception_close_failure_is_fatal(env, monkeypatch):
+    _activate()
+    monkeypatch.setattr(migrate, "open_connection", _failing_connection(env.copy, ("COMMIT",)))
+    monkeypatch.setattr(migrate, "_close_migration_connection",
+                        lambda _conn: (False, "close_unverified: simulated"))
+    with pytest.raises(migrate.FatalExit) as exc:
+        migrate.run(db_path=env.copy, **_fast_drain())
+    assert exc.value.reason == "migration_connection_open"
+    assert exc.value.exit_code != 0
+    assert pool.writes_blocked() is True
+    assert _row_counts(env.copy) == 1                  # 不写 success/failed 猜结果
+
+
+# --- 修正 3：halt_migration 的独立异常边界 -----------------------------------
+
+def test_halt_block_writes_failure_still_confirms_other_actions(env, monkeypatch):
+    _activate()
+    calls: list[str] = []
+    real_state = maint.maintenance_state
+    real_confirm = pool.confirm_writes_blocked
+
+    def bad_block(*_a, **_k):
+        calls.append("block")
+        raise RuntimeError("block boom")
+
+    monkeypatch.setattr(pool, "block_writes", bad_block)
+    monkeypatch.setattr(maint, "maintenance_state",
+                        lambda: calls.append("state") or real_state())
+    monkeypatch.setattr(pool, "confirm_writes_blocked",
+                        lambda: calls.append("confirm") or real_confirm())
+
+    rec = migrate.MigrationRecord(migration_id="m-block")
+    with pytest.raises(migrate.FatalExit) as exc:
+        migrate.halt_migration("x", rec=rec)
+    assert exc.value.reason == "halt_unconfirmed"
+    assert calls == ["block", "state", "confirm"]      # 三项都执行，未短路
+    assert rec.halted is False
+    assert pool._ISSUERS == {}                         # 不签发凭据
+
+
+def test_halt_maintenance_state_failure_is_fatal_but_keeps_block(env, monkeypatch):
+    _activate()
+
+    def bad_state():
+        raise OSError("maintenance file unreadable")
+
+    monkeypatch.setattr(maint, "maintenance_state", bad_state)
+    rec = migrate.MigrationRecord(migration_id="m-maint")
+    with pytest.raises(migrate.FatalExit) as exc:
+        migrate.halt_migration("x", rec=rec)
+    assert exc.value.reason == "halt_unconfirmed"
+    assert pool.writes_blocked() is True               # 封锁动作仍执行成功
+    assert rec.halted is False
+    assert pool._ISSUERS == {}
+
+
+def test_halt_confirm_failure_is_fatal_without_credential(env, monkeypatch):
+    _activate()
+
+    def bad_confirm():
+        raise RuntimeError("confirm boom")
+
+    monkeypatch.setattr(pool, "confirm_writes_blocked", bad_confirm)
+    rec = migrate.MigrationRecord(migration_id="m-confirm")
+    with pytest.raises(migrate.FatalExit) as exc:
+        migrate.halt_migration("x", rec=rec)
+    assert exc.value.reason == "halt_unconfirmed"
+    assert rec.halted is False
+    assert pool._ISSUERS == {}
+
+
+def test_halt_log_failure_does_not_block_lockdown(env, monkeypatch):
+    _activate()
+
+    def bad_log(*_a, **_k):
+        raise OSError("log volume full")
+
+    monkeypatch.setattr(migrate, "_write_fault_log", bad_log)
+    rec = migrate.MigrationRecord(migration_id="m-log")
+    result = migrate.halt_migration("x", rec=rec)
+    assert result["halt_tail"] == pool.HALT_TAIL_OK
+    assert rec.halted is True                          # halt_tail 复核成功后才置位
+    assert result["diagnostics"]["log_errors"]         # 日志错误保留为诊断

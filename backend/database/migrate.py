@@ -709,6 +709,7 @@ class MigrationRecord:
 
     migration_id: str
     phase: Phase = Phase.PREPARED
+    phase_epoch: int = 0                 # 计划 §2.5.1：每次成功转换 +1，拒绝路径不变
     halted: bool = False
     commit_raised: bool = False          # 非 phase 标记（设计 v1.10 §1.1 S1）
     pending_reason: str | None = None
@@ -768,6 +769,7 @@ def set_phase_memory(rec: MigrationRecord, old: Phase, new: Phase) -> PhaseResul
     if (old, new) not in LEGAL_TRANSITIONS:
         raise IllegalTransition(old, new)
     rec.phase = new
+    rec.phase_epoch += 1                 # 只在成功转换后递增，且每次只加一
     return PhaseResult.SUCCESS
 
 
@@ -881,45 +883,92 @@ def halt_migration(reason: str, *, rec: MigrationRecord | None = None,
                    migration_id: str | None = None,
                    detail: dict[str, Any] | None = None,
                    fault_log_path: str | Path | None = None) -> dict[str, Any]:
-    """停机收尾（设计 v1.10 §0.10 十二次修订）：封锁 → 回读 → 签发 → `halt_tail`。
+    """停机收尾（设计 v1.10 §0.10 十二次修订 + 计划 §2.5.2）。
 
-    顺序固定，且三个保护动作各自独立异常边界：
+    三个确认动作**各自独立异常边界**，任何一个抛错都不得跳过其余仍可执行的确认：
 
-    1. `pool.block_writes()`：先封锁，保证此后不存在可提交的业务写；
-    2. 读维护文件（A 类判定唯一入口 `maint.maintenance_state()`）→ `maintenance_ok`；
-    3. `pool.confirm_writes_blocked()` 回读确认写入闸/连接/在途事务；
-    4. 用**已注册令牌对象**签发凭据（`mint_confirmation` 会当场再次实证封锁）；
-    5. `pool.halt_tail(conf)` 复核，成功才置 `rec.halted`。
+    1. `pool.block_writes()`（先封锁，保证此后无业务写可提交）；
+    2. `maint.maintenance_state()`（A 类唯一判定入口）→ `maintenance_ok`；
+    3. `pool.confirm_writes_blocked()`（闸置位 + 写连接全关 + 无在途可提交 + 只读 query_only）。
 
-    任一确认不成立 → `FatalExit`（非零退出、零数据库写入），绝不"尽力而为"继续。
-    本函数只写 `migration-fault.log` 与非 phase 标记。
+    只有三项都取得**明确肯定**结果，才允许注册可信发射器、签发凭据并 `halt_tail()`。
+    任一失败/不可读 → `FatalExit`（非零退出），**不签发凭据、不置 `rec.halted`**。
+    故障日志写入失败不中断封锁与确认动作，日志错误本身保留为诊断信息。
     """
     from backend.database import maint, pool
 
     mid = migration_id or (rec.migration_id if rec is not None else "unknown")
-    block_reason = pool.block_writes(pool.REASON_MAINTENANCE)
-    state = maint.maintenance_state()
-    maintenance_ok = state is maint.MaintState.ACTIVE
-    writes_ok, write_detail = pool.confirm_writes_blocked()
+    diagnostics: dict[str, Any] = {}
+    log_errors: list[str] = []
 
-    _write_fault_log({
+    def _log(record: dict[str, Any]) -> None:
+        """非 DB 诊断通道：写失败只记录错误，绝不中断封锁与确认。"""
+        try:
+            _write_fault_log(record, fault_log_path)
+        except Exception as exc:      # noqa: BLE001 - 日志不得影响故障安全
+            log_errors.append(f"{type(exc).__name__}: {exc}")
+
+    # --- 1) 封锁：独立边界 ---
+    block_reason: str | None = None
+    block_error: str | None = None
+    try:
+        block_reason = pool.block_writes(pool.REASON_MAINTENANCE)
+    except Exception as exc:          # noqa: BLE001 - 必须继续尝试维护态/回读确认
+        block_error = f"{type(exc).__name__}: {exc}"
+
+    # --- 2) 维护态：独立边界 ---
+    state: Any = None
+    maint_error: str | None = None
+    try:
+        state = maint.maintenance_state()
+    except Exception as exc:          # noqa: BLE001
+        maint_error = f"{type(exc).__name__}: {exc}"
+
+    # --- 3) 写入封锁回读：独立边界 ---
+    writes_ok = False
+    write_detail: dict[str, Any] = {}
+    confirm_error: str | None = None
+    try:
+        writes_ok, write_detail = pool.confirm_writes_blocked()
+    except Exception as exc:          # noqa: BLE001
+        confirm_error = f"{type(exc).__name__}: {exc}"
+
+    mstate = getattr(maint, "MaintState", None)
+    maintenance_ok = bool(mstate is not None and state is mstate.ACTIVE)
+    diagnostics = {
+        "block_reason": block_reason,
+        "block_error": block_error,
+        "maintenance": getattr(state, "name", None),
+        "maint_error": maint_error,
+        "maintenance_ok": maintenance_ok,
+        "writes_blocked": bool(writes_ok),
+        "confirm_error": confirm_error,
+        "block_detail": write_detail,
+        "log_errors": log_errors,
+    }
+
+    _log({
         "event": "halt_requested",
         "migration_id": mid,
         "reason": str(reason),
-        "maintenance": state.name,
-        "maintenance_ok": bool(maintenance_ok),
-        "writes_blocked": bool(writes_ok),
-        "block_detail": write_detail,
         "detail": detail or {},
         "ts": _utc_now(),
-    }, fault_log_path)
+        **diagnostics,
+    })
 
-    if not maintenance_ok or not writes_ok:
+    if block_error is not None or maint_error is not None or confirm_error is not None \
+            or not maintenance_ok or not writes_ok:
         raise FatalExit(
             "halt_unconfirmed",
-            f"维护态={state.name} maintenance_ok={maintenance_ok} writes_blocked={writes_ok}",
+            f"维护态={diagnostics['maintenance']} maintenance_ok={maintenance_ok} "
+            f"writes_blocked={writes_ok} block_error={block_error} "
+            f"maint_error={maint_error} confirm_error={confirm_error}",
         )
-    token = _ensure_issuer_token()
+
+    try:
+        token = _ensure_issuer_token()
+    except Exception as exc:          # noqa: BLE001 - 注册失败同样不得签发凭据
+        raise FatalExit("halt_unconfirmed", f"register_confirmation_issuer 失败：{exc}") from exc
     try:
         confirmation = pool.mint_confirmation(token, mid, True, True)
     except pool.HaltPreconditionFailed as exc:
@@ -929,20 +978,21 @@ def halt_migration(reason: str, *, rec: MigrationRecord | None = None,
     except pool.HaltPreconditionFailed as exc:
         raise FatalExit("halt_unconfirmed", f"halt_tail 拒绝：{exc.code}") from exc
 
+    # 只有 halt_tail 复核成功之后才允许标记已 halt
     if rec is not None:
         rec.halted = True
         rec.pending_reason = str(reason)
         rec.commit_raised = rec.commit_raised or reason == "commit_outcome_unknown"
-    _write_fault_log({
+    _log({
         "event": "halt_tail",
         "migration_id": mid,
         "reason": str(reason),
         "halt_tail": tail,
-        "block_reason": block_reason,
         "ts": _utc_now(),
-    }, fault_log_path)
+    })
     return {"halt_tail": tail, "reason": str(reason), "migration_id": mid,
-            "maintenance": state.name, "writes_blocked": True}
+            "maintenance": diagnostics["maintenance"], "writes_blocked": True,
+            "diagnostics": {**diagnostics, "log_errors": log_errors}}
 
 
 def halt_tail(confirmation: Any) -> str:
@@ -1054,6 +1104,59 @@ def migration_state_summary(db_path: str | Path | None = None) -> dict[str, Any]
 
 # --- 空迁移 dry-run（计划 §8：P-1.6 = 最小状态机 + 空迁移 dry-run） -------------
 
+def _safe_log(record: dict[str, Any], path: str | Path | None = None) -> str | None:
+    """非 DB 诊断写入：失败只返回错误串，绝不影响封锁与确认动作。"""
+    try:
+        _write_fault_log(record, path)
+        return None
+    except Exception as exc:      # noqa: BLE001 - 日志不得影响故障安全
+        return f"{type(exc).__name__}: {exc}"
+
+
+def _recheck_structure_unchanged(db_path: str | Path,
+                                 expected_hash: str | None) -> tuple[bool, str | None]:
+    """只读复核：事务回滚后结构摘要是否仍与迁移前一致。
+
+    用独立连接 + `PRAGMA query_only=1`：只读语义由 SQLite 强制，不产生任何写入。
+    复核本身失败（打不开/查询错）一律视为"无法确认"，调用方必须走 halt，不得
+    认定 `KNOWN_FAILED`。
+    """
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30, isolation_level=None)
+        try:
+            conn.execute("PRAGMA query_only=1")
+            actual = structure_hash(conn)
+        finally:
+            conn.close()
+    except Exception as exc:          # noqa: BLE001 - 复核不可用即无法确认
+        return False, f"recheck_unavailable: {type(exc).__name__}: {exc}"
+    if expected_hash is None:
+        return False, "recheck_no_baseline_hash"
+    if actual != expected_hash:
+        return False, "recheck_structure_changed"
+    return True, None
+
+
+def _close_migration_connection(conn: sqlite3.Connection) -> tuple[bool, str | None]:
+    """关闭本次迁移的独立连接，并**确认**它真的不可再执行 SQL。
+
+    `migrate.open_connection()` 建的是直接 SQLite 连接，不在 P-1.5 业务连接池里：
+    `pool.confirm_writes_blocked()` 无法证明它已关闭。因此在 halt 确认前必须显式
+    关闭并复核（关闭后任何 `execute` 都必须抛 `ProgrammingError`）。
+    """
+    try:
+        conn.close()
+    except Exception as exc:          # noqa: BLE001
+        return False, f"close_error: {type(exc).__name__}: {exc}"
+    try:
+        conn.execute("SELECT 1")
+    except sqlite3.ProgrammingError:
+        return True, None
+    except Exception as exc:          # noqa: BLE001 - 非 ProgrammingError 属异常路径
+        return False, f"close_unverified: {type(exc).__name__}: {exc}"
+    return False, "close_unverified: connection still operable"
+
+
 def run(*, db_path: str | Path | None = None, dry_run: bool = True,
         snapshot: bool = False, snapshot_stage: str = "pre-migrate",
         drain_rounds: int = 2, drain_min_interval: float = 10.0,
@@ -1062,26 +1165,24 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
         fault_log_path: str | Path | None = None) -> dict[str, Any]:
     """执行一次**空迁移**（P-1.6 只允许 dry-run，且必须指向副本）。
 
-    安全边界（任一不满足即拒绝，不动任何数据）：
+    前置边界（任一不满足即拒绝，不动任何数据）：开关开启；`dry_run=True` 且目标
+    不是主库；维护态 `ACTIVE`；单实例锁；写入封锁；排空判据；`preflight == ready`。
 
-    * `NODEPOOL_MIGRATION_ENABLED=1`（默认 0，PT-11：关闭时入口不可达）；
-    * `dry_run=True` 且目标库**不是** `config.DB_PATH`（P-1.6 不碰生产/开发主库）；
-      非 dry-run 一律 `p17_required`；
-    * 维护态 `ACTIVE` + 写入闸已封锁（`gate.apply_state`）；
-    * 排空判据（`gate.drain`）通过，否则 `halt_migration("drain_failed")`；
-    * 可选 `snapshot=True`：`pre-migrate` 备份集生成 + 校验，失败即停机收尾；
-    * `preflight == ready`（基线已登记、无未完成迁移）。
+    阶段结果判定口径（计划 §2.5.1 的"失败二分"，全部由**本地事实**决定）：
 
-    事务与状态顺序（与设计 v1.10 §5 的 T1–T4 对齐，但 durable 后端换成 status 行）：
-
-    1. `BEGIN IMMEDIATE` → `PREPARED→TX_OPEN`（T1）→ 插 `running` 行 → `TX_OPEN→COMMIT_ATTEMPTED`（T2）；
-    2. 空迁移：零 DDL；
-    3. `COMMIT`：抛异常 ⇒ `halt_migration("commit_outcome_unknown")`，phase 停
-       `COMMIT_ATTEMPTED`（设计 T6′ 的 P-1 等价：无事件证据，不得冒充 UNKNOWN）；
-    4. `running → success`（独立事务）成功后才 `COMMIT_ATTEMPTED→COMMITTED`（T4）。
-
-    事务内任何异常：`ROLLBACK` → `TX_OPEN→TX_ROLLED_BACK`（T3）→ 独立事务写 `failed`
-    行 → 重封锁（`migration_incomplete` ⇒ 下次启动 RECOVERY_REQUIRED。）
+    * `BEGIN IMMEDIATE` 抛错 ⇒ **没有事务**：phase 保持 `PREPARED`，不伪造
+      `TX_OPEN`，不写任何行；保持封锁。
+    * 事务内异常 + `ROLLBACK` 明确成功 + 只读复核结构未变 ⇒ `KNOWN_FAILED`：
+      推进 `TX_ROLLED_BACK`（T3/T5）并写 `failed` 行（`migration_incomplete` ⇒
+      RECOVERY_REQUIRED，写入保持封锁）。
+    * `ROLLBACK` 失败 / 只读复核失败 / 复核不可用 ⇒ `OUTCOME_UNKNOWN`：**不伪造
+      `TX_ROLLED_BACK`**，**不写误导性的 failed 行**；关闭迁移连接并确认后
+      `halt_migration("rollback_unverified")`。
+    * `COMMIT` 抛错 ⇒ `OUTCOME_UNKNOWN`：phase 停 `COMMIT_ATTEMPTED`，不写 success
+      / failed 猜结果；**先关闭并确认迁移连接**，再 `halt_migration("commit_outcome_unknown")`；
+      连接关闭失败 ⇒ `FatalExit`（不把连接池确认冒充为全部连接已关闭）。
+    * `running → success` 失败 ⇒ 停 `COMMIT_ATTEMPTED` + halt；`A` 之后内存落地
+      失败 ⇒ halt（`HALTED` 语义）。
     """
     from backend.database import backup, gate, maint, pool
 
@@ -1124,7 +1225,8 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
             halt = halt_migration("drain_failed", rec=rec, detail={"detail": drain_result.detail},
                                   fault_log_path=fault_log_path)
             return {"ok": False, "code": "drain_failed", "status": "halted",
-                    "phase": rec.phase.value, "migration_id": rec.migration_id,
+                    "phase": rec.phase.value, "phase_epoch": rec.phase_epoch,
+                    "migration_id": rec.migration_id,
                     "halt_tail": halt["halt_tail"], "requirement": "recovery_required"}
 
         if snapshot:
@@ -1135,7 +1237,8 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
                 halt_migration("snapshot_failed", rec=rec, detail={"error": str(exc)},
                                fault_log_path=fault_log_path)
                 return {"ok": False, "code": "snapshot_failed", "status": "halted",
-                        "phase": rec.phase.value, "migration_id": rec.migration_id,
+                        "phase": rec.phase.value, "phase_epoch": rec.phase_epoch,
+                        "migration_id": rec.migration_id,
                         "requirement": "recovery_required"}
 
         conn = open_connection(target)
@@ -1146,51 +1249,128 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
                     "migration_not_ready",
                     f"preflight={pre['state']} current={pre.get('current_version')}",
                 )
+            hash_before = structure_hash(conn)
             seq = _next_seq(conn)
             started_at = _utc_now()
             detail = {"dry_run": True, "statements": 0, "target_version": TARGET_VERSION}
+
+            begin_ok = False
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                set_phase_memory(rec, Phase.PREPARED, Phase.TX_OPEN)
+                begin_ok = True
+                set_phase_memory(rec, Phase.PREPARED, Phase.TX_OPEN)          # T1
                 _insert_row(conn, migration_id=rec.migration_id, seq=seq,
                             version=TARGET_VERSION, status="running",
                             started_at=started_at, finished_at=None,
                             detail_json=json.dumps(detail, sort_keys=True, ensure_ascii=False))
-                set_phase_memory(rec, Phase.TX_OPEN, Phase.COMMIT_ATTEMPTED)
+                set_phase_memory(rec, Phase.TX_OPEN, Phase.COMMIT_ATTEMPTED)  # T2
                 # 空迁移：P-1.6 的 dry-run 不含任何 DDL，这里就是全部"迁移内容"
-            except Exception as exc:      # noqa: BLE001 - 事务内任何异常都要回滚
-                try:
-                    conn.execute("ROLLBACK")
-                except Exception:
-                    pass
-                set_phase_memory(rec, Phase.TX_OPEN, Phase.TX_ROLLED_BACK)
-                failed_ok = _mark_failed(target, rec.migration_id, seq, TARGET_VERSION,
-                                        started_at, str(exc))
+            except Exception as exc:      # noqa: BLE001 - 事务内任何异常都要判定能否确认失败
+                rollback_ok = False
+                rollback_error: str | None = None
+                if begin_ok:
+                    try:
+                        conn.execute("ROLLBACK")
+                        rollback_ok = True
+                    except Exception as rb:      # noqa: BLE001
+                        rollback_error = f"{type(rb).__name__}: {rb}"
+                recheck_ok = False
+                recheck_detail: str | None = None
+                if begin_ok and rollback_ok:
+                    recheck_ok, recheck_detail = _recheck_structure_unchanged(target, hash_before)
+
+                closed, close_error = _close_migration_connection(conn)
                 pool.ensure_blocked(pool.REASON_MAINTENANCE)
-                _write_fault_log({
-                    "event": "migration_failed",
+                _safe_log({
+                    "event": "migration_transaction_failed",
                     "migration_id": rec.migration_id,
                     "phase": rec.phase.value,
+                    "phase_epoch": rec.phase_epoch,
+                    "begin_ok": begin_ok,
+                    "rollback_ok": rollback_ok,
+                    "rollback_error": rollback_error,
+                    "recheck_ok": recheck_ok,
+                    "recheck_detail": recheck_detail,
+                    "connection_closed": closed,
+                    "close_error": close_error,
                     "error": str(exc),
-                    "failed_row": failed_ok,
                     "ts": _utc_now(),
                 }, fault_log_path)
-                return {"ok": False, "code": "migration_failed", "status": "rolled_back",
-                        "phase": rec.phase.value, "migration_id": rec.migration_id,
-                        "failed_row": failed_ok, "error": str(exc),
+
+                if not begin_ok:
+                    # BEGIN 失败：没有事务被打开，绝不伪造 TX_OPEN/回滚状态
+                    return {"ok": False, "code": "begin_failed", "result": "no_transaction",
+                            "phase": rec.phase.value, "phase_epoch": rec.phase_epoch,
+                            "migration_id": rec.migration_id,
+                            "rows_written": 0, "connection_closed": closed,
+                            "error": str(exc)}
+
+                if rollback_ok and recheck_ok:
+                    old_phase = rec.phase
+                    if old_phase in (Phase.TX_OPEN, Phase.COMMIT_ATTEMPTED):
+                        set_phase_memory(rec, old_phase, Phase.TX_ROLLED_BACK)   # T3/T5
+                    failed_ok = _mark_failed(target, rec.migration_id, seq, TARGET_VERSION,
+                                             started_at, str(exc),
+                                             {"known_failed": True,
+                                              "recheck": recheck_detail})
+                    if not failed_ok:
+                        halt_migration("failed_row_unwritable", rec=rec,
+                                       detail={"error": str(exc)},
+                                       fault_log_path=fault_log_path)
+                        return {"ok": False, "code": "failed_row_unwritable",
+                                "result": "outcome_unknown",
+                                "phase": rec.phase.value, "phase_epoch": rec.phase_epoch,
+                                "migration_id": rec.migration_id,
+                                "requirement": "recovery_required"}
+                    return {"ok": False, "code": "migration_failed", "result": "known_failed",
+                            "status": "rolled_back", "phase": rec.phase.value,
+                            "phase_epoch": rec.phase_epoch, "migration_id": rec.migration_id,
+                            "failed_row": True, "error": str(exc),
+                            "requirement": "recovery_required"}
+
+                # OUTCOME_UNKNOWN：回滚/复核不可确认 ⇒ 不伪造任何持久痕迹，直接 halt
+                if not closed:
+                    raise FatalExit(
+                        "migration_connection_open",
+                        f"迁移连接未能确认关闭：{close_error}",
+                    )
+                halt_migration("rollback_unverified", rec=rec,
+                               detail={"error": str(exc), "rollback_ok": rollback_ok,
+                                       "rollback_error": rollback_error,
+                                       "recheck_ok": recheck_ok,
+                                       "recheck_detail": recheck_detail},
+                               fault_log_path=fault_log_path)
+                return {"ok": False, "code": "rollback_unverified",
+                        "result": "outcome_unknown", "status": "halted",
+                        "phase": rec.phase.value, "phase_epoch": rec.phase_epoch,
+                        "migration_id": rec.migration_id,
                         "requirement": "recovery_required"}
 
             try:
                 conn.execute("COMMIT")
-            except Exception as exc:      # noqa: BLE001 - COMMIT 结果不可知必须在同一处判定
-                try:
-                    conn.execute("ROLLBACK")
-                except Exception:
-                    pass
+            except Exception as exc:      # noqa: BLE001 - COMMIT 结果不可知必须就地判定
+                closed, close_error = _close_migration_connection(conn)
+                pool.ensure_blocked(pool.REASON_MAINTENANCE)
+                _safe_log({
+                    "event": "migration_commit_outcome_unknown",
+                    "migration_id": rec.migration_id,
+                    "phase": rec.phase.value,
+                    "phase_epoch": rec.phase_epoch,
+                    "connection_closed": closed,
+                    "close_error": close_error,
+                    "error": str(exc),
+                    "ts": _utc_now(),
+                }, fault_log_path)
+                if not closed:
+                    # 不能把"连接池已封锁"冒充为"本次迁移连接已关闭"
+                    raise FatalExit("migration_connection_open",
+                                    f"COMMIT 异常后迁移连接未能确认关闭：{close_error}")
                 halt_migration("commit_outcome_unknown", rec=rec,
                                detail={"error": str(exc)}, fault_log_path=fault_log_path)
                 return {"ok": False, "code": "commit_outcome_unknown", "status": "halted",
-                        "phase": rec.phase.value, "migration_id": rec.migration_id,
+                        "phase": rec.phase.value, "phase_epoch": rec.phase_epoch,
+                        "migration_id": rec.migration_id, "rows_written": 0,
+                        "connection_closed": True,
                         "requirement": "recovery_required"}
 
             try:
@@ -1204,31 +1384,43 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
                 if int(updated) != 1:
                     raise MigrationStateError("phase_row_missing",
                                               "running 行未找到，无法确认迁移已落地")
-            except Exception as exc:      # noqa: BLE001 - 无 durable 证据不得推进 phase
+            except Exception as exc:      # noqa: BLE001 - 无持久痕迹不得推进 phase
                 try:
                     conn.execute("ROLLBACK")
                 except Exception:
                     pass
+                closed, close_error = _close_migration_connection(conn)
+                pool.ensure_blocked(pool.REASON_MAINTENANCE)
+                if not closed:
+                    raise FatalExit("migration_connection_open",
+                                    f"状态行落盘失败后迁移连接未能确认关闭：{close_error}")
                 halt_migration("phase_commit_failed", rec=rec,
                                detail={"error": str(exc)}, fault_log_path=fault_log_path)
                 return {"ok": False, "code": "phase_commit_failed", "status": "halted",
-                        "phase": rec.phase.value, "migration_id": rec.migration_id,
+                        "phase": rec.phase.value, "phase_epoch": rec.phase_epoch,
+                        "migration_id": rec.migration_id,
                         "requirement": "recovery_required"}
 
             try:
-                set_phase_memory(rec, Phase.COMMIT_ATTEMPTED, Phase.COMMITTED)
+                set_phase_memory(rec, Phase.COMMIT_ATTEMPTED, Phase.COMMITTED)   # T4
             except Exception as exc:      # noqa: BLE001 - A 之后落地失败 ⇒ HALTED
+                pool.ensure_blocked(pool.REASON_MAINTENANCE)
                 halt_migration("phase_apply_failed", rec=rec,
                                detail={"error": str(exc)}, fault_log_path=fault_log_path)
                 return {"ok": False, "code": "phase_apply_failed", "status": "halted",
-                        "phase": rec.phase.value, "migration_id": rec.migration_id,
+                        "phase": rec.phase.value, "phase_epoch": rec.phase_epoch,
+                        "migration_id": rec.migration_id,
                         "requirement": "recovery_required"}
 
             return {"ok": True, "code": "migration_committed", "status": "committed",
-                    "phase": rec.phase.value, "migration_id": rec.migration_id,
-                    "seq": seq, "version": TARGET_VERSION, "dry_run": True, "statements": 0}
+                    "phase": rec.phase.value, "phase_epoch": rec.phase_epoch,
+                    "migration_id": rec.migration_id, "seq": seq,
+                    "version": TARGET_VERSION, "dry_run": True, "statements": 0}
         finally:
-            conn.close()
+            try:
+                conn.close()
+            except Exception:             # noqa: BLE001 - 清理不得掩盖上面的判定结果
+                pass
 
 
 def rollback_to_snapshot(set_path: str | Path | None = None, *,
@@ -1237,18 +1429,20 @@ def rollback_to_snapshot(set_path: str | Path | None = None, *,
                          clock: Any = None, sleeper: Any = None,
                          checkpoint: Any = None, holders: Any = None,
                          fault_log_path: str | Path | None = None) -> dict[str, Any]:
-    """从备份集回滚（P-1.6 只接线"受维护态与排空约束"的安全入口 + 失败关闭）。
+    """P-1.6 的回滚入口：**只做安全前置检查与只读验证**，不执行真实恢复。
 
-    顺序：维护态 ACTIVE → 封锁 → 排空 → `restore_set`（其内部自带验证、
-    `pre-restore`、同卷临时文件、原库三件改名隔离、恢复后校验）。任何失败都
-    `halt_migration("restore_failed")`，保持封锁，绝不"再试一次覆盖原库"。
+    计划 §2.5.2-3 把"恢复"放在停机窗口：停写 → 排空 → 关闭全部连接 → 用
+    `pre-migrate` 备份集原子替换 → L1/L2 校验 → 人工确认后清维护文件 → 重启。
+    该流程属 P-1.7 演练内容，**P-1.6 不得触碰目标库**。
 
-    **已知的接口边界（P-1.6 不解决，留 P-1.7 停机窗口）**：`restore_set()` 的
-    恢复后校验会调用 `db.init_db()`，而它需要写连接；维护期写入闸（P-1.5）已
-    关闭业务写连接，因此"进程内 + 已封锁"的成功恢复在 P-1.6 走不通。真实恢复
-    必须在停机窗口由独立进程执行（计划 §6 的恢复步骤 = P-1.7 演练内容）。
-    本阶段保留受控入口与完整的前置检查/失败关闭语义，并用 `restore_failed`
-    暴露该边界，绝不为了"跑通"绕开写封锁。
+    因此本函数：
+
+    1. 要求迁移开关开启、维护态 `ACTIVE`；
+    2. 定位备份集（显式传入或最新集），用 `backup.verify_set()` 做**纯只读**验证；
+    3. 一律以 `MigrationRefused("p17_required")` 拒绝执行恢复。
+
+    **绝不调用** `backup.restore_set()`，不替换/覆盖/隔离目标数据库，也不因为
+    "失败后会还原"就提前开放真实恢复能力。
     """
     from backend.database import backup, gate, maint
 
@@ -1265,35 +1459,14 @@ def rollback_to_snapshot(set_path: str | Path | None = None, *,
         if not latest:
             raise MigrationRefused("no_backup_set", "没有任何可用备份集")
         set_dir = Path(latest["path"])
-
-    with migration_run_lock():
-        gate.apply_state(state)
-        rec = MigrationRecord(migration_id=f"rollback-{set_dir.name}")
-        drain_kwargs: dict[str, Any] = {"rounds": drain_rounds,
-                                        "min_interval": drain_min_interval,
-                                        "db_path": target}
-        if clock is not None:
-            drain_kwargs["clock"] = clock
-        if sleeper is not None:
-            drain_kwargs["sleeper"] = sleeper
-        if checkpoint is not None:
-            drain_kwargs["checkpoint"] = checkpoint
-        if holders is not None:
-            drain_kwargs["holders"] = holders
-        result = gate.drain(**drain_kwargs)
-        if not result.continue_allowed:
-            halt_migration("drain_failed", rec=rec, fault_log_path=fault_log_path)
-            return {"ok": False, "code": "drain_failed", "status": "halted",
-                    "phase": rec.phase.value}
-        try:
-            report = backup.restore_set(set_dir, db_path=target)
-        except Exception as exc:     # noqa: BLE001 - 回滚失败必须停机
-            halt_migration("restore_failed", rec=rec, detail={"error": str(exc)},
-                           fault_log_path=fault_log_path)
-            return {"ok": False, "code": "restore_failed", "status": "halted",
-                    "phase": rec.phase.value, "error": str(exc)}
-        return {"ok": True, "code": "restored", "set": set_dir.name,
-                "restore": report}
+    verdict = backup.verify_set(set_dir)          # 只读：不复制、不替换、不算 L3
+    if not verdict.get("ok"):
+        raise MigrationRefused("backup_invalid", f"备份集验证未通过：{verdict.get('errors')}")
+    raise MigrationRefused(
+        "p17_required",
+        f"P-1.6 不执行真实恢复（目标 {target}，备份集 {set_dir.name}）；"
+        "停机窗口恢复属 P-1.7，本阶段只完成前置检查与只读验证",
+    )
 
 
 __all__ = [
