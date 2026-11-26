@@ -11,8 +11,10 @@ import json
 import os
 import pathlib
 import sqlite3
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,18 +32,34 @@ OTHER_FS = Path("/dev/shm")
 # --- fixtures / helpers -------------------------------------------------------
 
 
+def _tmp_root() -> Path:
+    """测试用临时根目录。
+
+    刻意**不用** ``/tmp``：本机 ``/tmp`` 上「文件」与「目录」的 ``st_dev`` 不同
+    （47 vs 48，沙箱/overlay 特性），而 v1.10 §2.6 的同卷判定比较的正是
+    ``os.stat(DB_PATH).st_dev`` 与 ``os.stat(STATE_DIR).st_dev``；在该文件系统上
+    任何正常的同卷布局都会被判成跨卷。``$HOME`` 下两者一致（53），因此测试
+    临时目录建在 ``$HOME`` 下。设备号差异本身由专门的注入用例覆盖，不依赖真实挂载。
+    """
+    root = Path.home() / ".p14test"
+    root.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix="run-", dir=str(root)))
+
+
 @pytest.fixture
-def env(tmp_path: Path, monkeypatch):
+def env(monkeypatch):
     """把 maint 的 STATE_DIR / MAINT_FILE 与 config.DB_PATH 指到临时目录。"""
-    state = tmp_path / "state"
+    root = _tmp_root()
+    state = root / "state"
     state.mkdir()
-    db_path = tmp_path / "nodepool.db"
+    db_path = root / "nodepool.db"
     monkeypatch.setattr(maint, "STATE_DIR", state)
     monkeypatch.setattr(maint, "MAINT_FILE", state / maint.MAINT_FILENAME)
     monkeypatch.setattr(config, "DB_PATH", db_path)
     maint.reset_state_dir_selfcheck()
     yield SimpleNamespace(state=state, db=db_path, maint_file=state / maint.MAINT_FILENAME)
     maint.reset_state_dir_selfcheck()
+    shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture
@@ -410,6 +428,15 @@ def test_pt14_selfcheck_on_real_state_dir():
         pytest.skip("真实 STATE_DIR 不可写")
     maint.reset_state_dir_selfcheck()
     chk = maint.selfcheck_state_dir()
+    db_path = Path(config.DB_PATH)
+    db_file_dev = os.stat(db_path).st_dev if db_path.exists() else None
+    db_dir_dev = os.stat(db_path.parent).st_dev
+    if (not chk.ok and chk.code == maint.ERR_STATE_DIR_CROSS_DEVICE
+            and db_file_dev is not None and db_file_dev != db_dir_dev):
+        # 本机 /tmp（overlay 沙箱）文件与目录 st_dev 不同：当其它测试把
+        # DB_PATH 重定向到 /tmp 时，严格判定必然判跨卷——这是正确的判定结果，
+        # 不是缺陷。只在文件系统自身一致时才要求自检通过。
+        pytest.skip("沙箱 /tmp 上文件与目录 st_dev 不同，该布局在严格同卷判定下必然跨卷")
     assert chk.ok is True, chk.as_dict()
     assert str(real_state) == chk.state_dir
     assert chk.db_dev == chk.state_dev
@@ -425,11 +452,7 @@ def test_pt14_same_device_check_uses_db_path_st_dev(env):
     chk = maint.selfcheck_state_dir()
     assert chk.ok is True, chk.as_dict()
     db_file_dev = os.stat(env.db).st_dev
-    db_dir_dev = os.stat(env.db.parent).st_dev
-    if db_file_dev == db_dir_dev:      # 正常文件系统：比较对象就是库文件本身
-        assert chk.db_dev == db_file_dev
-    else:                              # overlay/沙箱：退回库所在目录锚点
-        assert chk.db_dev == db_dir_dev
+    assert chk.db_dev == db_file_dev          # 存在：必须用 DB_PATH 文件自身的 st_dev
     assert chk.state_dev == os.stat(env.state).st_dev
 
 
@@ -542,11 +565,144 @@ def test_pt14b_config_flags_state_dir_equal_data_dir(tmp_path):
     assert out.stdout.strip() == "state_dir_equals_data_dir"
 
 
+# --- PT-14b / §2.6：数据库文件设备号判定（注入，不依赖真实挂载） ---------------
+
+
+def _inject_stat(monkeypatch, mapping):
+    """按路径注入 st_dev；mapping 的值为 int，或异常实例（表示该路径 stat 抛该异常）。
+    未登记的路径仍走真实 ``os.stat``。
+
+    注入点在 ``maint._st_dev()``（唯一设备号取值点），等价于让
+    ``os.stat(<path>).st_dev`` 返回注入值或抛出注入异常，但不会波及 pathlib /
+    其它模块对 ``os.stat`` 的正常使用。
+    """
+    real = maint._st_dev
+
+    def fake(path, *args, **kwargs):
+        key = str(path)
+        if key in mapping:
+            value = mapping[key]
+            if isinstance(value, BaseException):
+                raise value
+            return value
+        return real(path)
+
+    monkeypatch.setattr(maint, "_st_dev", fake)
+
+
+def test_pt14b_db_file_dev_differs_from_parent_uses_file_dev(env, monkeypatch):
+    """DB_PATH 存在且其文件 st_dev ≠ 父目录 st_dev：必须用**文件**设备号判定。"""
+    _make_db(env.db, ("success",))
+    _inject_stat(monkeypatch, {
+        str(env.db): 900,                 # 库文件设备号
+        str(env.db.parent): 700,          # 父目录设备号（故意不同）
+        str(env.state): 900,              # STATE_DIR 与库文件同设备
+    })
+    chk = maint.selfcheck_state_dir()
+    assert chk.ok is True, chk.as_dict()
+    assert chk.db_dev == 900                   # 文件设备号，而非父目录的 700
+    assert chk.state_dev == 900
+    assert all(chk.steps[name] for name in maint._PROBE_STEPS), chk.steps
+
+
+def test_pt14b_state_matches_parent_but_not_db_file_is_cross_device(env, monkeypatch):
+    """STATE_DIR 与**父目录**同设备、但与 DB_PATH **文件**不同设备 ⇒ 拒绝迁移。"""
+    _make_db(env.db, ("success",))
+    _inject_stat(monkeypatch, {
+        str(env.db): 900,
+        str(env.db.parent): 700,
+        str(env.state): 700,              # 与父目录一致，与库文件不一致
+    })
+    chk = maint.selfcheck_state_dir()
+    assert chk.ok is False
+    assert chk.code == maint.ERR_STATE_DIR_CROSS_DEVICE
+    assert chk.db_dev == 900 and chk.state_dev == 700
+    assert chk.steps["write"] is False           # 在探针之前就被拦下
+    assert [p.name for p in env.state.iterdir()] == []
+
+
+def test_pt14b_state_matches_db_file_but_not_parent_is_ok(env, monkeypatch):
+    """STATE_DIR 与 DB_PATH **文件**同设备、但与父目录不同 ⇒ 按文件设备号判为同卷。"""
+    _make_db(env.db, ("success",))
+    _inject_stat(monkeypatch, {
+        str(env.db): 900,
+        str(env.db.parent): 700,
+        str(env.state): 900,
+    })
+    chk = maint.selfcheck_state_dir()
+    assert chk.ok is True, chk.as_dict()
+    assert chk.db_dev == 900 and chk.state_dev == 900
+
+
+def test_pt14b_db_absent_allows_parent_dir_anchor(env, monkeypatch):
+    """DB_PATH 明确不存在（FileNotFoundError）：允许用库所在目录设备号作锚点。"""
+    assert not env.db.exists()
+    _inject_stat(monkeypatch, {
+        str(env.db): FileNotFoundError(2, "No such file or directory"),
+        str(env.db.parent): 700,
+        str(env.state): 700,              # 与父目录同设备 ⇒ 同卷
+    })
+    chk = maint.selfcheck_state_dir()
+    assert chk.ok is True, chk.as_dict()
+    assert chk.db_dev == 700 and chk.state_dev == 700
+    assert not env.db.exists()            # 自检不创建数据库文件
+
+    _inject_stat(monkeypatch, {
+        str(env.db): FileNotFoundError(2, "No such file or directory"),
+        str(env.db.parent): 700,
+        str(env.state): 900,              # 与父目录不同设备 ⇒ 跨卷
+    })
+    maint.reset_state_dir_selfcheck()
+    chk2 = maint.selfcheck_state_dir()
+    assert chk2.ok is False and chk2.code == maint.ERR_STATE_DIR_CROSS_DEVICE
+
+
+@pytest.mark.parametrize("exc", [
+    PermissionError(13, "Permission denied"),
+    OSError(5, "Input/output error"),
+    OSError(16, "Device or resource busy"),
+])
+def test_pt14b_db_stat_error_fails_closed(env, monkeypatch, exc):
+    """DB_PATH stat 抛权限/IO 异常：失败关闭，返回 maint_fs_unsupported + errno，
+    **不得**伪装成文件不存在、**不得**退回父目录锚点。"""
+    _make_db(env.db, ("success",))
+    _inject_stat(monkeypatch, {
+        str(env.db): exc,
+        str(env.db.parent): 700,
+        str(env.state): 900,              # 即便“看起来”与文件同设备也不得采信
+    })
+    chk = maint.selfcheck_state_dir()
+    assert chk.ok is False
+    assert chk.code == maint.ERR_MAINT_FS_UNSUPPORTED, chk.as_dict()
+    assert chk.code != maint.ERR_STATE_DIR_CROSS_DEVICE
+    assert chk.errno == exc.errno
+    assert chk.steps["write"] is False     # 未进入探针
+    assert "失败关闭" in chk.detail
+    assert [p.name for p in env.state.iterdir()] == []
+
+
 # --- PT-24：探针副作用审计 ----------------------------------------------------
 
 
-def test_pt24_probe_never_touches_database(env, capsys):
-    """PT-24：自检 + 判定 + 写维护文件，全程数据库三件不变。"""
+def test_pt24_probe_never_touches_database(tmp_path, monkeypatch, capsys):
+    """PT-24：自检 + 判定 + 写维护文件，全程数据库三件不变。
+
+    该用例刻意使用 ``tmp_path``（``/tmp``）：本机 ``/tmp`` 的 ``-wal`` 只读打开
+    不会改动 mtime，能真正断言「大小与 mtime 均不变」。但同一 ``/tmp`` 上
+    文件与目录的 ``st_dev`` 不同（48 vs 47），会让严格同卷判定直接判跨卷、
+    探针根本不执行，故仅对**设备号**做注入（``state`` 与 ``db`` 同为 47），
+    文件系统行为本身不做任何伪造。
+    """
+    state = tmp_path / "state"
+    state.mkdir()
+    db_path = tmp_path / "nodepool.db"
+    monkeypatch.setattr(maint, "STATE_DIR", state)
+    monkeypatch.setattr(maint, "MAINT_FILE", state / maint.MAINT_FILENAME)
+    monkeypatch.setattr(config, "DB_PATH", db_path)
+    _inject_stat(monkeypatch, {str(db_path): 47, str(state): 47, str(db_path.parent): 47})
+    maint.reset_state_dir_selfcheck()
+    env = SimpleNamespace(state=state, db=db_path, maint_file=state / maint.MAINT_FILENAME)
+
     conn = sqlite3.connect(env.db)
     try:
         conn.execute("PRAGMA journal_mode=WAL")

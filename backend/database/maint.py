@@ -280,6 +280,15 @@ def maintenance_state() -> MaintState:
 # --- 写入 --------------------------------------------------------------------
 
 
+def _st_dev(path: Any) -> int:
+    """取路径的 ``st_dev``。**唯一**的设备号取值点，便于测试精确注入。
+
+    这里不吞异常：调用方必须区分 ``FileNotFoundError``（文件确实不存在）
+    与其他 ``OSError``（权限/IO 异常，必须失败关闭）。
+    """
+    return os.stat(path).st_dev
+
+
 def _fsync_dir(path: Path) -> None:
     """目录 fsync（``O_RDONLY|O_DIRECTORY`` 是目录 fsync 的合法用法）。"""
     fd = os.open(str(path), os.O_RDONLY | os.O_DIRECTORY)
@@ -543,15 +552,16 @@ def selfcheck_state_dir() -> StateDirCheck:
         return finish(False, ERR_MAINT_FS_UNSUPPORTED, getattr(e, "errno", None),
                       f"建目录失败：{e!r}")
 
-    # 「同一文件系统」判定（计划 §2.6）：`os.stat(DB_PATH).st_dev` 与
-    # `os.stat(STATE_DIR).st_dev` 必须相等。
+    # 「同一文件系统」判定（计划 §2.6 原文）：
+    #     os.stat(STATE_DIR).st_dev == os.stat(DB_PATH).st_dev
     #
-    # 边界处理（不改变语义，只补充可判定的情形）：
-    # * 库文件尚未创建（首次部署）时无法 stat 文件，只能取**库所在目录**
-    #   的 st_dev 作为同一挂载的锚点——目录与库同属一个挂载点。
-    # * 少数 overlay/沙箱文件系统会给「文件」与「它所在目录」报不同的 st_dev。
-    #   此时文件值不能代表挂载归属，仍退回目录锚点；正常情况下两者相等，
-    #   比较的对象就是计划原文的 `os.stat(DB_PATH).st_dev`。
+    # 规则（严格，不放宽）：
+    # * DB_PATH 已存在 ⇒ **必须**用库文件自身的 st_dev 判定；即使它与父目录
+    #   的 st_dev 不一致，也不得退回父目录设备号。
+    # * DB_PATH 不存在 ⇒ **仅当**明确捕获 FileNotFoundError 时，才允许用库所在
+    #   目录的 st_dev 作为同一挂载的锚点（首次部署，文件尚未创建）。
+    # * 其它 stat 异常（PermissionError / EIO / 其它 OSError）⇒ 失败关闭：
+    #   返回 maint_fs_unsupported 并附 errno，**不得**伪装成文件不存在。
     db_path = Path(config.DB_PATH)
     db_dir = db_path.parent
     if not db_dir.exists():
@@ -561,24 +571,35 @@ def selfcheck_state_dir() -> StateDirCheck:
             return finish(False, ERR_MAINT_FS_UNSUPPORTED, getattr(e, "errno", None),
                           f"数据库目录不可用：{e!r}", str(db_dir))
     anchor_str = str(db_dir)
+
     try:
-        db_dir_dev = os.stat(db_dir).st_dev
-        state_dev = os.stat(state_dir).st_dev
-        db_file_dev = os.stat(db_path).st_dev if db_path.exists() else None
+        state_dev = _st_dev(state_dir)
     except OSError as e:
         return finish(False, ERR_MAINT_FS_UNSUPPORTED, getattr(e, "errno", None),
-                      f"取 st_dev 失败：{e!r}", anchor_str)
+                      f"取 STATE_DIR st_dev 失败（失败关闭）：{e!r}", anchor_str)
 
-    # 正常文件系统：文件 st_dev == 目录 st_dev，走计划原文的「库文件 vs 状态目录」比较。
-    db_dev = (db_file_dev
-              if db_file_dev is not None and db_file_dev == db_dir_dev
-              else db_dir_dev)
+    db_dev: int | None = None
+    db_dev_source = ""
+    try:
+        db_dev = _st_dev(db_path)                  # 库文件存在：以文件本身为准
+        db_dev_source = "db_file"
+    except FileNotFoundError:                      # 唯一允许退回目录锚点的情形
+        try:
+            db_dev = _st_dev(db_dir)
+            db_dev_source = "db_dir(anchor:db_file_absent)"
+        except OSError as e:
+            return finish(False, ERR_MAINT_FS_UNSUPPORTED, getattr(e, "errno", None),
+                          f"取数据库目录 st_dev 失败（失败关闭）：{e!r}", anchor_str)
+    except OSError as e:                           # PermissionError / EIO / 其它
+        return finish(False, ERR_MAINT_FS_UNSUPPORTED, getattr(e, "errno", None),
+                      f"取 DB_PATH st_dev 失败（失败关闭，不退回目录锚点）：{e!r}",
+                      anchor_str)
 
     if db_dev != state_dev:
         return finish(False, ERR_STATE_DIR_CROSS_DEVICE, None,
                       "STATE_DIR 与数据库不在同一文件系统：拒绝迁移（业务照常运行）"
-                      f"（db_dir st_dev={db_dev}, state_dir st_dev={state_dev},"
-                      f" db_file st_dev={db_file_dev}）",
+                      f"（db st_dev={db_dev}[{db_dev_source}],"
+                      f" state_dir st_dev={state_dev})",
                       anchor_str, db_dev, state_dev)
 
     if not state_dir.is_dir():
