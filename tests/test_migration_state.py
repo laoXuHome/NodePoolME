@@ -924,3 +924,54 @@ def test_halt_log_failure_does_not_block_lockdown(env, monkeypatch):
     assert result["halt_tail"] == pool.HALT_TAIL_OK
     assert rec.halted is True                          # halt_tail 复核成功后才置位
     assert result["diagnostics"]["log_errors"]         # 日志错误保留为诊断
+
+
+# --- 最终修正：迁移连接关闭失败不得被降级为普通失败 --------------------------
+
+def test_begin_failure_with_close_failure_is_fatal(env, monkeypatch):
+    """BEGIN 失败 + 连接关闭失败 ⇒ FatalExit，不得报成 begin_failed，零 status 行。"""
+    _activate()
+    monkeypatch.setattr(migrate, "open_connection", _failing_connection(env.copy, ("BEGIN",)))
+    monkeypatch.setattr(migrate, "_close_migration_connection",
+                        lambda _conn: (False, "close_unverified: simulated"))
+    with pytest.raises(migrate.FatalExit) as exc:
+        migrate.run(db_path=env.copy, **_fast_drain())
+
+    assert exc.value.reason == "migration_connection_open"
+    assert exc.value.exit_code != 0
+    assert _row_counts(env.copy) == 1                 # 无 running / failed 行
+    assert all(row["status"] == "success" for row in _rows(env.copy))
+    assert pool.writes_blocked() is True
+    log = [r for r in _fault_records(config.MIGRATION_FAULT_LOG)
+           if r["event"] == "migration_transaction_failed"][-1]
+    assert log["begin_ok"] is False and log["connection_closed"] is False
+
+
+def test_known_failed_with_close_failure_is_fatal_and_skips_failed_row(env, monkeypatch):
+    """回滚成功 + 复核成功 + 连接关闭失败 ⇒ FatalExit；不得推进 phase、不得写 failed 行。"""
+    _activate()
+    _fail_once_insert(monkeypatch)
+    mark_calls = {"n": 0}
+    real_mark = migrate._mark_failed
+
+    def spy_mark(*args, **kwargs):
+        mark_calls["n"] += 1
+        return real_mark(*args, **kwargs)
+
+    monkeypatch.setattr(migrate, "_mark_failed", spy_mark)
+    monkeypatch.setattr(migrate, "_close_migration_connection",
+                        lambda _conn: (False, "close_unverified: simulated"))
+
+    with pytest.raises(migrate.FatalExit) as exc:
+        migrate.run(db_path=env.copy, **_fast_drain())
+
+    assert exc.value.reason == "migration_connection_open"
+    assert exc.value.exit_code != 0
+    assert mark_calls["n"] == 0                        # 零次 _mark_failed 调用
+    assert _row_counts(env.copy) == 1                  # 没有误导性的 failed 行
+    assert all(row["status"] == "success" for row in _rows(env.copy))
+    assert pool.writes_blocked() is True
+    log = [r for r in _fault_records(config.MIGRATION_FAULT_LOG)
+           if r["event"] == "migration_transaction_failed"][-1]
+    assert log["rollback_ok"] is True and log["recheck_ok"] is True
+    assert log["connection_closed"] is False

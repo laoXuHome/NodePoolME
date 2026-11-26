@@ -1297,12 +1297,19 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
                     "ts": _utc_now(),
                 }, fault_log_path)
 
+                if not closed:
+                    # 连接未被确认关闭：既不能报成普通 BEGIN 失败，也不能继续写 failed 行
+                    raise FatalExit(
+                        "migration_connection_open",
+                        f"事务失败后迁移连接未能确认关闭：{close_error}",
+                    )
+
                 if not begin_ok:
                     # BEGIN 失败：没有事务被打开，绝不伪造 TX_OPEN/回滚状态
                     return {"ok": False, "code": "begin_failed", "result": "no_transaction",
                             "phase": rec.phase.value, "phase_epoch": rec.phase_epoch,
                             "migration_id": rec.migration_id,
-                            "rows_written": 0, "connection_closed": closed,
+                            "rows_written": 0, "connection_closed": True,
                             "error": str(exc)}
 
                 if rollback_ok and recheck_ok:
@@ -1329,11 +1336,6 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
                             "requirement": "recovery_required"}
 
                 # OUTCOME_UNKNOWN：回滚/复核不可确认 ⇒ 不伪造任何持久痕迹，直接 halt
-                if not closed:
-                    raise FatalExit(
-                        "migration_connection_open",
-                        f"迁移连接未能确认关闭：{close_error}",
-                    )
                 halt_migration("rollback_unverified", rec=rec,
                                detail={"error": str(exc), "rollback_ok": rollback_ok,
                                        "rollback_error": rollback_error,
