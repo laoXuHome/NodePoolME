@@ -132,6 +132,7 @@ docker run -d --name nodepool --restart unless-stopped \
 | `NODEPOOL_MIGRATION_ENABLED` | `0` | 迁移入口开关；仅停机执行 `run --apply` 时设为 `1` |
 | `NODEPOOL_ADMIN_PASSWORD` | `nodepool` | 首次启动的管理密码（登录后可在 UI 修改） |
 | `NODEPOOL_SECRET` | 内置默认值 | 会话签名密钥，生产环境务必修改 |
+| `NODEPOOL_TZ`（compose） | `Asia/Shanghai` | 容器时区；显式设置，避免继承宿主机 `TZ` |
 | `NODEPOOL_PORT`（compose） | `8080` | 宿主端口 |
 | `NODEPOOL_TEST_ENGINE` | `mihomo` | `mihomo` 全协议检测；`tcp` 仅连通性，用于无内核环境 |
 | `NODEPOOL_MIHOMO_BIN` | `/usr/local/bin/mihomo` | 内核路径 |
