@@ -54,6 +54,11 @@ fi
 TAG="${IMAGE##*:}"
 echo "==> target image: $IMAGE"
 
+# The state directory is new in v1.10/P-1.8.  Create it before compose starts so
+# the bind mount and the maintenance/instance-lock files have a stable home.
+NODEPOOL_ROOT="$(grep -E '^NODEPOOL_ROOT=' .env | tail -1 | cut -d= -f2- | tr -d '"' | xargs)"
+mkdir -p "${NODEPOOL_ROOT:-/opt/nodepool}/state"
+
 # "latest" is fine for docker pull, but release bundles are published per version tag,
 # so resolve the newest release when the image tag is latest.
 BUNDLE_TAG="$TAG"

@@ -3,6 +3,9 @@ services:
     image: ${NODEPOOL_IMAGE:-ghcr.io/laoxuhome/nodepoolme:latest}
     container_name: nodepool
     restart: unless-stopped
+    init: true
+    user: "0:0"
+    stop_grace_period: 30s
     ports:
       - "${NODEPOOL_PORT:-8080}:8080"
     environment:

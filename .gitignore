@@ -12,3 +12,6 @@ tests/__pycache__/
 *.db-wal
 *.db-shm
 tools/.np_gh*
+
+# Legacy schema fixture used by migration baseline tests
+!tests/fixtures/*.db

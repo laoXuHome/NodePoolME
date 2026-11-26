@@ -85,10 +85,10 @@ Clash / Mihomo / sing-box / v2rayN 等客户端
 ### Docker Compose（推荐）
 
 ```bash
-mkdir -p /opt/nodepool/{data,config,logs,backup}
+mkdir -p /opt/nodepool/{data,config,logs,backup,state}
 cd /opt/nodepool
-curl -fsSLO https://raw.githubusercontent.com/laoxuhome/NodePoolME/main/docker-compose.yml
-curl -fsSL  https://raw.githubusercontent.com/laoxuhome/NodePoolME/main/.env.example -o .env
+curl -fsSLO https://raw.githubusercontent.com/laoXuHome/NodePoolME/main/docker-compose.yml
+curl -fsSL  https://raw.githubusercontent.com/laoXuHome/NodePoolME/main/.env.example -o .env
 # 编辑 .env：设置 NODEPOOL_ADMIN_PASSWORD、NODEPOOL_SECRET、NODEPOOL_IMAGE
 docker compose up -d
 ```
@@ -106,6 +106,7 @@ docker run -d --name nodepool --restart unless-stopped \
   -v /opt/nodepool/config:/config \
   -v /opt/nodepool/logs:/logs \
   -v /opt/nodepool/backup:/backup \
+  -v /opt/nodepool/state:/state \
   ghcr.io/laoxuhome/nodepoolme:latest
 ```
 
@@ -114,7 +115,7 @@ docker run -d --name nodepool --restart unless-stopped \
 | 来源 | 地址 |
 | --- | --- |
 | GHCR（GitHub Actions 构建，多架构） | `ghcr.io/laoxuhome/nodepoolme:latest` |
-| 版本标签 | `ghcr.io/laoxuhome/nodepoolme:v1.4.6`、`sha-xxxxxxx` |
+| 版本标签 | `ghcr.io/laoxuhome/nodepoolme:v1.8.7`、`sha-xxxxxxx` |
 
 支持 `linux/amd64` 与 `linux/arm64`（含 Mihomo 内核）。
 
@@ -126,6 +127,8 @@ docker run -d --name nodepool --restart unless-stopped \
 | `NODEPOOL_CONFIG_DIR` | `/config` | 配置与 Mihomo 工作目录 |
 | `NODEPOOL_LOG_DIR` | `/logs` | 轮转日志 |
 | `NODEPOOL_BACKUP_DIR` | `/backup` | 备份文件 |
+| `NODEPOOL_STATE_DIR` | `/state` | 维护状态文件 `maintenance.json`、迁移锁；必须与数据库同文件系统，且不得等于 `NODEPOOL_DATA_DIR` |
+| `NODEPOOL_MIGRATION_ENABLED` | `0` | 迁移入口开关；仅停机执行 `run --apply` 时设为 `1` |
 | `NODEPOOL_ADMIN_PASSWORD` | `nodepool` | 首次启动的管理密码（登录后可在 UI 修改） |
 | `NODEPOOL_SECRET` | 内置默认值 | 会话签名密钥，生产环境务必修改 |
 | `NODEPOOL_PORT`（compose） | `8080` | 宿主端口 |
@@ -142,10 +145,14 @@ docker run -d --name nodepool --restart unless-stopped \
 ├── config/     # 配置、Mihomo 工作目录（可重建）
 ├── data/       # nodepool.db（SQLite）、sub/（订阅输出）
 ├── logs/       # nodepool.log（5MB×3 轮转）
-└── backup/     # 手动/自动备份、恢复前安全副本
+├── backup/     # 手动/自动备份、恢复前安全副本
+└── state/      # maintenance.json、migration.lock、migration-fault.log
 ```
 
 容器重建不会丢数据；镜像升级不清除机场、缓存、检测历史与订阅设置。
+
+`state/` 不能放在 `data/` 内，也不能和 `data/` 分到不同文件系统；请保持两者同为
+`$NODEPOOL_ROOT` 下的普通目录。删除 `state/` 会丢失维护态证据，升级/备份时不要清理。
 
 ## 使用流程
 
@@ -321,21 +328,58 @@ sudo npup v1.2.1     # 也可以直接指定版本，脚本会改写 .env 再升
 **备份**
 
 - UI：系统设置 → 「创建备份」/「下载数据库」。
-- 命令行：`docker exec nodepool python -c "import sqlite3; s=sqlite3.connect('/data/nodepool.db'); b=sqlite3.connect('/backup/manual.db'); s.backup(b)"`
+- 命令行：`docker exec nodepool python -m backend.database.cli backup --label manual --json`（在线导出并校验）
 
-**恢复**
+**恢复（停机离线）**
 
-- UI：系统设置 → 选择 `.db` 文件 → 「上传并恢复」。会校验 SQLite 表结构，覆盖前把旧库保存为 `backup/pre-restore-<时间>.db`，恢复后自动重建订阅。
+运行中的进程不允许覆盖数据库文件；系统设置里的上传入口会明确返回
+`manual_import_required`。恢复必须停机后由 CLI 执行：
+
+```bash
+cd /opt/nodepool
+docker compose stop nodepool
+# 先在 .env 设 NODEPOOL_MIGRATION_ENABLED=1
+docker compose run --rm --no-deps --name nodepool-migrate \
+  -e NODEPOOL_MIGRATION_ENABLED=1 nodepool \
+  python -m backend.database.cli import --file /backup/nodepool-xxxx.db \
+  --recover --reason "restore from backup"
+# 完成后把 NODEPOOL_MIGRATION_ENABLED 改回 0，再 docker compose up -d
+```
+
+导入前建议先用只读命令校验备份：
+
+```bash
+docker compose run --rm --no-deps --name nodepool-verify nodepool \
+  python -m backend.database.cli verify --file /backup/nodepool-xxxx.db --json
+```
 
 **升级**
 
 ```bash
 cd /opt/nodepool
+mkdir -p state
 docker compose pull
 docker compose up -d
+docker compose ps
 ```
 
-数据卷不变，配置与历史全部保留。升级后可在订阅输出页「立即重新生成」以套用新版本逻辑。
+数据卷（`data/config/logs/backup/state`）不变，配置与历史全部保留。升级后可在订阅输出页「立即重新生成」以套用新版本逻辑。
+
+迁移/恢复是**停机离线操作**，不要在应用运行时执行：
+
+```bash
+cd /opt/nodepool
+docker compose stop nodepool
+# 先在 .env 设 NODEPOOL_MIGRATION_ENABLED=1，再启动一个仅用于迁移的容器：
+docker compose run --rm --no-deps --name nodepool-migrate \
+  -e NODEPOOL_MIGRATION_ENABLED=1 nodepool \
+  python -m backend.database.cli run --apply
+# 成功后再把 NODEPOOL_MIGRATION_ENABLED 改回 0，docker compose up -d
+```
+
+`run --apply` 只对主库执行，要求库里已有不可变基线；普通首次启动会自动登记基线。
+恢复导入使用 `python -m backend.database.cli import --file /backup/xxx.db --recover --reason "..."`，
+不要在应用运行中直接替换数据库文件。
 
 ## 本地开发
 
@@ -383,7 +427,7 @@ python tests/test_engine_live.py    # 需要 /tmp/mihomo 内核，验证真实 H
 | GET/PATCH | `/api/settings` | 调度参数 |
 | GET | `/api/logs` | 系统日志 |
 | GET | `/api/system/update?force=` | 比对 GitHub Releases 最新版本与离线包（结果缓存 10 分钟） |
-| POST/GET | `/api/system/backup` `/download` `/restore` | 备份 / 下载 / 恢复 |
+| POST/GET | `/api/system/backup` `/download` `/restore` | 备份 / 下载 / 停机 CLI 恢复（运行中 restore 返回 409） |
 | GET | `/sub/all?token=...&format=...` | 统一订阅 |
 | GET | `/sub/all/{token}/{format}` | 无查询参数订阅形式 |
 | GET | `/healthz` | 健康检查 |
@@ -392,7 +436,7 @@ python tests/test_engine_live.py    # 需要 /tmp/mihomo 内核，验证真实 H
 
 **包含**：多机场管理、独立拉取、全量缓存、三种默认节点标签、自定义节点标签、随机化与分散、四层并发、连续失败保护、完整批次与原子发布、动态标识、唯一统一订阅、三种输出、备份恢复、健康检查、多架构镜像。
 
-**暂不包含**：下载/上传速度测试、ISP 与流媒体解锁检测、复杂节点评分、多订阅输出、第三方订阅转换、独立 Redis/MySQL、多用户权限体系。
+**暂不包含**：ISP 与流媒体解锁检测、复杂节点评分、多订阅输出、第三方订阅转换、独立 Redis/MySQL、多用户权限体系。
 
 **已知限制**：
 

@@ -22,6 +22,7 @@ ENV PYTHONUNBUFFERED=1 \
     NODEPOOL_LOG_DIR=/logs \
     NODEPOOL_BACKUP_DIR=/backup \
     NODEPOOL_STATE_DIR=/state \
+    NODEPOOL_MIGRATION_ENABLED=0 \
     NODEPOOL_MIHOMO_BIN=/usr/local/bin/mihomo \
     NODEPOOL_MIHOMO_API=http://127.0.0.1:9090
 
@@ -41,9 +42,18 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend ./backend
+COPY scripts ./scripts
 COPY --from=web /backend/static ./backend/static
 
 RUN mkdir -p /data /config /logs /backup /state
+
+LABEL org.opencontainers.image.title="NodePoolME" \
+      org.opencontainers.image.description="NodePoolME subscription pool, health testing and publishing" \
+      org.opencontainers.image.source="https://github.com/laoXuHome/NodePoolME"
+
+# The official compose deliberately runs as root because bind-mounted /data,
+# /config, /logs, /backup and /state are created by the host/docker as root.
+USER root
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

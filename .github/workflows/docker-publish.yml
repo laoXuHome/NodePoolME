@@ -54,8 +54,80 @@ jobs:
           python tests/test_no_node_dedupe.py
           python -m pytest -q
 
-  build:
+  smoke:
     needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build amd64 image for smoke test
+        run: docker build -t nodepoolme:smoke .
+
+      - name: Run container and exercise core flows
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="${RUNNER_TEMP}/nodepool-smoke"
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT"/{data,config,logs,backup,state}
+          docker rm -f nodepool-smoke >/dev/null 2>&1 || true
+          docker run -d --name nodepool-smoke --user 0:0 \
+            -p 18080:8080 \
+            -e TZ=Asia/Shanghai \
+            -e NODEPOOL_ADMIN_PASSWORD=smoke-pass \
+            -e NODEPOOL_SECRET=smoke-secret-not-for-production \
+            -e NODEPOOL_MIGRATION_ENABLED=0 \
+            -e NODEPOOL_TEST_ENGINE=mihomo \
+            -v "$ROOT/data:/data" \
+            -v "$ROOT/config:/config" \
+            -v "$ROOT/logs:/logs" \
+            -v "$ROOT/backup:/backup" \
+            -v "$ROOT/state:/state" \
+            nodepoolme:smoke
+
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/healthz; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:18080/healthz | tee /tmp/healthz-first.json
+          grep -q '"engine":"mihomo"' /tmp/healthz-first.json
+
+          docker exec nodepool-smoke python /app/scripts/docker_smoke.py | tee /tmp/smoke.json
+          grep -q '"result": "PASS"' /tmp/smoke.json
+
+          docker restart nodepool-smoke >/dev/null
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/healthz; then break; fi
+            sleep 2
+          done
+          docker exec -i nodepool-smoke python - <<'PY'
+          import sqlite3, sys
+          db = sqlite3.connect('/data/nodepool.db')
+          airports = db.execute('SELECT COUNT(*) FROM airports').fetchone()[0]
+          nodes = db.execute('SELECT COUNT(*) FROM nodes').fetchone()[0]
+          baseline = db.execute("SELECT COUNT(*) FROM schema_migrations WHERE status='success'").fetchone()[0]
+          db.close()
+          print({'airports': airports, 'nodes': nodes, 'baseline_rows': baseline})
+          assert airports >= 1 and nodes >= 1 and baseline >= 1
+          PY
+
+          docker stop nodepool-smoke >/dev/null
+          docker run --rm --user 0:0 \
+            -e NODEPOOL_MIGRATION_ENABLED=0 \
+            -v "$ROOT/data:/data" -v "$ROOT/config:/config" \
+            -v "$ROOT/logs:/logs" -v "$ROOT/backup:/backup" -v "$ROOT/state:/state" \
+            nodepoolme:smoke python -m backend.database.cli status --json | tee /tmp/status-after-stop.json
+          grep -q '"maintenance": "INACTIVE"' /tmp/status-after-stop.json
+          test -n "$(ls -A "$ROOT/backup")"
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          docker logs nodepool-smoke || true
+          cat /tmp/smoke.json || true
+
+  build:
+    needs: [test, smoke]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:

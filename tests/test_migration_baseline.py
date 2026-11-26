@@ -19,7 +19,10 @@ from backend import config
 from backend.database import migrate
 
 REPO = Path(__file__).resolve().parents[1]
-DEV_DB = REPO / "data" / "nodepool.db"
+# Schema-only, zero-row copy of the legacy alter-history database.
+# The live data/ directory is intentionally git-ignored, so baseline tests must
+# never depend on a developer machine's local database.
+DEV_DB = Path(__file__).resolve().parent / "fixtures" / "legacy_dev.db"
 
 
 # --- helpers ----------------------------------------------------------------------------
