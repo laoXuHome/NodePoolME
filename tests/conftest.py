@@ -18,8 +18,11 @@ _ORIGINAL_ENGINE = None
 def clean_database():
     global _ORIGINAL_ENGINE
 
-    from backend.database import db
+    from backend.database import db, pool
     from backend.testers import engine as engine_mod
+
+    # v1.10 §2.7 写入闸是进程级状态：每个测试开始前必须回到放行态
+    pool.reset_for_tests()
 
     if _ORIGINAL_ENGINE is None:
         _ORIGINAL_ENGINE = engine_mod.engine_manager

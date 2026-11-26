@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from backend.database import db
+from backend.database import gate as maint_gate
 from backend.services import fetcher
 from backend.services.runtime_gate import gate
 from backend.subscriptions import builder
@@ -48,6 +49,10 @@ class RuntimeState:
         # 当前正在测的节点（机场、节点名、当前检测项、延迟/结果），随请求更新
         self.current: dict | None = None
         self.airport_names: dict = {}
+        # v1.10 §2.7 A 类入口 2：调度器只看这一轮判定结果，不自行重试迁移
+        self.maintenance_blocked = False
+        self.maintenance_reason: str | None = None
+        self.maintenance_logged = False
 
     def as_dict(self) -> dict:
         return {
@@ -79,6 +84,8 @@ class RuntimeState:
             "tag_total": self.tag_total,
             "tag_pct": round(self.tag_done / self.tag_total * 100, 1) if self.tag_total else 0,
             "current": self.current,
+            "maintenance_blocked": self.maintenance_blocked,
+            "maintenance_reason": self.maintenance_reason,
         }
 
     def request_pause(self) -> dict:
@@ -123,6 +130,34 @@ class RuntimeState:
 
 state = RuntimeState()
 scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
+
+
+def maintenance_hold() -> str | None:
+    """调度轮的 A 类维护态判定：每轮一次，非 INACTIVE 即停轮。
+
+    * 只调用 ``gate.judge()``（唯一判定实现），不读维护文件、不自建判定；
+    * 停止时不重试迁移、不推进任何迁移状态，只把运行态标记为 stopped；
+    * 判定结果同步交给 B 类（写入闸 / 连接池），使调度轮内的写入一律落空。
+    """
+    mstate, reason = maint_gate.judge()
+    if reason is not None:
+        maint_gate.apply_state(mstate)
+        state.maintenance_blocked = True
+        state.maintenance_reason = reason
+        if not state.running:
+            state.phase = "stopped"
+        if not state.maintenance_logged:
+            state.maintenance_logged = True
+            try:
+                db.append_log("WARN", "调度",
+                              f"维护态（{reason}）：后台任务已停止，等待人工恢复")
+            except Exception:
+                pass
+        return reason
+    state.maintenance_blocked = False
+    state.maintenance_reason = None
+    state.maintenance_logged = False
+    return None
 
 
 class CycleStopped(Exception):
@@ -683,6 +718,8 @@ async def fetch_now(airport_id: int, trigger: str = "manual") -> dict:
 
 # ---------------------------------------------------------------------------- scheduler jobs
 async def job_fetch() -> None:
+    if maintenance_hold():
+        return
     if state.fetching or state.running or gate.owner:
         return
     due = fetcher.due_airports()
@@ -702,6 +739,8 @@ async def job_fetch() -> None:
 
 
 async def job_cycle() -> None:
+    if maintenance_hold():
+        return
     if state.running:
         return
     interval = max(1, db.get_int("test_interval_minutes", 30))
@@ -719,6 +758,8 @@ async def job_publish() -> None:
 
     Both modes force a full latency + label cycle before writing the subscription.
     """
+    if maintenance_hold():
+        return
     if db.get("sub_publish_enabled", "0") != "1":
         return
     mode = (db.get("sub_publish_mode", "time") or "time").strip().lower()
@@ -841,6 +882,8 @@ def _parse_ts(value) -> datetime | None:
 
 
 async def job_maintenance() -> None:
+    if maintenance_hold():
+        return
     days = db.get_int("history_days", 30)
     cutoff = (datetime.now() - timedelta(days=max(7, min(days, 365)))).strftime("%Y-%m-%d %H:%M:%S")
     db.execute("DELETE FROM results WHERE ts < ?", (cutoff,))

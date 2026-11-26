@@ -1601,11 +1601,13 @@ async def sub_all_token_fmt_slash(token: str, fmt: str, request: Request,
 
 
 @sub_router.get("/healthz")
-async def healthz():
+async def healthz(request: Request):
+    maintenance = getattr(request.app.state, "maintenance", None) or {}
     return {
         "status": "ok",
         "version": config.VERSION,
         "engine": engine_mod.engine_manager.name,
         "db": config.DB_PATH.exists(),
         "scheduler": manager.scheduler.running,
+        "migration": maintenance.get("state", "unknown"),
     }

@@ -7,8 +7,14 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from backend import config
+from backend.database import pool
 
 _local = threading.local()
+_WRITE_CONNS: dict[int, sqlite3.Connection] = {}
+_READ_CONNS: dict[int, sqlite3.Connection] = {}
+# 批量关闭连接后递增；其它线程残留的 thread-local 句柄据此判定失效并重开，
+# 避免维护结束后把已被关闭的旧句柄重新拿出来用。
+_GENERATION = 0
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -277,27 +283,135 @@ def now() -> str:
 
 
 def connect() -> sqlite3.Connection:
+    """业务写连接（thread-local 复用）。
+
+    维护态下连接池已被 A 类入口标记 dead，checkout 直接抛 ``PoolClosed``；
+    读写统一走这里的老代码在维护期会得到写侧拒绝，只读函数改走
+    :func:`connect_readonly`（见 :func:`read_connection`）。
+    """
+    if pool.pool_dead():
+        raise pool.PoolClosed(pool.blocked_reason() or pool.REASON_MAINTENANCE)
     conn = getattr(_local, "conn", None)
+    if conn is not None and getattr(_local, "conn_gen", None) != _GENERATION:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        conn = None
     if conn is None:
         conn = sqlite3.connect(str(config.DB_PATH), timeout=30, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA recursive_triggers=ON")
         _local.conn = conn
+        _local.conn_gen = _GENERATION
+        _WRITE_CONNS[id(conn)] = conn
     return conn
+
+
+def connect_readonly() -> sqlite3.Connection:
+    """只读连接（``mode=ro`` + ``PRAGMA query_only=1``），thread-local 复用。
+
+    维护态 / 恢复态下的读请求仍可服务；连接自打开起即禁止任何写入。
+    """
+    conn = getattr(_local, "ro", None)
+    if conn is not None and getattr(_local, "ro_gen", None) != _GENERATION:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        conn = None
+    if conn is None:
+        conn = sqlite3.connect(str(config.DB_PATH) + "?mode=ro", uri=True, timeout=30,
+                               check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA query_only=1")
+        conn.execute("PRAGMA busy_timeout=30000")
+        _local.ro = conn
+        _local.ro_gen = _GENERATION
+        _READ_CONNS[id(conn)] = conn
+    return conn
+
+
+def read_connection() -> sqlite3.Connection:
+    """读路径入口：正常态沿用写连接（保持既有行为），封锁态退化为只读连接。"""
+    if pool.pool_dead():
+        return connect_readonly()
+    return connect()
+
+
+def open_write_connections() -> int:
+    return len(_WRITE_CONNS)
+
+
+def close_write_connections() -> int:
+    """关闭全部业务写连接（维护排空用），返回关闭个数。"""
+    global _GENERATION
+    _GENERATION += 1
+    closed = 0
+    for key, conn in list(_WRITE_CONNS.items()):
+        try:
+            conn.close()
+            closed += 1
+        except Exception:
+            pass
+        _WRITE_CONNS.pop(key, None)
+    if isinstance(getattr(_local, "conn", None), sqlite3.Connection):
+        _local.conn = None
+    return closed
+
+
+def close_all_connections() -> int:
+    """关闭全部写连接与只读连接（迁移替换数据库文件前使用）。"""
+    closed = close_write_connections()
+    for key, conn in list(_READ_CONNS.items()):
+        try:
+            conn.close()
+            closed += 1
+        except Exception:
+            pass
+        _READ_CONNS.pop(key, None)
+    if isinstance(getattr(_local, "ro", None), sqlite3.Connection):
+        _local.ro = None
+    return closed
+
+
+def readonly_query_only_ok() -> bool:
+    """全部已打开的只读连接是否都带 ``PRAGMA query_only=1``。"""
+    for conn in list(_READ_CONNS.values()):
+        try:
+            value = conn.execute("PRAGMA query_only").fetchone()[0]
+        except Exception:
+            return False
+        if int(value) != 1:
+            return False
+    return True
+
+
+def table_exists(name: str) -> bool:
+    conn = read_connection()
+    result = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (name,)
+    ).fetchone()
+    return result is not None
 
 
 @contextmanager
 def transaction():
-    conn = connect()
-    try:
-        conn.execute("BEGIN IMMEDIATE")
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
+    """正式批量写入入口：先过 ``write_guard()``（维护态 + PRAGMA），再开事务。"""
+    from backend.database import gate
+
+    with gate.write_guard() as conn:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
 
 def reset_connection() -> None:
@@ -308,7 +422,16 @@ def reset_connection() -> None:
             conn.close()
         except Exception:
             pass
+        _WRITE_CONNS.pop(id(conn), None)
         _local.conn = None
+    ro = getattr(_local, "ro", None)
+    if ro is not None:
+        try:
+            ro.close()
+        except Exception:
+            pass
+        _READ_CONNS.pop(id(ro), None)
+        _local.ro = None
 
 
 def init_db() -> None:
@@ -486,7 +609,7 @@ def init_db() -> None:
 
 
 def get(key: str, default: str | None = None) -> str | None:
-    row = connect().execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    row = read_connection().execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     return row["value"] if row else default
 
 
@@ -548,12 +671,12 @@ def record_schedule_plan(interval_minutes: int, source: str = "") -> None:
 
 
 def rows(sql: str, params: Iterable = ()) -> list[dict]:
-    conn = connect()
+    conn = read_connection()
     return [dict(r) for r in conn.execute(sql, tuple(params)).fetchall()]
 
 
 def row(sql: str, params: Iterable = ()) -> dict | None:
-    conn = connect()
+    conn = read_connection()
     r = conn.execute(sql, tuple(params)).fetchone()
     return dict(r) if r else None
 
