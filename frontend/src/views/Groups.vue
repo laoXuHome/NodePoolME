@@ -132,7 +132,7 @@ async function saveSpeed() {
 }
 
 async function runAllSpeed() {
-  await ElMessageBox.confirm('将对所有未被排除测速的节点重新测速，单节点最多下载 50 MB。已有有效结果也会被新结果替换。',
+  await ElMessageBox.confirm(`将对所有未被排除测速的节点重新测速，单节点最多下载 ${speedForm.speed_traffic_limit_mb} MB。已有有效结果也会被新结果替换。`,
                              '全部重新测速', { type: 'warning', confirmButtonText: '开始测速' })
   speedBusy.value = 'all'
   try {

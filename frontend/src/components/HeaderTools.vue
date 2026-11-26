@@ -34,8 +34,7 @@ async function runCheck() {
         message: `<div style="line-height:1.9;font-size:13px">
           <div>当前版本：<b>v${data.current}</b></div>
           <div>最新版本：<b style="color:#2f6bdd">v${data.latest}</b></div>
-          <div>离线包：${asset}</div>
-          <div style="margin-top:6px;color:#8d939d">NAS 升级：<code>sudo npup v${data.latest}</code></div></div>`,
+          <div>离线包：${asset}</div></div>`,
         dangerouslyUseHTMLString: true,
         confirmButtonText: data.asset ? '去下载' : '知道了',
         showCancelButton: !!data.asset,
