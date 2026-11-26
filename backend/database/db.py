@@ -432,19 +432,71 @@ def table_exists(name: str) -> bool:
     return result is not None
 
 
+# 在途写事务登记表：封锁时必须能明确"中止"它们，而不是只看连接数量。
+# id(conn) -> {"conn": conn, "aborted": bool}
+_INFLIGHT: dict[int, dict] = {}
+_INFLIGHT_LOCK = threading.Lock()
+
+
+def _register_txn(conn: sqlite3.Connection) -> dict:
+    entry = {"conn": conn, "aborted": False}
+    with _INFLIGHT_LOCK:
+        _INFLIGHT[id(conn)] = entry
+    return entry
+
+
+def _unregister_txn(entry: dict) -> None:
+    with _INFLIGHT_LOCK:
+        if _INFLIGHT.get(id(entry["conn"])) is entry:
+            _INFLIGHT.pop(id(entry["conn"]), None)
+
+
+def _assert_txn_committable(entry: dict) -> None:
+    """提交前复核：写入闸已封锁或在途事务已被中止 ⇒ 拒绝提交。"""
+    if entry["aborted"] or pool.writes_blocked():
+        raise pool.WriteRefused("writes_blocked")
+
+
+def abort_inflight_transactions() -> int:
+    """把当前所有在途写事务标记为中止（由封锁流程在关闭连接前调用）。"""
+    with _INFLIGHT_LOCK:
+        entries = list(_INFLIGHT.values())
+        for entry in entries:
+            entry["aborted"] = True
+        return len(entries)
+
+
+def active_write_transactions() -> int:
+    """仍然"可提交"的在途写事务数（已被封锁中止的不计入）。"""
+    with _INFLIGHT_LOCK:
+        return sum(1 for entry in _INFLIGHT.values() if not entry["aborted"])
+
+
 @contextmanager
 def transaction():
-    """正式批量写入入口：先过 ``write_guard()``（维护态 + PRAGMA），再开事务。"""
+    """正式批量写入入口：``write_guard()``（维护态 + PRAGMA）→ 登记在途事务 → 事务。
+
+    封锁可以在事务体执行期间发生：此时连接被关闭、登记项被标记 aborted，
+    提交前的 :func:`_assert_txn_committable` 会抛 ``WriteRefused("writes_blocked")``，
+    因此封锁返回后不存在仍能提交的业务写入。
+    """
     from backend.database import gate
 
     with gate.write_guard() as conn:
+        entry = _register_txn(conn)
         try:
             conn.execute("BEGIN IMMEDIATE")
             yield conn
+            _assert_txn_committable(entry)
             conn.commit()
         except Exception:
-            conn.rollback()
+            try:
+                conn.rollback()
+            except Exception:
+                pass          # 连接已被封锁关闭时回滚失败是预期结果，异常以上抛的原因为准
             raise
+        finally:
+            _unregister_txn(entry)
 
 
 def reset_connection() -> None:

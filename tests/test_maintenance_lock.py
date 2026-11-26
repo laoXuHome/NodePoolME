@@ -234,15 +234,34 @@ def test_pool_dead_after_block_and_readonly_still_serves(maint_file):
     assert db.readonly_query_only_ok() is True
 
 
+def _fake_halt_migration():
+    """模拟 P-1.6：定义在 backend.database.migrate 里的 halt_migration 可调用对象。"""
+
+    def halt_migration():
+        return None
+
+    halt_migration.__module__ = pool._TRUSTED_ISSUER_MODULE
+    return halt_migration
+
+
+def _register_fake_issuer() -> object:
+    return pool.register_confirmation_issuer(_fake_halt_migration())
+
+
 def test_halt_tail_requires_confirmed_flags():
-    ok = pool.new_confirmation("p15-mig", True, True, now=1730000000.0)
+    rec = pool.MaintConfirmation("p15-mig", True, True, 1730000000.0)   # 直接实例化
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.halt_tail(rec)
+    assert exc.value.code == "no_trusted_issuer"      # P-1.5 没有可信发射器
+
+    token = _register_fake_issuer()
+    pool.block_writes(pool.REASON_MAINTENANCE)
+    with pytest.raises(pool.HaltPreconditionFailed) as exc2:
+        pool.halt_tail(rec)                            # 没带哨兵 ⇒ 仍无效
+    assert exc2.value.code == "unconfirmed"
+
+    ok = pool.mint_confirmation(token, "p15-mig", True, True, now=1730000000.0)
     assert pool.halt_tail(ok) == pool.HALT_TAIL_OK
-    for rec in (
-        pool.new_confirmation("p15-mig", False, True),
-        pool.new_confirmation("p15-mig", True, False),
-    ):
-        with pytest.raises(pool.HaltPreconditionFailed):
-            pool.halt_tail(rec)
 
 
 def test_write_connection_recovers_after_unblock(maint_file):
@@ -577,6 +596,136 @@ def test_halt_tail_rejects_unconfirmed_objects(maint_file):
 
 
 def test_halt_tail_accepts_only_confirmation_from_halt_migration():
-    rec = pool.new_confirmation("mig-42", True, True)
+    pool.block_writes(pool.REASON_MAINTENANCE)
+    token = _register_fake_issuer()
+    rec = pool.mint_confirmation(token, "mig-42", True, True)
     assert rec.source == "halt_migration"
+    assert rec._issuer == pool._TRUSTED_ISSUER_MODULE
     assert pool.halt_tail(rec) == pool.HALT_TAIL_OK
+
+
+# ============================== P-1.5 最终修复：凭据真实性 + 在途写入封锁
+# --------------------------------------------------- 问题 1：凭据真实性
+def test_direct_instantiation_of_confirmation_is_never_valid():
+    _register_fake_issuer()
+    forged = pool.MaintConfirmation("m", True, True, 1.0)          # 无哨兵
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.halt_tail(forged)
+    assert exc.value.code == "unconfirmed"
+
+    class Fake(pool.MaintConfirmation):                          # 子类也不能绕过
+        pass
+
+    with pytest.raises(pool.HaltPreconditionFailed):
+        pool.halt_tail(Fake("m", True, True, 1.0))
+
+
+def test_public_factory_is_gone_and_mint_needs_registered_token():
+    assert not hasattr(pool, "new_confirmation")
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.mint_confirmation(object(), "m", True, True)
+    assert exc.value.code == "untrusted_issuer"
+    with pytest.raises(pool.HaltPreconditionFailed):
+        pool.mint_confirmation(None, "m", True, True)
+
+
+def test_mint_refuses_when_writes_not_actually_blocked():
+    token = _register_fake_issuer()
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.mint_confirmation(token, "m", True, True)
+    assert exc.value.code == "unconfirmed_state"
+
+
+def test_only_migrate_module_may_register_issuer():
+    def foreign_halt_migration():
+        return None
+
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.register_confirmation_issuer(foreign_halt_migration)
+    assert exc.value.code == "untrusted_issuer_module"
+    assert pool._ISSUERS == {}
+
+
+def test_mint_refuses_unconfirmed_state():
+    pool.block_writes(pool.REASON_MAINTENANCE)
+    token = _register_fake_issuer()
+    for ok, blocked in ((False, True), (True, False), (1, True)):
+        with pytest.raises(pool.HaltPreconditionFailed) as exc:
+            pool.mint_confirmation(token, "m", ok, blocked)
+        assert exc.value.code == "unconfirmed_state"
+
+
+def test_halt_tail_fails_closed_when_no_issuer_registered(maint_file):
+    pool.block_writes(pool.REASON_MAINTENANCE)
+    token = _register_fake_issuer()
+    rec = pool.mint_confirmation(token, "mig-7", True, True)
+    assert pool.halt_tail(rec) == pool.HALT_TAIL_OK
+    pool.reset_for_tests()                                       # 重新回到 P-1.5 常态
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.halt_tail(rec)
+    assert exc.value.code == "no_trusted_issuer"
+
+
+def test_halt_tail_rejects_unconfirmed_objects_with_codes(maint_file):
+    _write_active(maint_file)
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.halt_tail({"maintenance_ok": True, "writes_blocked": True})
+    assert exc.value.code == "not_confirmation"
+
+    pool.block_writes(pool.REASON_MAINTENANCE)
+    token = _register_fake_issuer()
+    rec = pool.mint_confirmation(token, "m", True, True)
+    object.__setattr__(rec, "writes_blocked", False)             # 篡改字段
+    with pytest.raises(pool.HaltPreconditionFailed) as exc2:
+        pool.halt_tail(rec)
+    assert exc2.value.code == "unconfirmed"
+
+
+# ----------------------------------------------- 问题 2：在途写事务封锁
+@pytest.mark.parametrize("pause_point", ["after_write", "before_write"])
+def test_inflight_transaction_cannot_commit_after_block(maint_file, pause_point):
+    entered = threading.Event()
+    resume = threading.Event()
+    outcome: dict = {}
+
+    def session1():
+        try:
+            with db.transaction() as conn:            # 会话 1：真的拿到写连接并开启事务
+                if pause_point == "before_write":
+                    entered.set()
+                    assert resume.wait(5.0)
+                    conn.execute("INSERT INTO logs (ts, level, source, message) "
+                                 "VALUES ('x','I','t','t')")
+                else:
+                    conn.execute("INSERT INTO logs (ts, level, source, message) "
+                                 "VALUES ('x','I','t','t')")
+                    entered.set()
+                    assert resume.wait(5.0)
+            outcome["commit"] = "ok"
+        except BaseException as exc:                  # noqa: BLE001 - 记录真实异常
+            outcome["commit"] = type(exc).__name__
+
+    worker = threading.Thread(target=session1)
+    worker.start()
+    assert entered.wait(5.0), "会话 1 未进入事务暂停点"
+    assert db.active_write_transactions() == 1        # 事务确实在途
+
+    pool.block_writes(pool.REASON_MAINTENANCE)        # 会话 2：触发全局封锁
+    assert pool.writes_blocked() is True
+    assert db.open_write_connections() == 0
+    assert db.active_write_transactions() == 0        # 在途事务已被封锁中止
+    assert pool.confirm_writes_blocked()[0] is True
+    with pytest.raises(pool.PoolClosed):
+        db.connect()                                  # 新会话 checkout 被拒
+    assert db.rows("SELECT 1 AS x")[0]["x"] == 1      # 只读会话仍可用
+
+    resume.set()
+    worker.join(5)
+    assert outcome["commit"] in ("WriteRefused", "ProgrammingError")
+    assert outcome["commit"] != "ok"
+    # 数据库最终状态：封锁后没有发生写入提交
+    rows = db.rows("SELECT COUNT(*) AS c FROM logs WHERE message='t'")[0]["c"]
+    assert rows == 0
+    with pytest.raises((pool.WriteRefused, pool.PoolClosed)):
+        with db.transaction():
+            pass                                      # 封锁后新事务也拿不到写权
