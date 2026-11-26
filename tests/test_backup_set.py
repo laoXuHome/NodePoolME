@@ -549,3 +549,167 @@ def test_published_set_contains_only_three_files(tmp_path):
     assert sorted(p.name for p in set_dir.iterdir()) == ["complete.json", "db", "manifest.json"]
     assert backup.verify_set(set_dir)["ok"] is True
     assert sorted(p.name for p in set_dir.iterdir()) == ["complete.json", "db", "manifest.json"]
+
+
+# --- P-1.3 修复：恢复失败安全（WAL 未 checkpoint 的原库绝不能被破坏） ----------
+
+
+def _fresh_db_with_uncheckpointed_wal(tmp_path):
+    """造一个"已提交数据只存在于 -wal 里"的库副本，用于验证失败路径不丢数据。"""
+    src = _fresh_db(tmp_path)
+    keeper = sqlite3.connect(src)
+    keeper.execute("PRAGMA journal_mode=WAL")
+    keeper.execute("PRAGMA wal_autocheckpoint=0")
+    for i in range(5):
+        keeper.execute(
+            "INSERT INTO logs(ts, level, source, message) VALUES (?, 'INFO', 'wal', ?)",
+            (f"2026-11-26 19:00:0{i}", f"wal-only-{i}"),
+        )
+    keeper.commit()
+    wal = Path(str(src) + "-wal")
+    assert wal.exists() and wal.stat().st_size > 0, "需要存在未 checkpoint 的 WAL 帧"
+
+    target = tmp_path / "live.db"
+    shutil.copyfile(src, target)
+    shutil.copyfile(wal, str(target) + "-wal")
+    shm = Path(str(src) + "-shm")
+    if shm.exists():
+        shutil.copyfile(shm, str(target) + "-shm")
+    # 不带 -wal 的纯 db 副本必须看不到这 5 行（证明数据确实只在 WAL 里）；
+    # 必须在 keeper 仍打开时复制，否则关闭会触发 checkpoint 把帧写回主库
+    bare = tmp_path / "bare.db"
+    shutil.copyfile(src, bare)
+    keeper.close()
+    # 只读打开：读写连接在关闭时会 checkpoint，把 WAL 帧合并回主库，破坏测试前提
+    bare_conn = sqlite3.connect(f"file:{bare}?mode=ro", uri=True)
+    full_conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
+    assert _count(bare_conn, "logs") < _count(full_conn, "logs"), "构造失败：数据未停留在 WAL"
+    assert _count(full_conn, "logs") == _fresh_db.last["logs"] + 5
+    bare_conn.close()
+    full_conn.close()
+    assert Path(str(target) + "-wal").stat().st_size > 0, "构造失败：WAL 帧已被 checkpoint"
+    return target
+
+
+def _side_state(db_path: Path) -> dict:
+    """记录 db/-wal/-shm 的存在性、大小与 sha256，用于"完全不变"断言。"""
+    state = {}
+    for suffix in ("", "-wal", "-shm"):
+        p = Path(str(db_path) + suffix)
+        # -shm 是 WAL 索引（可从 WAL 重建），字节不等价；db 与 -wal 必须字节不变
+        digest = None
+        if p.exists() and suffix != "-shm":
+            digest = hashlib.sha256(p.read_bytes()).hexdigest()
+        state[suffix or "db"] = (
+            p.exists(),
+            p.stat().st_size if p.exists() else None,
+            digest,
+        )
+    return state
+
+
+def test_restore_copy_failure_leaves_original_untouched(tmp_path, monkeypatch):
+    target = _fresh_db_with_uncheckpointed_wal(tmp_path)
+    result = backup.snapshot_set("manual", src_db=target, backup_dir=tmp_path / "b", min_free_mb=0)
+    before = _side_state(target)
+
+    real_copy = backup.shutil.copyfile
+
+    def boom(src, dst, *a, **k):
+        if Path(dst).name.startswith("restore-"):
+            raise OSError("模拟复制失败")
+        return real_copy(src, dst, *a, **k)
+
+    monkeypatch.setattr(backup.shutil, "copyfile", boom)
+    with pytest.raises(backup.BackupError) as exc:
+        backup.restore_set(Path(result["path"]), db_path=target, backup_dir=tmp_path / "b")
+    assert exc.value.reason == "restore_stage_failed"
+    assert _side_state(target) == before, "复制失败不得改动原库任何文件"
+    assert _count(sqlite3.connect(target), "logs") == _fresh_db.last["logs"] + 5
+
+
+def test_restore_fsync_failure_leaves_original_untouched(tmp_path, monkeypatch):
+    target = _fresh_db_with_uncheckpointed_wal(tmp_path)
+    result = backup.snapshot_set("manual", src_db=target, backup_dir=tmp_path / "b", min_free_mb=0)
+    before = _side_state(target)
+
+    real_fsync = backup._fsync_file
+
+    def boom(path, *a, **k):
+        if Path(path).name.startswith("restore-"):
+            raise OSError("模拟 fsync 失败")
+        return real_fsync(path, *a, **k)
+
+    monkeypatch.setattr(backup, "_fsync_file", boom)
+    with pytest.raises(backup.BackupError) as exc:
+        backup.restore_set(Path(result["path"]), db_path=target, backup_dir=tmp_path / "b")
+    assert exc.value.reason == "restore_stage_failed"
+    assert _side_state(target) == before, "fsync 失败不得改动原库任何文件"
+
+
+def test_restore_staged_verify_failure_leaves_original_untouched(tmp_path, monkeypatch):
+    target = _fresh_db_with_uncheckpointed_wal(tmp_path)
+    result = backup.snapshot_set("manual", src_db=target, backup_dir=tmp_path / "b", min_free_mb=0)
+    before = _side_state(target)
+
+    def boom(*a, **k):
+        raise backup.BackupError("restore_verify_failed", "模拟临时库完整性校验失败")
+
+    monkeypatch.setattr(backup, "_verify_staged_db", boom)
+    with pytest.raises(backup.BackupError) as exc:
+        backup.restore_set(Path(result["path"]), db_path=target, backup_dir=tmp_path / "b")
+    assert exc.value.reason == "restore_verify_failed"
+    assert _side_state(target) == before, "临时库校验失败不得改动原库任何文件"
+    leftovers = [p.name for p in tmp_path.glob("restore-*.db")]
+    assert leftovers == [], "失败的临时文件必须被清理"
+
+
+def test_restore_replace_failure_preserves_original_wal(tmp_path, monkeypatch):
+    target = _fresh_db_with_uncheckpointed_wal(tmp_path)
+    result = backup.snapshot_set("manual", src_db=target, backup_dir=tmp_path / "b", min_free_mb=0)
+    before = _side_state(target)
+
+    real_replace = backup.os.replace
+
+    def guarded(src, dst, *a, **k):
+        if Path(src).name.startswith("restore-"):
+            raise OSError("模拟 os.replace 失败")
+        return real_replace(src, dst, *a, **k)
+
+    monkeypatch.setattr(backup.os, "replace", guarded)
+    with pytest.raises(backup.BackupError) as exc:
+        backup.restore_set(Path(result["path"]), db_path=target, backup_dir=tmp_path / "b")
+    assert exc.value.reason == "restore_replace_failed"
+    assert _side_state(target) == before, "替换失败必须原样还原 db 与 -wal/-shm"
+    assert _count(sqlite3.connect(target), "logs") == _fresh_db.last["logs"] + 5
+
+
+def test_post_restore_check_failure_restores_original_with_wal(tmp_path, monkeypatch):
+    target = _fresh_db_with_uncheckpointed_wal(tmp_path)
+    result = backup.snapshot_set("manual", src_db=target, backup_dir=tmp_path / "b", min_free_mb=0)
+    before = _side_state(target)
+
+    def boom(*a, **k):
+        raise RuntimeError("模拟恢复后校验失败")
+
+    monkeypatch.setattr(backup, "_post_restore_checks", boom)
+    with pytest.raises(backup.BackupError) as exc:
+        backup.restore_set(Path(result["path"]), db_path=target, backup_dir=tmp_path / "b")
+    assert exc.value.reason == "restore_rolled_back"
+    assert _side_state(target) == before, "回退后必须回到原库（含未 checkpoint 的 WAL）"
+    assert _count(sqlite3.connect(target), "logs") == _fresh_db.last["logs"] + 5
+
+
+def test_restore_normal_path_on_wal_database_keeps_wal_rows(tmp_path):
+    """补齐：正常恢复同样以"存在未 checkpoint WAL"的库为目标。"""
+    target = _fresh_db_with_uncheckpointed_wal(tmp_path)
+    result = backup.snapshot_set("manual", src_db=target, backup_dir=tmp_path / "b", min_free_mb=0)
+    set_dir = Path(result["path"])
+    replaced = backup.restore_set(set_dir, db_path=target, backup_dir=tmp_path / "b")
+    assert replaced["ok"] is True
+    conn = sqlite3.connect(target)
+    assert _count(conn, "logs") == _fresh_db.last["logs"] + 5
+    manifest = json.loads((set_dir / "manifest.json").read_text())
+    for table, expected in manifest["tables"].items():
+        assert _count(conn, table) == expected
+    conn.close()

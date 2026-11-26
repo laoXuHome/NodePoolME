@@ -650,10 +650,11 @@ def restore_set(
 ) -> dict[str, Any]:
     """把备份集安全恢复到 `db_path`（默认 `config.DB_PATH`）。
 
-    步骤与 §3.3 一致，任何一步失败都不留下"半个库"：
+    失败安全顺序（任何一步失败都不丢原库数据）：
     验证备份集 → 生成 `pre-restore` → 关闭连接 → 确认无第三方句柄 →
-    删 `-wal/-shm` → 同卷临时文件 + fsync → `os.replace` + 目录 fsync →
-    恢复后校验 →（可选）发布订阅；失败自动回退 `pre-restore`。
+    同卷临时文件复制 + fsync + **完整校验** → 原库三件（db/-wal/-shm）**改名隔离**
+    （不是删除） → `os.replace` 临时文件 → 目录 fsync → 恢复后校验 →
+    成功才丢弃隔离副本；失败先按隔离副本原样还原，再回退 `pre-restore`。
     """
     target = Path(db_path or config.DB_PATH)
     source_set = Path(set_dir)
@@ -662,6 +663,7 @@ def restore_set(
     if not verdict["ok"]:
         raise BackupError("backup_invalid", f"备份集验证失败：{verdict['errors']}")
 
+    manifest = _read_manifest(source_set) or {}
     pre_restore = snapshot_set("pre-restore", src_db=target, backup_dir=backup_dir)
 
     (close_connections or _default_close_connections)()
@@ -670,49 +672,59 @@ def restore_set(
     if held:
         raise BackupError("restore_handles_present", f"仍有进程持有库文件：{held[:5]}")
 
-    for suffix in ("-wal", "-shm"):
-        side = Path(str(target) + suffix)
-        if side.exists():
-            side.unlink()
-
+    # --- 阶段 A：只读准备，绝不触碰目标库文件 ---
     nonce = secrets.token_hex(8)
     tmp = target.parent / f"restore-{nonce}.db"
-    shutil.copyfile(source_set / DB_FILE, tmp)
-    _fsync_file(tmp)
-
-    check = _open_ro(tmp)
     try:
-        if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-            raise BackupError("restore_verify_failed", "临时恢复库 integrity_check 失败")
-        present = set(_table_names(check))
-        missing = [t for t in migrate.BASE_TABLES if t not in present]
-        if missing:
-            raise BackupError("restore_verify_failed", f"临时恢复库缺表：{missing}")
-    finally:
-        check.close()
+        shutil.copyfile(source_set / DB_FILE, tmp)
+        _fsync_file(tmp)
+    except Exception as exc:  # noqa: BLE001 - 复制/落盘失败时目标库必须原封不动
+        _silent_unlink(tmp)
+        raise BackupError("restore_stage_failed", f"临时文件复制/fsync 失败：{exc}") from exc
 
+    try:
+        _verify_staged_db(tmp, manifest)
+    except Exception as exc:  # noqa: BLE001
+        _silent_unlink(tmp)
+        if isinstance(exc, BackupError):
+            raise
+        raise BackupError("restore_verify_failed", f"临时恢复库校验失败：{exc}") from exc
+
+    # --- 阶段 B：原库三件改名隔离（可原样还原），再原子替换 ---
+    quarantine = _quarantine_target(target, nonce)
     replaced = False
     try:
         os.replace(tmp, target)
         _fsync_dir(target.parent)
         replaced = True
         _post_restore_checks(target, source_set)
-    except Exception as exc:  # noqa: BLE001 - 需要把任何失败都转成回退
+    except Exception as exc:  # noqa: BLE001 - 任何失败都要还原
+        _silent_unlink(tmp)
+        first_error = exc
         try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
-        if not replaced:
-            raise BackupError("restore_replace_failed", str(exc)) from exc
+            restored = _unquarantine(quarantine)
+        except Exception as quarantine_exc:  # noqa: BLE001
+            restored = False
+            first_error = f"{first_error} / 隔离副本还原失败：{quarantine_exc}"
+        if restored:
+            if not replaced:
+                raise BackupError("restore_replace_failed", str(first_error)) from exc
+            raise BackupError("restore_rolled_back",
+                              f"恢复后校验失败，已还原原库：{first_error}") from exc
+
+        # 隔离副本已不可用：退到 pre-restore 备份集
         try:
             _rollback_to_pre_restore(target, pre_restore["path"])
         except Exception as rollback_exc:  # noqa: BLE001
             raise BackupError(
                 "restore_failed",
-                f"恢复失败且回退失败：{exc} / {rollback_exc}",
+                f"恢复失败且回退失败：{first_error} / {rollback_exc}",
             ) from exc
-        raise BackupError("restore_rolled_back", f"恢复后校验失败，已回退：{exc}") from exc
+        raise BackupError("restore_rolled_back", f"恢复失败，已回退 pre-restore：{first_error}") from exc
+
+    # 成功：隔离副本与临时文件一并清理
+    _drop_quarantine(quarantine)
+    _silent_unlink(tmp)
 
     published = None
     if publish is not None:
@@ -725,6 +737,97 @@ def restore_set(
         "pre_restore_set": pre_restore["file"],
         "published": published,
     }
+
+
+def _silent_unlink(path: Path) -> None:
+    try:
+        if path.exists():
+            path.unlink()
+    except OSError:
+        pass
+
+
+def _verify_staged_db(tmp: Path, manifest: dict[str, Any]) -> None:
+    """临时恢复库的完整校验：integrity/fk/表齐全/逐表计数/tasks 形态。
+
+    全部在**目标库未改动**的前提下进行；任何不满足都抛错，由调用方丢弃临时文件。
+    """
+    conn = _open_ro(tmp, immutable=True)
+    try:
+        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise BackupError("restore_verify_failed", f"临时恢复库 integrity_check={integrity}")
+        if conn.execute("PRAGMA foreign_key_check").fetchall():
+            raise BackupError("restore_verify_failed", "临时恢复库存在外键违规")
+        present = set(_table_names(conn))
+        missing = [t for t in migrate.BASE_TABLES if t not in present]
+        if missing:
+            raise BackupError("restore_verify_failed", f"临时恢复库缺表：{missing}")
+        counts = {t: int(conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0])
+                  for t in migrate.BASE_TABLES if t in present}
+        for table, expected in (manifest.get("tables") or {}).items():
+            if table in counts and int(expected) != counts[table]:
+                raise BackupError("restore_verify_failed",
+                                  f"{table}: manifest={expected} staged={counts[table]}")
+        tasks = migrate.tasks_state(conn)
+        want_tasks = manifest.get("tasks") or {}
+        if bool(want_tasks.get("tasks_present")) != bool(tasks["tasks_present"]):
+            raise BackupError("restore_verify_failed", "临时恢复库 tasks 存在性与 manifest 不一致")
+        if tasks["tasks_present"] and int(want_tasks.get("tasks_rows", -1)) != tasks["tasks_rows"]:
+            raise BackupError("restore_verify_failed",
+                              f"tasks: manifest={want_tasks.get('tasks_rows')} staged={tasks['tasks_rows']}")
+    finally:
+        conn.close()
+
+
+def _quarantine_target(target: Path, nonce: str) -> list[tuple[Path, Path]]:
+    """把目标库 `db` 与 `-wal` / `-shm` 改名到同目录隔离名（不删除任何文件）。
+
+    返回 [(原路径, 隔离路径)]；中途失败会把已改名的文件立即还原后抛错。
+    """
+    pairs: list[tuple[Path, Path]] = []
+    try:
+        for suffix in ("", "-wal", "-shm"):
+            src = Path(str(target) + suffix)
+            if not src.exists():
+                continue
+            dst = Path(str(src) + f".restore-prev-{nonce}")
+            os.replace(src, dst)
+            pairs.append((src, dst))
+        _fsync_dir(target.parent)
+    except Exception:
+        _unquarantine(pairs)
+        raise
+    return pairs
+
+
+def _unquarantine(pairs: list[tuple[Path, Path]]) -> bool:
+    """把隔离副本改回原名。先彻底清掉替换后可能残留的新库与 sidecar，再按
+    `-wal` / `-shm` → `db` 的顺序还原，避免出现"有 wal 无 db"的中间态。"""
+    if not pairs:
+        return True
+    base = next((src for src, _ in pairs if not str(src).endswith(("-wal", "-shm"))), pairs[0][0])
+    for suffix in ("-wal", "-shm"):
+        _silent_unlink(Path(str(base) + suffix))
+    _silent_unlink(base)
+    ok = True
+    ordered = sorted(pairs, key=lambda p: 1 if p[0] == base else 0)
+    for src, dst in ordered:
+        try:
+            if dst.exists():
+                os.replace(dst, src)
+        except OSError:
+            ok = False
+    try:
+        _fsync_dir(base.parent)
+    except OSError:
+        ok = False
+    return ok
+
+
+def _drop_quarantine(pairs: list[tuple[Path, Path]]) -> None:
+    for _src, dst in pairs:
+        _silent_unlink(dst)
 
 
 def _post_restore_checks(target: Path, set_dir: Path) -> None:
@@ -752,18 +855,26 @@ def _post_restore_checks(target: Path, set_dir: Path) -> None:
 
 
 def _rollback_to_pre_restore(target: Path, pre_restore_dir: str) -> None:
-    """用 `pre-restore` 备份集把库换回去（同卷临时文件 + os.replace）。"""
+    """用 `pre-restore` 备份集把库换回去（同卷临时文件 + fsync + 校验 + 隔离替换）。"""
     pref = Path(pre_restore_dir)
     nonce = secrets.token_hex(8)
     tmp = target.parent / f"rollback-{nonce}.db"
     shutil.copyfile(pref / DB_FILE, tmp)
     _fsync_file(tmp)
-    for suffix in ("-wal", "-shm"):
-        side = Path(str(target) + suffix)
-        if side.exists():
-            side.unlink()
-    os.replace(tmp, target)
-    _fsync_dir(target.parent)
+    try:
+        _verify_staged_db(tmp, _read_manifest(pref) or {})
+    except Exception:
+        _silent_unlink(tmp)
+        raise
+    pairs = _quarantine_target(target, nonce)
+    try:
+        os.replace(tmp, target)
+        _fsync_dir(target.parent)
+    except Exception:
+        _unquarantine(pairs)
+        _silent_unlink(tmp)
+        raise
+    _drop_quarantine(pairs)
 
 
 __all__ = [
