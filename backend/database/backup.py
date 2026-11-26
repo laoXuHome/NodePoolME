@@ -859,6 +859,14 @@ def _restore_moved(pairs: list[tuple[Path, Path]], *, remove_new: bool) -> _Rest
         return outcome
     base = next((src for src, _ in pairs if not str(src).endswith(("-wal", "-shm"))), None)
     outcome.target_dir = (base or pairs[0][0]).parent
+
+    # 预检：pairs 中每一项都是"已成功隔离"的文件，隔离副本必须全部在位。
+    # 任一缺失即在**任何删除/改名之前**整体失败，避免"先清掉目标文件、再发现副本没了"。
+    missing_pre = [dst for _src, dst in pairs if not dst.exists()]
+    if missing_pre:
+        outcome.missing.extend(missing_pre)
+        return outcome
+
     if remove_new and base is not None:
         for suffix in ("-wal", "-shm"):
             _silent_unlink(Path(str(base) + suffix))

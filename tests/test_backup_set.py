@@ -921,3 +921,75 @@ def test_fsync_failure_reports_persistence_unconfirmed(tmp_path, monkeypatch):
     # DB 内容已改名还原（字节与原始一致），但整体不得被称为成功
     assert _side_state(target)["db"] == before["db"]
     assert _side_state(target)["-wal"] == before["-wal"]
+
+
+# --- P-1.3 局部修复：隔离副本预检必须在清理目标文件之前 ------------------------
+
+
+def test_preflight_missing_copy_blocks_target_cleanup(tmp_path):
+    """remove_new=True 场景：任一隔离副本缺失时，目标路径上的新库文件一个字节都不许动。"""
+    target = tmp_path / "live.db"
+    target.write_bytes(b"NEW-DB")
+    Path(str(target) + "-wal").write_bytes(b"NEW-WAL")
+    Path(str(target) + "-shm").write_bytes(b"NEW-SHM")
+
+    q_db = Path(str(target) + ".restore-prev-t1")
+    q_wal = Path(str(target) + "-wal.restore-prev-t1")
+    q_db.write_bytes(b"OLD-DB")
+    q_wal.write_bytes(b"OLD-WAL")
+    q_shm_missing = Path(str(target) + "-shm.restore-prev-t1")  # 故意不创建
+
+    pairs = [(target, q_db), (Path(str(target) + "-wal"), q_wal), (Path(str(target) + "-shm"), q_shm_missing)]
+    outcome = backup._restore_moved(pairs, remove_new=True)
+
+    assert outcome.ok() is False
+    assert [p.name for p in outcome.missing] == [q_shm_missing.name]
+    # 目标文件完全不变（未被删除或覆盖）
+    assert target.read_bytes() == b"NEW-DB"
+    assert Path(str(target) + "-wal").read_bytes() == b"NEW-WAL"
+    assert Path(str(target) + "-shm").read_bytes() == b"NEW-SHM"
+    # 已存在的隔离副本也未被提前清理
+    assert q_db.exists() and q_wal.exists()
+
+
+def test_preflight_missing_db_copy_keeps_replaced_library_readable(tmp_path, monkeypatch):
+    """集成：替换成功、恢复后校验失败，进入 _unquarantine 前删掉 DB 隔离副本。"""
+    target, set_dir = _wal_target_and_set(tmp_path)
+    manifest = json.loads((set_dir / "manifest.json").read_text())
+    new_db_sha = hashlib.sha256((set_dir / "db").read_bytes()).hexdigest()
+
+    def boom(*a, **k):
+        raise RuntimeError("inject: post-check 失败")
+
+    monkeypatch.setattr(backup, "_post_restore_checks", boom)
+
+    real_unquarantine = backup._unquarantine
+    seen: dict[str, Path] = {}
+
+    def wrapper(pairs):
+        db_dst = next(dst for src, dst in pairs if not str(src).endswith(("-wal", "-shm")))
+        wal_dst = next(dst for src, dst in pairs if str(src).endswith("-wal"))
+        shm_dst = next(dst for src, dst in pairs if str(src).endswith("-shm"))
+        seen["db"], seen["wal"], seen["shm"] = db_dst, wal_dst, shm_dst
+        db_dst.unlink()          # 在 _unquarantine 开始前丢失 DB 隔离副本
+        return real_unquarantine(pairs)
+
+    monkeypatch.setattr(backup, "_unquarantine", wrapper)
+    with pytest.raises(backup.BackupError) as exc:
+        backup.restore_set(set_dir, db_path=target, backup_dir=tmp_path / "b")
+
+    assert exc.value.reason == "restore_rolled_back_leftover"
+    message = str(exc.value)
+    assert "隔离副本缺失" in message, message
+    assert str(seen["db"]) in message, "错误信息必须包含缺失隔离副本的完整路径"
+
+    # 目标路径上当前的新库 DB 未被删除或覆盖，仍等于备份集内容且可读
+    assert Path(target).exists(), "预检失败不得删除目标路径的新库 DB"
+    assert hashlib.sha256(Path(target).read_bytes()).hexdigest() == new_db_sha
+    conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert _count(conn, "logs") == manifest["tables"]["logs"]
+    conn.close()
+
+    # 其他目标文件（WAL/SHM 的隔离副本）未被提前清理
+    assert seen["wal"].exists() and seen["shm"].exists()
