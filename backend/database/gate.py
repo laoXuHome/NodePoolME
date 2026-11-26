@@ -11,6 +11,7 @@ v1.10 §2.7 规定五个 A 类入口都要调用 ``maintenance_state()``，不�
 """
 from __future__ import annotations
 
+import math
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -125,17 +126,83 @@ def external_holders(db_path: str | Path | None = None) -> list[str]:
     return backup.holders_of(path)
 
 
+class DrainFailed(RuntimeError):
+    """排空失败且调用方试图继续迁移时抛出的不可忽略失败（P-1.6 接线点）。"""
+
+    def __init__(self, result: "DrainResult") -> None:
+        super().__init__("drain_failed: " + (result.detail or "排空判据未满足"))
+        self.result = result
+        self.code = result.code
+
+    def halt_request(self) -> dict[str, Any]:
+        return self.result.halt_request()
+
+
+DRAIN_MIN_ROUNDS = 2
+DRAIN_MIN_INTERVAL = 10.0
+
+
+def effective_drain_params(rounds: int, min_interval: float) -> tuple[int, float, bool]:
+    """把调用方参数抬到安全下限之上，返回 (轮数, 间隔, 是否被抬高)。"""
+    try:
+        requested_rounds = int(rounds)
+    except (TypeError, ValueError):
+        requested_rounds = DRAIN_MIN_ROUNDS
+    effective_rounds = max(DRAIN_MIN_ROUNDS, requested_rounds)
+    try:
+        requested_interval = float(min_interval)
+    except (TypeError, ValueError):
+        requested_interval = DRAIN_MIN_INTERVAL
+    if not math.isfinite(requested_interval):
+        requested_interval = DRAIN_MIN_INTERVAL
+    effective_interval = max(DRAIN_MIN_INTERVAL, requested_interval)
+    coerced = (effective_rounds != requested_rounds
+               or effective_interval != requested_interval)
+    return effective_rounds, effective_interval, coerced
+
+
 @dataclass
 class DrainResult:
+    """排空结果。成功必须代表 ≥2 次完整检测、间隔 ≥10 秒。
+
+    ``halt_code`` / ``halt_request()`` 是 P-1.6 ``halt_migration("drain_failed")``
+    的调用契约；失败结果不允许被当成"可重试成功"。
+    """
+
     ok: bool
     code: str
     rounds: list[dict[str, Any]] = field(default_factory=list)
     detail: str = ""
     interval: float = DRAIN_MIN_INTERVAL
+    requested_rounds: int = DRAIN_MIN_ROUNDS
+    requested_interval: float = DRAIN_MIN_INTERVAL
+    coerced: bool = False
+    halt_code: str | None = None
+
+    @property
+    def halt_pending(self) -> bool:
+        return not self.ok
+
+    @property
+    def continue_allowed(self) -> bool:
+        """迁移是否可以继续：只有成功结果才为真，失败结果恒为假。"""
+        return bool(self.ok) and self.code == DRAIN_OK and not self.halt_code
+
+    def halt_request(self) -> dict[str, Any]:
+        return {
+            "code": self.halt_code or (DRAIN_FAILED if not self.ok else None),
+            "detail": self.detail,
+            "rounds": self.rounds,
+            "interval": self.interval,
+        }
 
     def as_dict(self) -> dict[str, Any]:
         return {"ok": self.ok, "code": self.code, "rounds": self.rounds,
-                "detail": self.detail, "interval": self.interval}
+                "detail": self.detail, "interval": self.interval,
+                "requested_rounds": self.requested_rounds,
+                "requested_interval": self.requested_interval,
+                "coerced": self.coerced, "halt_code": self.halt_code,
+                "continue_allowed": self.continue_allowed}
 
 
 def _drain_round(db_path: str | Path,
@@ -157,28 +224,46 @@ def _drain_round(db_path: str | Path,
     }
 
 
-def drain(*, rounds: int = 2, min_interval: float = DRAIN_MIN_INTERVAL,
+def drain(*, rounds: int = DRAIN_MIN_ROUNDS, min_interval: float = DRAIN_MIN_INTERVAL,
           clock: Callable[[], float] = time.monotonic,
           sleeper: Callable[[float], None] = time.sleep,
           checkpoint: Callable[[], tuple[int, int, int] | None] | None = None,
           holders: Callable[[], list[str]] | None = None,
           db_path: str | Path | None = None) -> DrainResult:
-    """停写排空：四项判据连续 ``rounds`` 次满足且两次间隔 ≥ ``min_interval`` 秒。
+    """停写排空：四项判据连续 ≥2 次满足且相邻两次间隔 ≥10 秒。
 
-    任一轮失败立即判定 ``drain_failed``，调用方据此走 ``halt_migration("drain_failed")``
-    的安全拒绝路径（本阶段不实现状态机）。
+    安全下限不可被调用方削弱：``rounds < 2`` 或 ``min_interval < 10`` 一律被抬到
+    下限（``coerced=True``），不返回"少检一轮/缩短间隔"的成功结果。
+
+    任一轮失败：写入闸**保持封锁**（不自动解除），结果标记
+    ``halt_code="drain_failed"``、``continue_allowed=False``；调用方必须走
+    :func:`assert_drain_ok` 或把 :meth:`DrainResult.halt_request` 交给 P-1.6 的
+    ``halt_migration("drain_failed")``。
     """
     path = Path(db_path) if db_path else config.DB_PATH
+    requested_rounds = rounds
+    requested_interval = min_interval
+    effective_rounds, effective_interval, coerced = effective_drain_params(
+        rounds, min_interval)
     checkpoint = checkpoint or (lambda: wal_checkpoint_truncate(path))
     holders = holders or (lambda: external_holders(path))
     results: list[dict[str, Any]] = []
     prev_end: float | None = None
-    for index in range(max(1, rounds)):
+
+    def _failed(detail: str) -> DrainResult:
+        # 排空失败：写入闸必须继续封锁，绝不自动解除
+        pool.ensure_blocked(pool.REASON_MAINTENANCE)
+        return DrainResult(False, DRAIN_FAILED, results, detail, effective_interval,
+                           requested_rounds=requested_rounds,
+                           requested_interval=requested_interval,
+                           coerced=coerced, halt_code=DRAIN_FAILED)
+
+    for index in range(effective_rounds):
         gap: float | None = None
         if prev_end is not None:
             gap = clock() - prev_end
-            while gap < min_interval:
-                sleeper(min_interval - gap)
+            while gap < effective_interval:
+                sleeper(effective_interval - gap)
                 gap = clock() - prev_end
         result = _drain_round(path, checkpoint, holders)
         result["index"] = index
@@ -186,9 +271,22 @@ def drain(*, rounds: int = 2, min_interval: float = DRAIN_MIN_INTERVAL,
             result["gap"] = round(gap, 3)
         results.append(result)
         if not result["ok"]:
-            return DrainResult(False, DRAIN_FAILED, results,
-                               f"第 {index + 1} 轮排空判据未通过", min_interval)
+            return _failed(f"第 {index + 1} 轮排空判据未通过")
         prev_end = clock()
     return DrainResult(True, DRAIN_OK, results,
-                       f"排空判据连续 {len(results)} 次满足，间隔 ≥ {min_interval:g} 秒",
-                       min_interval)
+                       f"排空判据连续 {len(results)} 次满足，间隔 ≥ {effective_interval:g} 秒",
+                       effective_interval,
+                       requested_rounds=requested_rounds,
+                       requested_interval=requested_interval,
+                       coerced=coerced)
+
+
+def assert_drain_ok(result: DrainResult) -> DrainResult:
+    """调用方在推进迁移前的硬断言：失败结果一律抛 :class:`DrainFailed`。
+
+    P-1.6 ``run()``/``rollback_to_snapshot()`` 必须在快照或迁移前调用本函数，
+    或在 ``except DrainFailed`` 内调用 ``halt_migration(exc.code)``。
+    """
+    if not result.continue_allowed:
+        raise DrainFailed(result)
+    return result

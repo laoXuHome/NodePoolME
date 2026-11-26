@@ -6,16 +6,22 @@
 * 只消费 A 类入口（HTTP 中间件、调度器、CLI、写入守卫、启动恢复）已经得出的
   结论，通过 :func:`block_writes` / :func:`unblock_writes` 生效。
 
-因此静态扫描下本文件不含任何维护文件读取或维护态判定的标识（PT-23）。
+并发约定（P-1.5 修复项 1）：写连接的 checkout/创建/登记与封锁操作共用同一把
+``_blocking_lock``（见 :func:`write_slot`），因此不存在"检查时未封锁 → 封锁关闭
+连接 → 另一个线程又新建并登记写连接"的窗口。
 """
 from __future__ import annotations
 
 import threading
-from typing import Any
+import time
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Any, Iterator
 
 REASON_MAINTENANCE = "maintenance"
 REASON_RECOVERY = "recovery_required"
 HALT_TAIL_OK = "halt_tail"
+HALT_SOURCE = "halt_migration"
 
 
 class PoolClosed(RuntimeError):
@@ -42,40 +48,98 @@ class HaltPreconditionFailed(RuntimeError):
     """``halt_tail`` 前置条件不满足：迁移未确认维护写入或写入封锁。"""
 
 
-_lock = threading.RLock()
+@dataclass(frozen=True)
+class MaintConfirmation:
+    """``halt_migration`` 回读确认后生成的凭据（``halt_tail`` 唯一接受的输入）。
+
+    这是 A→B 的显式交接值：只有迁移状态机在回读维护状态文件与
+    ``writes_blocked`` 后才允许构造它。普通对象、临时性子类、字段不全的鸭子类型
+    一律不得通过 :func:`halt_tail`（P-1.6 未实现前不提供其它入口）。
+    """
+
+    migration_id: str
+    maintenance_ok: bool
+    writes_blocked: bool
+    confirmed_at: float
+    source: str = HALT_SOURCE
+
+    def is_confirmed(self) -> bool:
+        return (self.source == HALT_SOURCE
+                and isinstance(self.migration_id, str) and self.migration_id.strip() != ""
+                and self.maintenance_ok is True
+                and self.writes_blocked is True
+                and isinstance(self.confirmed_at, (int, float)))
+
+
+def new_confirmation(migration_id: str, maintenance_ok: bool, writes_blocked: bool,
+                     *, now: float | None = None) -> MaintConfirmation:
+    """构造回读确认凭据的唯一工厂（供 P-1.6 ``halt_migration`` 调用）。"""
+    return MaintConfirmation(migration_id=str(migration_id),
+                             maintenance_ok=bool(maintenance_ok),
+                             writes_blocked=bool(writes_blocked),
+                             confirmed_at=time.time() if now is None else float(now))
+
+
+# 封锁与写连接 checkout 的共同同步边界（可重入，便于 block_writes 内部调用关闭）
+_blocking_lock = threading.RLock()
 _blocked_reason: str | None = None
+_blocked_seq = 0                      # 每次"从未封锁 → 封锁"自增，供测试与诊断
 
 
 # --------------------------------------------------------------------- 写入闸
+@contextmanager
+def write_slot() -> Iterator[None]:
+    """写连接 checkout 的同步边界。
+
+    在锁内复核写入闸：一旦 :func:`block_writes` 完成，任何并发 checkout 都在
+    这里被拒（不会再创建或登记新的写连接）。只读连接不经过这里。
+    """
+    with _blocking_lock:
+        reason = _blocked_reason
+        if reason is not None:
+            raise PoolClosed(reason)
+        yield
+
+
 def block_writes(reason: str = REASON_MAINTENANCE) -> str:
     """置位全局写入闸，并把连接池标记为 dead，同时关闭全部业务写连接。
 
-    由 A 类入口调用（幂等；重复调用不改变既有原因，保留首次封锁原因）。
+    置位与"关闭现有写连接"在同一个锁内完成，与 :func:`write_slot` 互斥，
+    因此封锁返回后不存在仍然存活的业务写连接。幂等：保留首次封锁原因。
     """
-    global _blocked_reason
-    with _lock:
+    global _blocked_reason, _blocked_seq
+    with _blocking_lock:
         if _blocked_reason is None:
             _blocked_reason = reason
+            _blocked_seq += 1
         current = _blocked_reason
-    close_business_connections()
+        close_business_connections()
     return current
+
+
+def ensure_blocked(reason: str = REASON_MAINTENANCE) -> str:
+    """确保写入闸处于封锁态（不解除）；用于排空失败等"必须保持封锁"的路径。"""
+    return block_writes(reason)
 
 
 def unblock_writes() -> None:
     """解除写入闸（仅用于维护结束后的受控恢复；不会自动推进迁移状态）。"""
     global _blocked_reason
-    with _lock:
+    with _blocking_lock:
         _blocked_reason = None
 
 
 def writes_blocked() -> bool:
-    with _lock:
-        return _blocked_reason is not None
+    return _blocked_reason is not None
 
 
 def blocked_reason() -> str | None:
-    with _lock:
-        return _blocked_reason
+    return _blocked_reason
+
+
+def blocked_sequence() -> int:
+    """封锁世代号（用于诊断/测试，不代表任何维护态判定）。"""
+    return _blocked_seq
 
 
 def pool_dead() -> bool:
@@ -85,9 +149,10 @@ def pool_dead() -> bool:
 
 def reset_for_tests() -> None:
     """测试专用：清空封锁标记（不关闭连接）。"""
-    global _blocked_reason
-    with _lock:
+    global _blocked_reason, _blocked_seq
+    with _blocking_lock:
         _blocked_reason = None
+        _blocked_seq = 0
 
 
 # ------------------------------------------------------------- 连接协作与排空
@@ -126,16 +191,26 @@ def confirm_writes_blocked() -> tuple[bool, dict[str, Any]]:
 
 # --------------------------------------------------------------------- halt_tail
 def halt_tail(rec: Any) -> str:
-    """停机收尾前置检查：只接受已回读确认的迁移记录，不读维护文件。
+    """停机收尾前置检查：只接受 :class:`MaintConfirmation` 回读确认凭据。
 
-    ``rec`` 必须是 ``halt_migration`` 已回读确认的记录对象，需同时具备
-    ``maintenance_ok`` 与 ``writes_blocked`` 且均为真，才允许进入后续安全收尾。
+    拒绝条件（任一命中即 :class:`HaltPreconditionFailed`）：
+
+    * 不是 :class:`MaintConfirmation`（普通对象 / 临时鸭子类型 / 字段不全）；
+    * ``source`` 不是 ``halt_migration``（未经回读确认）；
+    * ``migration_id`` 为空；
+    * ``maintenance_ok`` 或 ``writes_blocked`` 不为 ``True``（含缺省、非布尔真值）。
+
+    本函数不读维护文件、不查库、不推进任何迁移状态。
     """
-    maintenance_ok = getattr(rec, "maintenance_ok", None)
-    writes_blocked_flag = getattr(rec, "writes_blocked", None)
-    if maintenance_ok is True and writes_blocked_flag is True:
-        return HALT_TAIL_OK
-    raise HaltPreconditionFailed(
-        "halt_tail 前置条件不满足：maintenance_ok=%r writes_blocked=%r"
-        % (maintenance_ok, writes_blocked_flag)
-    )
+    if not isinstance(rec, MaintConfirmation):
+        raise HaltPreconditionFailed(
+            "halt_tail 拒绝继续：入参不是 halt_migration 回读确认凭据（%r）"
+            % (type(rec).__name__,)
+        )
+    if not rec.is_confirmed():
+        raise HaltPreconditionFailed(
+            "halt_tail 前置条件不满足：source=%r migration_id=%r "
+            "maintenance_ok=%r writes_blocked=%r"
+            % (rec.source, rec.migration_id, rec.maintenance_ok, rec.writes_blocked)
+        )
+    return HALT_TAIL_OK

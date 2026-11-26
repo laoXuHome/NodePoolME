@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -234,12 +235,11 @@ def test_pool_dead_after_block_and_readonly_still_serves(maint_file):
 
 
 def test_halt_tail_requires_confirmed_flags():
-    ok = type("Rec", (), {"maintenance_ok": True, "writes_blocked": True})()
+    ok = pool.new_confirmation("p15-mig", True, True, now=1730000000.0)
     assert pool.halt_tail(ok) == pool.HALT_TAIL_OK
     for rec in (
-        type("Rec", (), {"maintenance_ok": False, "writes_blocked": True})(),
-        type("Rec", (), {"maintenance_ok": True, "writes_blocked": False})(),
-        type("Rec", (), {})(),
+        pool.new_confirmation("p15-mig", False, True),
+        pool.new_confirmation("p15-mig", True, False),
     ):
         with pytest.raises(pool.HaltPreconditionFailed):
             pool.halt_tail(rec)
@@ -375,3 +375,208 @@ def test_wal_checkpoint_truncate_real(tmp_path):
     conn.commit()
     conn.close()
     assert gate.wal_checkpoint_truncate(path) == (0, 0, 0)
+
+
+# ============================================ P-1.5 初审修复：新增回归测试
+# ---------------------------------------------------------------- 问题 1：竞态
+def test_block_cannot_overtake_inflight_checkout(maint_file, monkeypatch):
+    """封锁不得抢跑：在途 checkout 未出同步边界前，block_writes 必须等待。"""
+    events = {"inside": threading.Event(), "go": threading.Event()}
+    real_connect = db.sqlite3.connect
+
+    def slow_connect(*args, **kwargs):
+        events["inside"].set()
+        events["go"].wait(5.0)
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(db.sqlite3, "connect", slow_connect)
+    holder: dict = {}
+
+    def checkout():
+        try:
+            holder["conn"] = db.connect()
+        except BaseException as exc:            # noqa: BLE001 - 记录而非吞掉
+            holder["err"] = exc
+
+    worker = threading.Thread(target=checkout)
+    worker.start()
+    assert events["inside"].wait(5.0), "写连接尚未进入创建阶段"
+
+    blocked = threading.Event()
+
+    def blocker():
+        pool.block_writes(pool.REASON_MAINTENANCE)
+        blocked.set()
+
+    thread_block = threading.Thread(target=blocker)
+    thread_block.start()
+    # 封锁操作不得在在途 checkout 之前完成（否则就是旧实现的竞态窗口）
+    assert blocked.wait(0.3) is False
+    events["go"].set()
+    worker.join(5)
+    thread_block.join(5)
+    assert blocked.is_set() is True
+    assert "err" not in holder and holder.get("conn") is not None
+    assert db.open_write_connections() == 0        # 封锁完成时已关闭刚登记的连接
+    with pytest.raises(pool.PoolClosed):
+        db.connect()
+
+
+def test_no_write_connection_survives_block_under_race(maint_file):
+    """8 线程并发 checkout 与封锁对撞：封锁后不得存在可用写连接。"""
+    attempts = 8
+    barrier = threading.Barrier(attempts + 1)
+    lock = threading.Lock()
+    results: list[tuple[str, float]] = []
+
+    def worker():
+        barrier.wait()
+        started = time.perf_counter()
+        try:
+            conn = db.connect()
+            conn.execute("INSERT INTO logs (ts, level, source, message) "
+                         "VALUES ('x','I','t','t')")
+            outcome = "ok"
+        except BaseException as exc:            # noqa: BLE001 - 记录而非吞掉
+            outcome = type(exc).__name__
+        with lock:
+            results.append((outcome, started))
+
+    threads = [threading.Thread(target=worker) for _ in range(attempts)]
+    for thread in threads:
+        thread.start()
+    barrier.wait()                              # 所有线程同时进入竞态窗口
+    pool.block_writes(pool.REASON_MAINTENANCE)
+    blocked_at = time.perf_counter()
+    for thread in threads:
+        thread.join(10)
+    late_writes = [r for r in results if r[0] == "ok" and r[1] > blocked_at]
+    assert late_writes == []
+    assert db.open_write_connections() == 0
+    assert pool.writes_blocked() is True
+    with pytest.raises(pool.PoolClosed):
+        db.connect()
+
+
+# ------------------------------------------------------- 问题 2：写入覆盖范围
+def test_every_write_helper_refused_after_block(maint_file):
+    _write_active(maint_file)
+    gate.apply_state(MaintState.ACTIVE)
+    logs_before = db.rows("SELECT COUNT(*) AS c FROM logs")[0]["c"]   # 只读仍可用
+    settings_before = db.get("test_interval_minutes")
+
+    with pytest.raises(pool.PoolClosed):
+        db.execute("INSERT INTO logs (ts, level, source, message) VALUES ('x','I','t','t')")
+    with pytest.raises(pool.PoolClosed):
+        db.set_setting("test_interval_minutes", "99")
+    with pytest.raises(pool.WriteRefused):
+        with db.transaction() as conn:
+            conn.execute("INSERT INTO logs (ts, level, source, message) VALUES ('x','I','t','t')")
+    with pytest.raises(pool.PoolClosed):
+        db.record_run_event("start")
+    db.append_log("INFO", "测试", "封锁期日志")                        # 不抛出、不落库
+
+    assert db.rows("SELECT COUNT(*) AS c FROM logs")[0]["c"] == logs_before
+    assert db.get("test_interval_minutes") == settings_before
+    assert db.row("SELECT 1 AS x")["x"] == 1
+
+
+def test_recovery_reason_is_preserved_after_block(maint_file):
+    _write_corrupt(maint_file)
+    gate.apply_state(MaintState.RECOVERY_REQUIRED)
+    with pytest.raises(pool.PoolClosed) as exc:
+        db.connect()
+    assert exc.value.reason == "recovery_required"
+    with pytest.raises(pool.WriteRefused) as exc2:
+        with gate.write_guard():
+            pass
+    assert exc2.value.reason == "recovery_required"
+
+
+# ------------------------------------------------------- 问题 3：排空参数下限
+@pytest.mark.parametrize("rounds,min_interval", [(1, 10.0), (0, 10.0), (2, 0.0), (2, 9.9), (1, 0.0)])
+def test_drain_parameters_cannot_weaken_floor(maint_file, rounds, min_interval):
+    _write_active(maint_file)
+    gate.apply_state(MaintState.ACTIVE)
+    clock = _FakeClock()
+    result = gate.drain(rounds=rounds, min_interval=min_interval, clock=clock,
+                        sleeper=clock.sleep, checkpoint=lambda: (0, 0, 0), holders=lambda: [])
+    assert result.ok is True
+    assert len(result.rounds) >= 2                 # 成功必定代表 ≥2 次完整检测
+    assert result.interval >= 10.0
+    assert result.rounds[1]["gap"] >= 10.0
+    assert result.coerced is True
+    assert result.requested_rounds == rounds and result.requested_interval == min_interval
+
+
+def test_drain_legal_parameters_not_coerced(maint_file):
+    _write_active(maint_file)
+    gate.apply_state(MaintState.ACTIVE)
+    clock = _FakeClock()
+    result = gate.drain(rounds=3, min_interval=10.0, clock=clock, sleeper=clock.sleep,
+                        checkpoint=lambda: (0, 0, 0), holders=lambda: [])
+    assert result.ok is True and result.coerced is False
+    assert len(result.rounds) == 3
+    assert all(r["gap"] >= 10.0 for r in result.rounds if "gap" in r)
+
+
+# --------------------------------------------------- 问题 4：失败保持封锁
+def test_drain_failure_keeps_gate_blocked_and_blocks_continue(maint_file):
+    _write_active(maint_file)
+    gate.apply_state(MaintState.ACTIVE)
+    clock = _FakeClock()
+    result = gate.drain(rounds=2, min_interval=10.0, clock=clock, sleeper=clock.sleep,
+                        checkpoint=lambda: (0, 1, 1), holders=lambda: [])
+    assert result.ok is False
+    assert result.code == gate.DRAIN_FAILED
+    assert result.halt_code == "drain_failed"
+    assert result.halt_pending is True
+    assert result.continue_allowed is False
+    assert result.halt_request()["code"] == "drain_failed"
+    assert pool.writes_blocked() is True           # 不自动解除
+    with pytest.raises(pool.PoolClosed):
+        db.connect()
+    with pytest.raises(gate.DrainFailed):
+        gate.assert_drain_ok(result)
+
+
+def test_drain_failure_blocks_even_if_gate_was_open(maint_file):
+    clock = _FakeClock()
+    result = gate.drain(rounds=2, min_interval=10.0, clock=clock, sleeper=clock.sleep,
+                        checkpoint=lambda: (0, 0, 0), holders=lambda: ["9:9"])
+    assert result.ok is False
+    assert pool.writes_blocked() is True           # 失败必须落到封锁态
+    with pytest.raises(pool.PoolClosed):
+        db.connect()
+
+
+def test_assert_drain_ok_passes_on_success(maint_file):
+    _write_active(maint_file)
+    gate.apply_state(MaintState.ACTIVE)
+    clock = _FakeClock()
+    result = gate.drain(rounds=2, min_interval=10.0, clock=clock, sleeper=clock.sleep,
+                        checkpoint=lambda: (0, 0, 0), holders=lambda: [])
+    assert gate.assert_drain_ok(result) is result
+
+
+# --------------------------------------------------------- 问题 5：halt_tail 契约
+def test_halt_tail_rejects_unconfirmed_objects(maint_file):
+    _write_active(maint_file)
+    candidates = [
+        {"maintenance_ok": True, "writes_blocked": True},
+        type("Rec", (), {"maintenance_ok": True, "writes_blocked": True})(),
+        pool.MaintConfirmation("m", True, True, 1.0, source="manual"),
+        pool.MaintConfirmation("", True, True, 1.0),
+        pool.MaintConfirmation("m", 1, True, 1.0),          # 非 True 的布尔真值
+        pool.MaintConfirmation("m", True, 1, 1.0),
+        pool.MaintConfirmation("m", True, True, "now"),
+    ]
+    for candidate in candidates:
+        with pytest.raises(pool.HaltPreconditionFailed):
+            pool.halt_tail(candidate)
+
+
+def test_halt_tail_accepts_only_confirmation_from_halt_migration():
+    rec = pool.new_confirmation("mig-42", True, True)
+    assert rec.source == "halt_migration"
+    assert pool.halt_tail(rec) == pool.HALT_TAIL_OK

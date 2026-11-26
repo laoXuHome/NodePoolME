@@ -4,6 +4,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Iterable
 
 from backend import config
@@ -282,40 +283,65 @@ def now() -> str:
     return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def connect() -> sqlite3.Connection:
-    """业务写连接（thread-local 复用）。
+_REQUIRED_PRAGMAS = ("foreign_keys", "recursive_triggers")
 
-    维护态下连接池已被 A 类入口标记 dead，checkout 直接抛 ``PoolClosed``；
-    读写统一走这里的老代码在维护期会得到写侧拒绝，只读函数改走
-    :func:`connect_readonly`（见 :func:`read_connection`）。
+
+def _pragmas_on(conn: sqlite3.Connection) -> bool:
+    """``foreign_keys`` 与 ``recursive_triggers`` 是否都为 ON（不抛出）。"""
+    try:
+        for name in _REQUIRED_PRAGMAS:
+            if int(conn.execute(f"PRAGMA {name}").fetchone()[0]) != 1:
+                return False
+    except Exception:
+        return False
+    return True
+
+
+def connect() -> sqlite3.Connection:
+    """业务写连接（thread-local 复用），checkout 与封锁共用同一条同步边界。
+
+    1. 进入 :func:`pool.write_slot`：与 ``block_writes()`` 互斥，封锁完成后任何
+       并发 checkout 都在这里被 ``PoolClosed`` 拒绝，不会再创建/登记写连接；
+    2. 连接代际不符（被批量关闭过）时丢弃旧句柄并重开；
+    3. 新建连接必须通过 ``foreign_keys=ON`` / ``recursive_triggers=ON`` 校验，
+       不通过即 ``WriteRefused("pragmas_not_enabled")``，绝不静默写库。
     """
-    if pool.pool_dead():
-        raise pool.PoolClosed(pool.blocked_reason() or pool.REASON_MAINTENANCE)
-    conn = getattr(_local, "conn", None)
-    if conn is not None and getattr(_local, "conn_gen", None) != _GENERATION:
-        try:
-            conn.close()
-        except Exception:
-            pass
-        conn = None
-    if conn is None:
-        conn = sqlite3.connect(str(config.DB_PATH), timeout=30, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA busy_timeout=30000")
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA recursive_triggers=ON")
-        _local.conn = conn
-        _local.conn_gen = _GENERATION
-        _WRITE_CONNS[id(conn)] = conn
-    return conn
+    with pool.write_slot():
+        conn = getattr(_local, "conn", None)
+        if conn is not None and getattr(_local, "conn_gen", None) != _GENERATION:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
+        if conn is None:
+            conn = sqlite3.connect(str(config.DB_PATH), timeout=30, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA recursive_triggers=ON")
+            if not _pragmas_on(conn):
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                raise pool.WriteRefused("pragmas_not_enabled")
+            _local.conn = conn
+            _local.conn_gen = _GENERATION
+            _WRITE_CONNS[id(conn)] = conn
+        return conn
 
 
 def connect_readonly() -> sqlite3.Connection:
-    """只读连接（``mode=ro`` + ``PRAGMA query_only=1``），thread-local 复用。
+    """只读连接（``PRAGMA query_only=1``），thread-local 复用。
 
-    维护态 / 恢复态下的读请求仍可服务；连接自打开起即禁止任何写入。
+    为什么不用 ``mode=ro``：WAL 库的 schema 与最新页可能只在 ``-wal`` 里，
+    纯只读句柄在部分平台无法完成 WAL 恢复（实测新建库 + WAL 下 ``mode=ro``
+    只能看到空 schema）。因此这里用 ``mode=rw``（库缺失即报错，不会建库）
+    打开，再立刻置 ``PRAGMA query_only=1``，由 SQLite 拒绝一切 INSERT/UPDATE/
+    DELETE/DDL；只读语义由 query_only 保证，而不是靠文件名参数。
     """
     conn = getattr(_local, "ro", None)
     if conn is not None and getattr(_local, "ro_gen", None) != _GENERATION:
@@ -325,8 +351,8 @@ def connect_readonly() -> sqlite3.Connection:
             pass
         conn = None
     if conn is None:
-        conn = sqlite3.connect(str(config.DB_PATH) + "?mode=ro", uri=True, timeout=30,
-                               check_same_thread=False)
+        conn = sqlite3.connect(Path(config.DB_PATH).as_uri() + "?mode=rw", uri=True,
+                               timeout=30, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA query_only=1")
         conn.execute("PRAGMA busy_timeout=30000")
@@ -337,10 +363,17 @@ def connect_readonly() -> sqlite3.Connection:
 
 
 def read_connection() -> sqlite3.Connection:
-    """读路径入口：正常态沿用写连接（保持既有行为），封锁态退化为只读连接。"""
+    """读路径入口：正常态沿用写连接（保持既有行为），封锁态退化为只读连接。
+
+    封锁与读请求可能并发：独立布尔检查之后仍可能撞上刚置位的写入闸，
+    因此这里对 ``PoolClosed`` 再兜一次，保证只读服务不因封锁而失败。
+    """
     if pool.pool_dead():
         return connect_readonly()
-    return connect()
+    try:
+        return connect()
+    except pool.PoolClosed:
+        return connect_readonly()
 
 
 def open_write_connections() -> int:
