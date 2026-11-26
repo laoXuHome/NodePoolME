@@ -167,6 +167,19 @@ const statusCounts = computed(() => ({
   unknown: data.value?.nodes_unknown || 0,
 }))
 
+const publishedTotal = computed(() => (data.value?.airport_list || []).reduce((sum, row) => sum + Number(row.published_count || 0), 0))
+const publishRatio = computed(() => {
+  const total = data.value?.nodes_total || 0
+  return total ? Math.round((publishedTotal.value / total) * 100) : 0
+})
+const airportOk = computed(() => data.value?.fetch?.ok || 0)
+const airportTotal = computed(() => data.value?.fetch?.total || data.value?.airport_list?.length || 0)
+const airportFailed = computed(() => data.value?.fetch?.error || 0)
+const qualifiedPct = computed(() => {
+  const total = data.value?.nodes_total || 0
+  return total ? Math.round(((data.value?.nodes_qualified || 0) / total) * 100) : 0
+})
+
 const rateMetrics = [
   { key: 'available_rate' },
   { key: 'publish_rate' },
@@ -210,7 +223,7 @@ function scoreSampleText(row) {
   return row.score_samples ? `${row.score_samples} 个完整快照` : '按当前值'
 }
 function rateText(row, key) {
-  if (!row.enabled || row[key] === null || row[key] === undefined) return '—'
+  if (!row.enabled || !row.pool_count || row[key] === null || row[key] === undefined) return '—'
   const value = Number(row[key])
   return `${value % 1 === 0 ? value.toFixed(0) : value.toFixed(1)}%`
 }
@@ -357,59 +370,97 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
 </script>
 
 <template>
-  <div class="np-page" v-loading="loading">
-    <h2 class="np-page-title">仪表盘</h2>
-    <OperationsMap v-if="data" :data="data" :runtime="runtime" :version="state.version" />
-
-    <div class="np-dash-band" v-if="data">
-      <div>
-        <span class="np-band-kicker">REALTIME CONTROL</span>
-        <h2>缓存池与检测脉冲</h2>
+  <div class="np-page np-dash-page" v-loading="loading">
+    <header v-if="data" class="dash-headline">
+      <div class="dash-headline-copy">
+        <span class="dash-eyebrow"><i></i> NODE POOL OPERATIONS · LIVE</span>
+        <h1>节点池<span>控制总览</span></h1>
+        <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
-      <p>左侧是当前缓存池结构与机场评价，右侧是检测任务和系统日志。所有检测只读取本地缓存。</p>
-    </div>
+      <div class="dash-headline-actions">
+        <span class="dash-live" :class="{ 'is-running': runtime.running }"><i></i>{{ runStateText }}</span>
+        <el-button class="dash-run-btn" type="primary" :disabled="runtime.running" @click="runNow">
+          <el-icon><VideoPlay /></el-icon>{{ runtime.running ? '检测进行中' : '启动全量检测' }}
+        </el-button>
+      </div>
+    </header>
 
-    <div class="np-dash-layout" v-if="data">
-      <!-- 缓存池 + 机场拉取：合并成主统计卡 -->
-      <div class="np-card np-dash-pool">
-        <div class="np-section-title">
-          <span class="np-dot" :class="(data.fetch?.error || data.fetch?.fetching) ? 'is-warning' : 'is-success'" />
-          缓存池
-          <el-tag :type="fetchState.type" size="small" effect="plain">
-            {{ data.fetch?.fetching ? fetchState.text : data.fetch?.error ? `${data.fetch.error} 个机场失败` : `${data.fetch?.ok || 0}/${data.fetch?.total || 0} 机场正常` }}
-          </el-tag>
+    <section v-if="data" class="kpi-grid">
+      <article class="kpi-card kpi-mint">
+        <div class="kpi-top"><span>NODE INVENTORY</span><el-icon><Connection /></el-icon></div>
+        <div class="kpi-value">{{ data.nodes_total }}<small>缓存节点</small></div>
+        <p>{{ data.nodes_unknown || 0 }} 个待检测 · {{ data.nodes_unavailable || 0 }} 个不可用</p>
+        <div class="kpi-track"><i :style="{ width: `${qualifiedPct}%` }"></i></div>
+      </article>
+      <article class="kpi-card kpi-violet">
+        <div class="kpi-top"><span>DISTRIBUTION</span><el-icon><Link /></el-icon></div>
+        <div class="kpi-value">{{ publishedTotal }}<small>下发节点</small></div>
+        <p>占缓存池 {{ publishRatio }}% · 原子替换统一订阅</p>
+        <div class="kpi-track"><i :style="{ width: `${publishRatio}%` }"></i></div>
+      </article>
+      <article class="kpi-card kpi-blue">
+        <div class="kpi-top"><span>SOURCE HEALTH</span><el-icon><OfficeBuilding /></el-icon></div>
+        <div class="kpi-value">{{ airportOk }}<small>/ {{ airportTotal }} 机场在线</small></div>
+        <p>{{ airportFailed ? `${airportFailed} 个拉取失败` : '全部机场订阅同步正常' }} · 失败保留旧缓存</p>
+        <div class="kpi-airports">
+          <i v-for="row in (data.airport_list || [])" :key="row.id"
+             :class="!row.enabled ? 'is-off' : row.last_status === 'ok' ? 'is-ok' : row.last_status === 'error' ? 'is-bad' : 'is-wait'"
+             :title="row.name" />
+        </div>
+      </article>
+      <article class="kpi-card kpi-amber">
+        <div class="kpi-top"><span>TEST PULSE</span><el-icon><Aim /></el-icon></div>
+        <div class="kpi-pulse-row">
+          <div class="kpi-value">{{ latencyPct }}<small>% 延迟检测</small></div>
+          <div class="kpi-ring" :style="{ background: `conic-gradient(#2ee6a8 ${latencyPct}%, rgba(255,255,255,.08) 0)` }">
+            <span>{{ latencyPct }}<small>%</small></span>
+          </div>
+        </div>
+        <p>标签检测 {{ tagPct }}% · 批次 {{ data.batch?.id ? `#${data.batch.id}` : '—' }} · {{ batchStatusLabel }}</p>
+        <div class="kpi-track"><i :style="{ width: `${tagPct}%` }"></i></div>
+      </article>
+    </section>
+
+    <div v-if="data" class="dash-workbench">
+      <section class="console-panel pool-panel">
+        <div class="panel-head">
+          <div>
+            <span class="panel-kicker">POOL STRUCTURE</span>
+            <h2>节点资产与机场评分</h2>
+          </div>
+          <div class="pool-status-pill" :class="{ 'is-warn': data.fetch?.error || data.fetch?.fetching }">
+            <i></i>{{ data.fetch?.fetching ? fetchState.text : data.fetch?.error ? `${data.fetch.error} 个机场失败` : `${data.fetch?.ok || 0}/${data.fetch?.total || 0} 机场正常` }}
+          </div>
         </div>
 
-        <div class="np-pool-overview">
-          <div class="np-pool-status">
-            <div class="np-pool-status-title">缓存池状态</div>
-            <div class="np-pool-status-total"><strong>{{ data.nodes_total }}</strong><span>节点</span></div>
-            <div class="np-pool-stack-wrap" :style="{ '--stack-top': statusTopColor }">
-              <div class="np-pool-stack"
-                   :title="`下发 ${statusCounts.qualified} · 未达标 ${statusCounts.qualified ? statusCounts.available - statusCounts.qualified : statusCounts.available} · 不可用 ${statusCounts.unavailable}`">
-                <div v-for="segment in statusSegments" :key="segment.key"
-                     class="np-pool-stack-seg" :class="{ 'is-thin': segment.height < 15 }"
-                     :style="{ height: `${segment.height}%`, background: `linear-gradient(90deg, ${segment.side}, ${segment.color} 38%, ${segment.light} 70%, ${segment.color})` }">
-                  <div class="np-pool-stack-label" :style="{ color: segment.ink, textShadow: segment.ink === '#ffffff' ? '0 1px 2px rgba(0,0,0,.3)' : 'none' }"
-                       :title="`${segment.label} ${segment.count} 个 · ${segment.percent}%`">
-                    <em>{{ segment.short }}</em><b>{{ segment.count }}</b><i>{{ segment.percent }}%</i>
-                  </div>
-                </div>
-              </div>
+        <div class="pool-summary">
+          <div class="pool-total">
+            <span>POOL TOTAL</span>
+            <strong>{{ data.nodes_total }}</strong>
+            <small>{{ qualifiedPct }}% 已通过延迟门槛</small>
+          </div>
+          <div class="pool-mix-wrap">
+            <div class="pool-mix" aria-label="节点池分布">
+              <span v-for="segment in statusSegments" :key="segment.key"
+                    :style="{ width: `${segment.percent}%`, background: segment.color }"
+                    :title="`${segment.label} ${segment.count} 个 · ${segment.percent}%`" />
+            </div>
+            <div class="pool-legend">
+              <span v-for="segment in statusSegments" :key="`lg-${segment.key}`">
+                <i :style="{ background: segment.color }"></i>{{ segment.label }} <b>{{ segment.count }}</b>
+              </span>
+              <span v-if="!statusSegments.length" class="np-muted">暂无节点状态</span>
             </div>
           </div>
-
-          <div class="np-pool-score-panel">
-        <div class="np-score-head">
-          <div>
-            <b>机场评价</b>
-            <span>近 {{ data.score_window_days || 7 }} 天数据</span>
+          <div class="pool-side-stats">
+            <div><span>待检测</span><b>{{ statusCounts.unknown }}</b></div>
+            <div><span>不可用</span><b>{{ statusCounts.unavailable }}</b></div>
+            <div><span>已下发</span><b>{{ statusCounts.qualified }}</b></div>
           </div>
-          <span class="np-score-sort">按展示分降序 ↓</span>
         </div>
 
-        <div v-if="data.airport_list?.length" class="np-score-table-wrap">
-          <table class="np-score-table">
+        <div v-if="data.airport_list?.length" class="score-desktop">
+          <table class="np-score-table console-score-table">
             <colgroup>
               <col class="np-score-col-rank" />
               <col class="np-score-col-name" />
@@ -422,17 +473,17 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
             <thead>
               <tr>
                 <th>#</th>
-                <th class="is-left">机场</th>
+                <th class="is-left">机场资产</th>
                 <th>可用率 <i>{{ scoreWeights.available }}%</i></th>
                 <th>下发率 <i>{{ scoreWeights.publish }}%</i></th>
-                <th>标签合格率 <i>{{ scoreWeights.tag }}%</i></th>
-                <th class="is-status">数据成熟度</th>
+                <th>标签率 <i>{{ scoreWeights.tag }}%</i></th>
+                <th class="is-status">成熟度</th>
                 <th class="is-score">评分</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(row, idx) in rankedAirports" :key="row.id" :class="{ 'is-off': !row.enabled }">
-                <td class="np-score-rank" :class="{ 'is-off': !row.enabled }">{{ idx + 1 }}</td>
+                <td class="np-score-rank" :class="{ 'is-off': !row.enabled }">{{ String(idx + 1).padStart(2, '0') }}</td>
                 <td class="np-score-airport">
                   <div class="np-score-airport-name">
                     <span class="np-airport-dot" :class="!row.enabled ? 'is-off' : `is-${row.last_status || 'none'}`" :title="airportStateText(row)" />
@@ -460,174 +511,163 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               </tr>
             </tbody>
           </table>
-        </div>
-        <div v-if="data.airport_list?.length" class="np-score-foot">
-          <span>原始评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 标签合格率 {{ scoreWeights.tag }}%；前 2 项取近 {{ data.score_window_days || 7 }} 天里按检测计划生成、且被快照命中的采样点，再做时段加权（17:00–01:00 权重 50%、01:00–08:00 15%、08:00–17:00 35%）。展示分 = min(100, 原始分 + 追加分)，追加分 = 1 + (原始分 − 10) / 60 × 14（10 分以下固定 +1、70 分及以上固定 +15）</span>
-          <span>覆盖率 = 有效采样点 / 计划采样点，只反映数据完整度，不参与评分；每天不足 4 份或 60 分钟内超过 2 份的日期整日淘汰，暂停、中断和单节点测试不计入</span>
-        </div>
+          <div class="score-footline">
+            <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 标签 {{ scoreWeights.tag }}%；近 {{ data.score_window_days || 7 }} 天动态采样。</span>
+            <span>成熟度只表示数据可信度，不参与评分。</span>
+          </div>
         </div>
 
-        <div v-if="data.airport_list?.length" class="np-pool-charts">
-            <div class="np-trend-toolbar">
-              <span>节点趋势 <em>{{ trendRangeText }} · {{ trendSampleText }}</em></span>
-              <div class="np-trend-range" role="group" aria-label="趋势区间">
-                <button type="button" :class="{ 'is-active': trendRange === '1d' }" @click="trendRange = '1d'">近 1 天</button>
-                <button type="button" :class="{ 'is-active': trendRange === '7d' }" @click="trendRange = '7d'">近 7 天</button>
-                <button type="button" :class="{ 'is-active': trendRange === '30d' }" @click="trendRange = '30d'">近 30 天</button>
+        <div v-if="data.airport_list?.length" class="score-mobile">
+          <article v-for="(row, idx) in rankedAirports" :key="`m-${row.id}`" class="score-mobile-card" :class="{ 'is-off': !row.enabled }">
+            <div class="score-mobile-head">
+              <span class="score-mobile-rank">{{ String(idx + 1).padStart(2, '0') }}</span>
+              <div>
+                <b>{{ row.name }}</b>
+                <small>{{ row.enabled ? `${row.pool_count} 节点` : '未启用' }} · {{ row.data_status_text || '—' }}</small>
+              </div>
+              <div class="np-pool-score" :class="scoreTone(row)">
+                <strong>{{ row.enabled && row.score !== null ? row.score : '—' }}</strong><em>{{ row.score_grade }}</em>
               </div>
             </div>
-            <div v-for="chart in trendCharts" :key="chart.key" class="np-pool-chart">
-              <TrendChart
-                :points="chart.points"
-                :rows="chart.rows"
-                :field="chart.field"
-                :range="trendRange"
-                :title="chart.title"
-                :palette="AIRPORT_COLORS"
-              />
+            <div class="score-mobile-metrics">
+              <span>可用 <b>{{ rateText(row, 'available_rate') }}</b></span>
+              <span>下发 <b>{{ rateText(row, 'publish_rate') }}</b></span>
+              <span>标签 <b>{{ rateText(row, 'tag_rate') }}</b></span>
             </div>
+          </article>
+        </div>
+
+        <div v-if="!data.airport_list?.length" class="np-empty">缓存池为空，先到「机场接入」添加并拉取订阅。</div>
+      </section>
+
+      <aside class="dash-side">
+        <section class="console-panel detect-panel">
+          <div class="panel-head compact">
+            <div>
+              <span class="panel-kicker">LIVE BATCH</span>
+              <h2>检测任务</h2>
             </div>
-          </div>
-
-        <div v-if="!data.airport_list?.length" class="np-empty">缓存池为空，先到「机场管理」添加并拉取订阅。</div>
-
-      </div>
-
-      <div class="np-dash-side">
-      <!-- 检测任务 + 最近批次：合并成一块实时状态 -->
-      <div class="np-card np-dash-detect">
-        <div class="np-detect-head">
-          <div class="np-detect-title">
-            检测任务
             <el-tag v-if="runtime.running" :type="runTagType" size="small">{{ runStateText }}</el-tag>
             <el-tag v-else type="success" size="small">空闲</el-tag>
           </div>
-          <div class="np-detect-inline">
-            <span>引擎 <b>{{ runtime.engine }}</b></span>
-            <span>上次启动 {{ shortTs(runtime.last_cycle_at || data.batch?.started_at) }}</span>
+
+          <div class="detect-rings">
+            <div class="ring-item">
+              <div class="np-batch-gauge is-ring" :class="`is-${runTone}`">
+                <svg viewBox="0 0 120 120" aria-hidden="true">
+                  <circle class="np-batch-gauge-track" cx="60" cy="60" r="48" pathLength="100" />
+                  <circle class="np-batch-gauge-value" cx="60" cy="60" r="48" pathLength="100"
+                          :style="{ strokeDasharray: `${latencyPct} 100` }" />
+                </svg>
+                <div class="np-batch-gauge-label"><strong>{{ latencyPct }}</strong><span>%</span></div>
+              </div>
+              <b>延迟检测</b>
+              <small>{{ runtime.latency_done || 0 }} / {{ runtime.latency_total || 0 }}</small>
+            </div>
+            <div class="ring-item">
+              <div class="np-batch-gauge is-ring is-tag" :class="`is-${runTone}`">
+                <svg viewBox="0 0 120 120" aria-hidden="true">
+                  <circle class="np-batch-gauge-track" cx="60" cy="60" r="48" pathLength="100" />
+                  <circle class="np-batch-gauge-value" cx="60" cy="60" r="48" pathLength="100"
+                          :style="{ strokeDasharray: `${tagPct} 100` }" />
+                </svg>
+                <div class="np-batch-gauge-label"><strong>{{ tagPct }}</strong><span>%</span></div>
+              </div>
+              <b>标签检测</b>
+              <small>{{ runtime.tag_done || 0 }} / {{ runtime.tag_total || 0 }}</small>
+            </div>
           </div>
-          <div class="np-detect-actions">
+
+          <div class="current-node" :class="{ 'is-idle': !runtime.running }">
+            <template v-if="runtime.running && runtime.current">
+              <div class="current-head"><i class="np-current-dot" /><span>正在检测</span><span class="np-flex" /><em>{{ runtime.current.stage }}</em></div>
+              <b class="current-name" :title="runtime.current.node">{{ runtime.current.node }}</b>
+              <div class="current-meta">
+                <span>{{ runtime.current.airport || '—' }}</span>
+                <span v-if="runtime.current.g || runtime.current.w">G {{ runtime.current.g ?? '—' }}ms · W {{ runtime.current.w ?? '—' }}ms</span>
+                <span class="np-current-result" :class="{ 'is-bad': ['未达标','未通过'].includes(runtime.current.result) }">{{ runtime.current.result }}</span>
+              </div>
+            </template>
+            <template v-else>
+              <div class="current-head"><i class="np-current-dot is-idle" /><span>调度空闲</span><span class="np-flex" /><em>{{ runtime.engine || 'mihomo' }}</em></div>
+              <div class="current-meta"><span>批次 #{{ runtime.batch_id || data.batch?.id || '—' }}</span><span>已处理 {{ runtime.done || 0 }} / {{ runtime.total || 0 }} 项</span></div>
+            </template>
+          </div>
+
+          <div class="detect-actions">
             <el-button v-if="!runtime.running" size="small" type="primary" @click="runNow">立即检测</el-button>
-            <el-button v-if="runtime.running && !runtime.paused"
-                       size="small" :disabled="runtime.stop_requested" @click="pauseCycle">暂停</el-button>
-            <el-button v-if="runtime.running && runtime.paused"
-                       size="small" type="success" :disabled="runtime.stop_requested" @click="resumeCycle">继续</el-button>
-            <el-button v-if="runtime.running" size="small" type="danger" plain
-                       :disabled="runtime.stop_requested" @click="stopCycle">
+            <el-button v-if="runtime.running && !runtime.paused" size="small" :disabled="runtime.stop_requested" @click="pauseCycle">暂停</el-button>
+            <el-button v-if="runtime.running && runtime.paused" size="small" type="success" :disabled="runtime.stop_requested" @click="resumeCycle">继续</el-button>
+            <el-button v-if="runtime.running" size="small" type="danger" plain :disabled="runtime.stop_requested" @click="stopCycle">
               {{ runtime.stop_requested ? '正在停止' : '停止检测' }}
             </el-button>
           </div>
-        </div>
 
-        <div class="np-detect-rings">
-          <div class="np-ring-item">
-            <div class="np-batch-gauge is-ring" :class="`is-${runTone}`">
-              <svg viewBox="0 0 160 160" aria-hidden="true">
-                <circle class="np-batch-gauge-track" cx="80" cy="80" r="65" pathLength="100" />
-                <circle class="np-batch-gauge-value" cx="80" cy="80" r="65" pathLength="100"
-                        :style="{ strokeDasharray: `${latencyPct} 100` }" />
-              </svg>
-              <div class="np-batch-gauge-label"><strong>{{ latencyPct }}</strong><span>%</span></div>
+          <div class="detect-stats">
+            <div><span>批次</span><b>#{{ data.batch?.id || '—' }}</b></div>
+            <div><span>耗时</span><b>{{ batchDuration }}</b></div>
+            <div><span>剩余</span><b>{{ batchRemaining }}</b></div>
+          </div>
+        </section>
+
+        <section class="console-panel logs-panel">
+          <div class="panel-head compact">
+            <div>
+              <span class="panel-kicker">SYSTEM LOG</span>
+              <h2>运行日志</h2>
             </div>
-            <div class="np-ring-meta">
-              <b>延迟检测</b>
-              <span>{{ runtime.latency_done || 0 }} / {{ runtime.latency_total || 0 }} 节点</span>
+            <div class="log-tools">
+              <el-select v-model="logLevel" size="small" style="width:88px" @change="loadLogs">
+                <el-option label="全部" value="ALL" />
+                <el-option label="信息" value="INFO" />
+                <el-option label="警告" value="WARN" />
+                <el-option label="错误" value="ERROR" />
+                <el-option label="调试" value="DEBUG" />
+              </el-select>
+              <el-button size="small" :loading="logsLoading" @click="loadLogs">刷新</el-button>
             </div>
           </div>
-          <div class="np-ring-item">
-            <div class="np-batch-gauge is-ring is-tag" :class="`is-${runTone}`">
-              <svg viewBox="0 0 160 160" aria-hidden="true">
-                <circle class="np-batch-gauge-track" cx="80" cy="80" r="65" pathLength="100" />
-                <circle class="np-batch-gauge-value" cx="80" cy="80" r="65" pathLength="100"
-                        :style="{ strokeDasharray: `${tagPct} 100` }" />
-              </svg>
-              <div class="np-batch-gauge-label"><strong>{{ tagPct }}</strong><span>%</span></div>
+          <div class="console-log" v-loading="logsLoading">
+            <div v-for="log in logs" :key="log.id">
+              <time>{{ formatTs(log.ts) }}</time>
+              <span :class="`lv-${log.level}`">{{ logLevelLabel(log.level) }}</span>
+              <span class="src">{{ logSourceLabel(log.source) }}</span>
+              <p>{{ log.message }}</p>
             </div>
-            <div class="np-ring-meta">
-              <b>标签检测</b>
-              <span>{{ runtime.tag_done || 0 }} / {{ runtime.tag_total || 0 }} 项</span>
-            </div>
+            <div v-if="!logs.length" class="np-empty">暂无日志</div>
           </div>
-        </div>
+          <span class="log-count">{{ logs.length }}/300 · 自动刷新</span>
+        </section>
+      </aside>
+    </div>
 
-        <div class="np-current" :class="{ 'is-idle': !runtime.running }">
-          <template v-if="runtime.running && runtime.current">
-            <div class="np-current-head">
-              <i class="np-current-dot" />
-              <span>正在检测</span>
-              <span class="np-flex" />
-              <span class="np-current-stage">{{ runtime.current.stage }}</span>
-            </div>
-            <div class="np-current-node">
-              <b :title="runtime.current.node">{{ runtime.current.node }}</b>
-            </div>
-            <div class="np-current-meta">
-              <span>{{ runtime.current.airport || '—' }}</span>
-              <span v-if="runtime.current.protocol">{{ runtime.current.protocol }}</span>
-              <span v-if="runtime.current.g || runtime.current.w" class="np-current-lat">
-                G {{ runtime.current.g ?? '—' }}ms · W {{ runtime.current.w ?? '—' }}ms
-              </span>
-              <span v-else-if="runtime.current.latency" class="np-current-lat">{{ runtime.current.latency }}ms</span>
-              <span class="np-current-result" :class="{ 'is-bad': ['未达标','未通过'].includes(runtime.current.result) }">
-                {{ runtime.current.result }}
-              </span>
-            </div>
-          </template>
-          <template v-else>
-            <div class="np-current-head">
-              <i class="np-current-dot is-idle" />
-              <span>{{ runtime.running ? '等待节点数据' : '当前空闲' }}</span>
-              <span class="np-flex" />
-              <span v-if="runtime.phase && runtime.running" class="np-current-stage">{{ runtime.phase }}</span>
-            </div>
-            <div class="np-current-meta">
-              <span>批次 #{{ runtime.batch_id || '—' }}</span>
-              <span>已处理 {{ runtime.done || 0 }} / {{ runtime.total || 0 }} 项</span>
-              <span v-if="runtime.last_cycle_at">上次启动 {{ shortTs(runtime.last_cycle_at) }}</span>
-            </div>
-          </template>
-        </div>
+    <OperationsMap v-if="data" :data="data" :runtime="runtime" :version="state.version" />
 
-        <div class="np-detect-batch-meta">
-          <span>批次 #{{ data.batch?.id || '—' }}</span>
-          <span>{{ batchStatusLabel }}</span>
-          <span>耗时 {{ batchDuration }}</span>
-          <span>剩余 {{ batchRemaining }}</span>
+    <section v-if="data?.airport_list?.length" class="console-panel trend-panel">
+      <div class="panel-head">
+        <div>
+          <span class="panel-kicker">POOL HISTORY</span>
+          <h2>节点趋势</h2>
+          <p>{{ trendRangeText }} · {{ trendSampleText }}</p>
         </div>
-
-        <div class="np-detect-sumstats">
-          <div><span>启用标签</span><b>{{ data.group_summary?.count || 0 }}</b></div>
-          <div><span>命中节点</span><b>{{ data.group_summary?.hits || 0 }}</b></div>
-          <div><span>累计通过</span><b>{{ data.group_summary?.passed || 0 }}</b></div>
+        <div class="trend-range" role="group" aria-label="趋势区间">
+          <button type="button" :class="{ 'is-active': trendRange === '1d' }" @click="trendRange = '1d'">1D</button>
+          <button type="button" :class="{ 'is-active': trendRange === '7d' }" @click="trendRange = '7d'">7D</button>
+          <button type="button" :class="{ 'is-active': trendRange === '30d' }" @click="trendRange = '30d'">30D</button>
         </div>
       </div>
+      <div class="trend-grid">
+        <div v-for="chart in trendCharts" :key="chart.key" class="trend-card">
+          <TrendChart :points="chart.points" :rows="chart.rows" :field="chart.field"
+                      :range="trendRange" :title="chart.title" :palette="AIRPORT_COLORS" />
+        </div>
+      </div>
+    </section>
 
-      <div class="np-card np-log-card">
-        <div class="np-section-title np-log-head">
-          <span class="np-log-title">系统日志</span>
-          <div class="np-log-tools">
-            <el-select v-model="logLevel" size="small" style="width:92px" @change="loadLogs">
-              <el-option label="全部级别" value="ALL" />
-              <el-option label="信息" value="INFO" />
-              <el-option label="警告" value="WARN" />
-              <el-option label="错误" value="ERROR" />
-              <el-option label="调试" value="DEBUG" />
-            </el-select>
-            <span class="np-muted">{{ logs.length }}/300 · 自动刷新</span>
-            <el-button size="small" :loading="logsLoading" @click="loadLogs">刷新</el-button>
-          </div>
-        </div>
-        <div class="np-log np-log-full" v-loading="logsLoading">
-          <div v-for="log in logs" :key="log.id">
-            <span class="np-muted">{{ formatTs(log.ts) }}</span>
-            <span :class="`lv-${log.level}`"> [{{ logLevelLabel(log.level) }}]</span>
-            <span class="np-muted">{{ logSourceLabel(log.source) }}</span>
-            {{ log.message }}
-          </div>
-          <div v-if="!logs.length" class="np-empty">暂无日志</div>
-        </div>
-      </div>
-      </div>
+    <div v-if="data" class="dash-footer">
+      <span>ALL SYSTEMS LOCAL</span>
+      <p>检测只读取本地缓存 · 机场失败保留旧版本 · 订阅发布使用原子替换</p>
+      <span>v{{ state.version || '—' }}</span>
     </div>
   </div>
 </template>

@@ -124,8 +124,8 @@ const paths = computed(() => nodes.value.map((node) => {
     <div class="opsmap-head">
       <div class="opsmap-copy">
         <span class="opsmap-kicker"><i></i> LIVE OPERATIONS MAP</span>
-        <h1>一张图看懂节点池<br /><em>如何持续运转</em></h1>
-        <p>从机场订阅进入，到全量缓存、双阶段检测、评分成熟度、统一发布，最后落到客户端。每个数字都来自当前控制台。</p>
+        <h1>节点池<em>运营全景</em></h1>
+        <p>机场接入 → 全量缓存 → 双阶段检测 → 评分成熟度 → 统一发布 → 客户端消费。</p>
       </div>
       <div class="opsmap-state">
         <span class="opsmap-live" :class="{ 'is-running': running }"><i></i>{{ runState }}</span>
@@ -144,18 +144,18 @@ const paths = computed(() => nodes.value.map((node) => {
       <svg class="opsmap-lines" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true">
         <defs>
           <linearGradient id="opsLineBlue" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#63a4ff" stop-opacity=".15" />
-            <stop offset="55%" stop-color="#63a4ff" stop-opacity=".62" />
-            <stop offset="100%" stop-color="#8b5cf6" stop-opacity=".95" />
+            <stop offset="0%" stop-color="#4fd9ff" stop-opacity=".14" />
+            <stop offset="55%" stop-color="#66f0c4" stop-opacity=".58" />
+            <stop offset="100%" stop-color="#9b7cff" stop-opacity=".92" />
           </linearGradient>
           <linearGradient id="opsLineCyan" x1="0" y1="1" x2="1" y2="0">
-            <stop offset="0%" stop-color="#22d3ee" stop-opacity=".14" />
-            <stop offset="60%" stop-color="#22d3ee" stop-opacity=".72" />
-            <stop offset="100%" stop-color="#60a5fa" stop-opacity=".95" />
+            <stop offset="0%" stop-color="#2ee6a8" stop-opacity=".14" />
+            <stop offset="60%" stop-color="#2ee6a8" stop-opacity=".66" />
+            <stop offset="100%" stop-color="#7c9cff" stop-opacity=".92" />
           </linearGradient>
           <radialGradient id="opsCoreGlow" cx=".5" cy=".5" r=".5">
-            <stop offset="0%" stop-color="#60a5fa" stop-opacity=".42" />
-            <stop offset="60%" stop-color="#7c3aed" stop-opacity=".12" />
+            <stop offset="0%" stop-color="#2ee6a8" stop-opacity=".34" />
+            <stop offset="60%" stop-color="#7c3aed" stop-opacity=".14" />
             <stop offset="100%" stop-color="#7c3aed" stop-opacity="0" />
           </radialGradient>
           <filter id="opsBlur"><feGaussianBlur stdDeviation="4" /></filter>
@@ -216,11 +216,11 @@ const paths = computed(() => nodes.value.map((node) => {
   border-radius: 30px;
   color: #eaf2ff;
   background:
-    radial-gradient(720px 420px at 16% 0%, rgba(59, 130, 246, .30), transparent 64%),
-    radial-gradient(620px 420px at 88% 16%, rgba(124, 58, 237, .27), transparent 66%),
-    radial-gradient(720px 460px at 52% 110%, rgba(6, 182, 212, .20), transparent 68%),
-    linear-gradient(135deg, #081426 0%, #0b1b36 52%, #111634 100%);
-  border: 1px solid rgba(141, 187, 255, .2);
+    radial-gradient(720px 430px at 14% 0%, rgba(46, 230, 168, .16), transparent 64%),
+    radial-gradient(620px 430px at 92% 16%, rgba(124, 58, 237, .22), transparent 66%),
+    radial-gradient(720px 460px at 50% 112%, rgba(45, 120, 255, .13), transparent 68%),
+    linear-gradient(135deg, #07111a 0%, #0a1622 52%, #10132a 100%);
+  border: 1px solid rgba(120, 190, 175, .19);
   box-shadow: 0 30px 80px rgba(11, 29, 61, .28), inset 0 1px 0 rgba(255, 255, 255, .10);
 }
 .opsmap::before {
@@ -230,8 +230,8 @@ const paths = computed(() => nodes.value.map((node) => {
   pointer-events: none;
   opacity: .42;
   background-image:
-    linear-gradient(rgba(125, 176, 255, .07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(125, 176, 255, .07) 1px, transparent 1px);
+    linear-gradient(rgba(120, 200, 180, .06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 200, 180, .06) 1px, transparent 1px);
   background-size: 34px 34px;
   mask-image: radial-gradient(ellipse at 50% 45%, #000 5%, transparent 78%);
 }
@@ -242,7 +242,7 @@ const paths = computed(() => nodes.value.map((node) => {
   right: -120px;
   top: -230px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(59, 130, 246, .24), transparent 68%);
+  background: radial-gradient(circle, rgba(124, 58, 237, .20), transparent 68%);
   pointer-events: none;
 }
 .opsmap-head { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
@@ -252,7 +252,7 @@ const paths = computed(() => nodes.value.map((node) => {
   font-size: 10.5px; font-weight: 700; letter-spacing: .18em;
   color: rgba(191, 219, 254, .78);
 }
-.opsmap-kicker i { width: 18px; height: 1px; background: #60a5fa; box-shadow: 0 0 8px #60a5fa; }
+.opsmap-kicker i { width: 18px; height: 1px; background: #2ee6a8; box-shadow: 0 0 8px #2ee6a8; }
 .opsmap-copy h1 {
   margin: 12px 0 10px;
   font-size: clamp(30px, 3.2vw, 46px);
@@ -263,7 +263,7 @@ const paths = computed(() => nodes.value.map((node) => {
 }
 .opsmap-copy h1 em {
   font-style: normal;
-  background: linear-gradient(90deg, #85b8ff, #c4b5fd 56%, #67e8f9);
+  background: linear-gradient(90deg, #6ff2c8, #d4f8ff 48%, #c4b5fd);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -307,16 +307,16 @@ const paths = computed(() => nodes.value.map((node) => {
   transform: translate(-50%, -50%);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 24%, rgba(255, 255, 255, .20), transparent 44%), linear-gradient(145deg, rgba(31, 78, 160, .70), rgba(19, 36, 76, .76));
-  border: 1px solid rgba(147, 197, 253, .42);
-  box-shadow: 0 0 0 9px rgba(96, 165, 250, .06), 0 0 52px rgba(96, 165, 250, .28), inset 0 1px 0 rgba(255, 255, 255, .18);
+  background: radial-gradient(circle at 35% 24%, rgba(255, 255, 255, .20), transparent 44%), linear-gradient(145deg, rgba(18, 82, 82, .62), rgba(24, 26, 66, .78));
+  border: 1px solid rgba(96, 240, 194, .34);
+  box-shadow: 0 0 0 9px rgba(46, 230, 168, .05), 0 0 52px rgba(46, 230, 168, .18), inset 0 1px 0 rgba(255, 255, 255, .16);
   backdrop-filter: blur(14px);
 }
-.ops-core-ring { position: absolute; inset: -17px; border-radius: 50%; border: 1px dashed rgba(147, 197, 253, .34); animation: ops-spin 26s linear infinite; }
-.ops-core-orb { position: absolute; top: 30px; width: 27px; height: 27px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #67e8f9 38%, #3b82f6 70%); box-shadow: 0 0 22px rgba(103, 232, 249, .75); }
+.ops-core-ring { position: absolute; inset: -17px; border-radius: 50%; border: 1px dashed rgba(96, 240, 194, .28); animation: ops-spin 26s linear infinite; }
+.ops-core-orb { position: absolute; top: 30px; width: 27px; height: 27px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #7dffd9 38%, #19c99a 70%); box-shadow: 0 0 22px rgba(46, 230, 168, .65); }
 .ops-core-orb i { position: absolute; inset: 9px; border-radius: 50%; background: #dff8ff; box-shadow: 0 0 14px #fff; }
 .ops-core-word { display: flex; align-items: baseline; margin-top: 16px; letter-spacing: -.045em; font-weight: 760; font-size: 21px; }
-.ops-core-word em { font-style: normal; font-size: 22.5px; color: #6ee7f9; letter-spacing: -.01em; }
+.ops-core-word em { font-style: normal; font-size: 22.5px; color: #61f0c4; letter-spacing: -.01em; }
 .ops-core-label { margin-top: 4px; font-size: 9.5px; letter-spacing: .16em; color: rgba(191, 219, 254, .67); }
 .ops-core small { margin-top: 8px; font-size: 10px; color: rgba(191, 219, 254, .82); font-variant-numeric: tabular-nums; }
 .ops-node {
@@ -324,8 +324,8 @@ const paths = computed(() => nodes.value.map((node) => {
   transform: translate(-50%, -50%);
   padding: 12px 13px 11px;
   border-radius: 16px;
-  background: linear-gradient(145deg, rgba(20, 49, 92, .77), rgba(14, 30, 61, .66));
-  border: 1px solid rgba(148, 197, 255, .18);
+  background: linear-gradient(145deg, rgba(18, 42, 52, .74), rgba(15, 25, 48, .68));
+  border: 1px solid rgba(120, 200, 180, .16);
   box-shadow: 0 12px 30px rgba(1, 10, 28, .24), inset 0 1px 0 rgba(255, 255, 255, .07);
   backdrop-filter: blur(12px);
 }
@@ -337,7 +337,7 @@ const paths = computed(() => nodes.value.map((node) => {
 .ops-node.tone-cyan { border-color: rgba(103, 232, 249, .34); }
 .ops-node-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .ops-node-num { font-size: 9px; letter-spacing: .12em; color: rgba(191, 219, 254, .52); font-variant-numeric: tabular-nums; }
-.ops-node-icon { width: 23px; height: 23px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; color: #bde7ff; background: rgba(96, 165, 250, .16); border: 1px solid rgba(147, 197, 253, .18); font-size: 14px; }
+.ops-node-icon { width: 23px; height: 23px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; color: #85f2cf; background: rgba(46, 230, 168, .09); border: 1px solid rgba(96, 240, 194, .16); font-size: 14px; }
 .ops-node-title { display: block; font-size: 11.5px; font-weight: 650; color: #dfeeff; letter-spacing: .01em; }
 .ops-node-value { display: flex; align-items: baseline; gap: 5px; margin: 5px 0 6px; font-size: 27px; line-height: 1; letter-spacing: -.045em; font-weight: 750; color: #fff; font-variant-numeric: tabular-nums; }
 .ops-node-value small { font-size: 9px; color: rgba(191, 219, 254, .62); font-weight: 500; letter-spacing: 0; white-space: nowrap; }
@@ -350,7 +350,7 @@ const paths = computed(() => nodes.value.map((node) => {
   font-size: 10px; color: rgba(191, 219, 254, .52);
 }
 .opsmap-foot > span:first-child { margin-right: 5px; color: rgba(191, 219, 254, .85); font-weight: 650; }
-.opsmap-foot i { font-style: normal; padding: 3px 8px; border-radius: 999px; background: rgba(96, 165, 250, .09); border: 1px solid rgba(147, 197, 253, .13); color: rgba(203, 226, 255, .66); }
+.opsmap-foot i { font-style: normal; padding: 3px 8px; border-radius: 999px; background: rgba(46, 230, 168, .06); border: 1px solid rgba(96, 240, 194, .14); color: rgba(190, 235, 225, .68); }
 .opsmap-foot-note { margin-left: auto; color: rgba(191, 219, 254, .40); }
 @keyframes ops-pulse { 0%, 100% { opacity: .7; transform: scale(.92); } 50% { opacity: 1; transform: scale(1.12); } }
 @keyframes ops-spin { to { transform: rotate(360deg); } }

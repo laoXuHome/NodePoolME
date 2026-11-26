@@ -225,8 +225,8 @@ sudo chmod +x /usr/local/bin/npup
 sudo ln -sf /usr/local/bin/npup /usr/local/bin/nodepool-upgrade   # 想要个更好记的名字
 
 sudo npup            # 默认更新到 .env 里指定的镜像（填 latest 即为最新版）
-sudo npup v2.002     # 也可以直接指定版本，脚本会改写 .env 再升级
-sudo npup --offline v2.002  # 完全不走 registry，只用 Release 离线包
+sudo npup v2.003     # 也可以直接指定版本，脚本会改写 .env 再升级
+sudo npup --offline v2.003  # 完全不走 registry，只用 Release 离线包
 ```
 
 脚本行为：`docker compose pull` 成功就直接重建容器；失败（或加 `--offline`）则下载对应 Release 的 `nodepoolme-v<版本>-offline-amd64.tar.gz`，先校验 `sha256sums.txt`，再解包并 `docker load` 其中的镜像 tar（离线包只提供 amd64），最后 `docker compose up -d` 并打印实际镜像与 revision。

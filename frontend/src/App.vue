@@ -21,12 +21,12 @@ function syncMobile(e) {
 const routeMeta = computed(() => route.meta || {})
 
 const menus = [
-  { path: '/dashboard', label: '仪表盘', short: '概览', icon: 'Odometer' },
-  { path: '/airports', label: '机场管理', short: '机场', icon: 'OfficeBuilding' },
-  { path: '/nodes', label: '缓存池', short: '缓存', icon: 'Connection' },
-  { path: '/groups', label: '检测标签', short: '标签', icon: 'Aim' },
-  { path: '/subscription', label: '订阅输出', short: '订阅', icon: 'Link' },
-  { path: '/settings', label: '系统设置', short: '设置', icon: 'Setting' }
+  { path: '/dashboard', label: '控制总览', short: '总览', code: '01', icon: 'Odometer' },
+  { path: '/airports', label: '机场接入', short: '机场', code: '02', icon: 'OfficeBuilding' },
+  { path: '/nodes', label: '节点池', short: '节点', code: '03', icon: 'Connection' },
+  { path: '/groups', label: '检测标签', short: '标签', code: '04', icon: 'Aim' },
+  { path: '/subscription', label: '订阅分发', short: '订阅', code: '05', icon: 'Link' },
+  { path: '/settings', label: '系统设置', short: '设置', code: '06', icon: 'Setting' }
 ]
 
 async function refresh() {
@@ -67,34 +67,54 @@ function onMenu(path) {
 
   <router-view v-else-if="isLogin" />
 
-  <div v-else-if="authed" class="np-shell">
-    <section class="np-workspace">
-      <header class="header-bar">
+  <div v-else-if="authed" class="np-shell np-console">
+    <aside v-if="!isMobile" class="np-rail" aria-label="主导航">
+      <div class="np-rail-brand">
+        <BrandLogo :size="42" light />
+        <span class="np-rail-badge">CORE</span>
+      </div>
+
+      <div class="np-rail-caption">WORKSPACE</div>
+      <nav class="np-rail-nav">
+        <button v-for="m in menus" :key="m.path" class="np-rail-link"
+                :class="{ active: route.path === m.path }" @click="onMenu(m.path)">
+          <span class="np-rail-code">{{ m.code }}</span>
+          <el-icon><component :is="m.icon" /></el-icon>
+          <span class="np-rail-label">{{ m.label }}</span>
+          <i class="np-rail-dot" />
+        </button>
+      </nav>
+
+      <div class="np-rail-spacer" />
+      <div class="np-rail-sys">
+        <span>RUNTIME MODE</span>
+        <b><i></i> LOCAL FIRST</b>
+        <small>检测只读本地缓存，不触发机场拉取</small>
+      </div>
+      <div class="np-rail-foot">
+        <span class="np-rail-ver">v{{ version }}</span>
+        <button class="np-rail-out" @click="doLogout">退出</button>
+      </div>
+    </aside>
+
+    <section class="np-stage">
+      <header class="np-commandbar">
         <div v-if="isMobile" class="np-mobile-brand">
-          <BrandLogo :size="30" compact />
+          <BrandLogo :size="30" compact light />
         </div>
-        <div v-else class="np-brandline">
-          <BrandLogo :size="48" />
+        <div v-else class="np-command-crumb">
+          <span>NODEPOOL /</span>
+          <b>{{ routeMeta.title || '控制总览' }}</b>
         </div>
-        <nav v-if="!isMobile" class="np-tabsnav" aria-label="主导航">
-          <button v-for="m in menus" :key="m.path" class="np-tabx"
-                  :class="{ active: route.path === m.path }" @click="onMenu(m.path)">
-            <el-icon><component :is="m.icon" /></el-icon>
-            <span>{{ m.label }}</span>
-          </button>
-        </nav>
-        <div class="np-flex" />
-        <div v-if="isMobile" class="np-mobile-tools">
-          <span class="np-ver is-mobile" title="当前版本">
-            <i class="np-ver-dot" />
-            <span class="np-ver-text">v{{ version }}</span>
-          </span>
-        </div>
+        <div class="np-command-spacer" />
+        <span v-if="!isMobile" class="np-system-live"><i></i> SYSTEM LIVE</span>
+        <span v-if="isMobile" class="np-ver is-mobile" title="当前版本"><i class="np-ver-dot" /><span class="np-ver-text">v{{ version }}</span></span>
         <HeaderTools v-if="!isMobile" compact />
         <button v-if="isMobile" class="np-icon-btn" aria-label="退出登录" @click="doLogout">
           <el-icon size="19"><SwitchButton /></el-icon>
         </button>
       </header>
+
       <main class="np-main">
         <section v-if="route.name !== 'dashboard' && routeMeta.title" class="np-route-masthead">
           <div class="np-route-mast-copy">

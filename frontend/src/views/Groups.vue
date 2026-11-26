@@ -563,7 +563,7 @@ onUnmounted(() => {
 
 <style scoped>
 .speed-panel {
-  border-top: 3px solid var(--np-accent, #2563eb);
+  border-top: 2px solid rgba(46, 230, 168, .55);
 }
 .speed-queue-strip {
   font-size: 12px;
@@ -582,9 +582,9 @@ onUnmounted(() => {
   align-items: center;
   padding: 8px 12px;
   margin-bottom: 6px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgba(139, 168, 205, .12);
   border-radius: 10px;
-  background: #f8fafc;
+  background: rgba(9, 16, 26, .56);
 }
 .speed-action-main {
   display: flex;
@@ -593,7 +593,7 @@ onUnmounted(() => {
 }
 .speed-note {
   font-size: 12px;
-  color: #64748b;
+  color: #8b9fb6;
   margin: 0 2px 8px;
 }
 .speed-num {
@@ -615,9 +615,9 @@ onUnmounted(() => {
 .speed-subhead {
   font-size: 13px;
   font-weight: 600;
-  color: #334155;
+  color: #dce8f7;
   padding: 8px 0 4px;
-  border-top: 1px dashed #e2e8f0;
+  border-top: 1px dashed rgba(139, 168, 205, .14);
   margin-top: 2px;
 }
 .speed-form > .speed-subhead:first-child {
@@ -635,9 +635,9 @@ onUnmounted(() => {
 .speed-config-panel {
   min-width: 0;
   padding: 0 14px 6px;
-  border: 1px solid #eef2f7;
+  border: 1px solid rgba(139, 168, 205, .10);
   border-radius: 10px;
-  background: #fbfcfe;
+  background: rgba(8, 15, 24, .54);
 }
 .speed-config-panel .speed-subhead {
   border-top: 0;
@@ -650,21 +650,21 @@ onUnmounted(() => {
 .speed-subhead-note {
   font-weight: 400;
   font-size: 11px;
-  color: #94a3b8;
+  color: #71869d;
   margin-left: 8px;
 }
 .speed-field-hint {
   width: 100%;
   font-size: 11px;
   line-height: 1.3;
-  color: #94a3b8;
+  color: #71869d;
   margin-top: 2px;
 }
 .speed-cap-note {
   margin: -6px 0 6px 102px;
   font-size: 11px;
   line-height: 1.5;
-  color: #94a3b8;
+  color: #71869d;
 }
 .speed-threshold-grid {
   display: grid;
@@ -683,7 +683,7 @@ onUnmounted(() => {
   align-items: center;
   flex: 0 0 auto;
   font-size: 12px;
-  color: #334155;
+  color: #b9cade;
 }
 .speed-threshold .speed-num-wide {
   flex: 1 1 auto;
@@ -697,10 +697,10 @@ onUnmounted(() => {
   gap: 4px 16px;
   margin-top: 4px;
   padding-top: 6px;
-  border-top: 1px dashed #e2e8f0;
+  border-top: 1px dashed rgba(139, 168, 205, .14);
   font-size: 12px;
   line-height: 1.6;
-  color: #475569;
+  color: #9db0c6;
   margin-bottom: 6px;
 }
 .speed-status {
@@ -715,16 +715,16 @@ onUnmounted(() => {
   font-style: normal;
   margin-left: 4px;
   font-size: 11px;
-  color: #94a3b8;
+  color: #71869d;
 }
 .speed-legend {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
   font-size: 12px;
-  color: #475569;
+  color: #a5b8ce;
   padding: 6px 10px;
-  background: #f8fafc;
+  background: rgba(9, 16, 26, .56);
   border-radius: 8px;
   margin-bottom: 8px;
 }
@@ -757,7 +757,7 @@ onUnmounted(() => {
   gap: 8px 12px;
   font-weight: 600;
   font-size: 13px;
-  color: #334155;
+  color: #dce8f7;
   margin-bottom: 8px;
 }
 .speed-table-title {

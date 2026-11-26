@@ -8,7 +8,6 @@ defineProps({ compact: { type: Boolean, default: false } })
 
 const router = useRouter()
 const version = computed(() => state.version || '1.0.0')
-const repoUrl = 'https://github.com/laoXuHome/NodePoolME'
 const checking = ref(false)
 const update = ref(null)
 const verTitle = computed(() => {
@@ -71,7 +70,5 @@ async function doLogout() {
       <el-icon><Refresh /></el-icon>
       <span>{{ checking ? '检测中' : '检测更新' }}</span>
     </button>
-    <a class="np-gh" :href="repoUrl" target="_blank" rel="noopener">GitHub ↗</a>
-    <button class="np-quit" @click="doLogout">退出</button>
   </div>
 </template>
