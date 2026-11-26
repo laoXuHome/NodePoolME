@@ -13,11 +13,16 @@
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
+import os
 import re
 import sqlite3
+import threading
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -535,6 +540,761 @@ def record_baseline(
         if own_conn:
             conn.close()
 
+# =============================================================================
+# P-1.6 迁移状态机（计划 §8：`migrate.py` 最小状态机 + 空迁移 dry-run）
+#
+# 范围声明（与已批准文档的对应关系，务必与交付材料一起阅读）：
+#
+# * 设计 v1.10 §5 的 phase 集合与转换表（T1–T8）**在本文件完整实现**，包括
+#   `IllegalTransition`、旧值 `PhaseMismatch`、`COMMITTED` 不可回退。
+# * 计划 v1.10 §3.2 与 PT-09b 明确规定 P-1 **不建** `system_events` /
+#   `migration_tx_notes`、不实现持久化事件链（`seq/prev_sha/token_fp/
+#   s5_failed_ever`），`schema_migrations.status` 只有 `running/failed/success`，
+#   且 `write_event()` 必须抛 `NotImplementedError`。
+#   因此本阶段实现的是"无事件链"的最小状态机：
+#       - phase 是**进程内**状态，唯一 durable 痕迹是 `schema_migrations.status`；
+#       - `set_phase()`（durable 事件后端）与 `write_event()`/`emit_event()`
+#         一律 `NotImplementedError`，绝不用内存或普通日志冒充持久事件；
+#       - 非 DB 诊断通道固定为 `<STATE_DIR>/migration-fault.log`（K1 未成立时
+#         唯一允许的记录方式）。
+# * 设计 v1.10 §1/§2 的 durable 事件链（A/B/C 提交结果确认、哈希链、E1–E3、
+#   β/β′ 恢复入口、`s5_failed_ever` 单调）**不在 P-1 实现**：PT-09b 未解除前
+#   实现它等于改已批准架构，需负责人裁决（见交付材料的冲突报告）。
+# * P-1.5 已验收的维护封锁、写入闸、排空判据与**发射器对象身份绑定**是本阶段
+#   唯一的可信凭据来源：`halt_migration` 必须走 `register_confirmation_issuer`
+#   → `mint_confirmation` → `halt_tail`，不得自造凭据、不得绕过身份校验。
+# * P-1.5 阶段不注册发射器 ⇒ `halt_tail()` 失败关闭；P-1.6 只有在**真实进入
+#   `halt_migration`** 时才惰性注册（模块 import 本身不注册，避免改变 P-1.5 语义）。
+# =============================================================================
+
+TARGET_VERSION = "1.10"
+
+
+class Phase(str, Enum):
+    """设计 v1.10 §5 的六个 phase。禁止在此之外新增临时状态。"""
+
+    PREPARED = "PREPARED"
+    TX_OPEN = "TX_OPEN"
+    COMMIT_ATTEMPTED = "COMMIT_ATTEMPTED"
+    COMMITTED = "COMMITTED"
+    TX_ROLLED_BACK = "TX_ROLLED_BACK"
+    UNKNOWN = "UNKNOWN"
+
+
+# 设计 v1.10 §1.2/§5 的转换表：**唯一**合法来源，任何其他"能走通"的组合都是 bug。
+LEGAL_TRANSITIONS: tuple[tuple[Phase, Phase], ...] = (
+    (Phase.PREPARED, Phase.TX_OPEN),            # T1 BEGIN 成功
+    (Phase.TX_OPEN, Phase.COMMIT_ATTEMPTED),    # T2 COMMIT 前
+    (Phase.TX_OPEN, Phase.TX_ROLLED_BACK),      # T3 ROLLBACK 成功
+    (Phase.COMMIT_ATTEMPTED, Phase.COMMITTED),  # T4 β 门禁全通过
+    (Phase.COMMIT_ATTEMPTED, Phase.TX_ROLLED_BACK),  # T5 β 确认未提交
+    (Phase.COMMIT_ATTEMPTED, Phase.UNKNOWN),    # T6 α COMMIT 抛异常且 K1 成立
+    (Phase.UNKNOWN, Phase.COMMITTED),           # T7 重查确认已提交
+    (Phase.UNKNOWN, Phase.TX_ROLLED_BACK),      # T8 重查确认未提交
+)
+
+TRANSITION_NAMES: dict[tuple[Phase, Phase], str] = {
+    (Phase.PREPARED, Phase.TX_OPEN): "T1",
+    (Phase.TX_OPEN, Phase.COMMIT_ATTEMPTED): "T2",
+    (Phase.TX_OPEN, Phase.TX_ROLLED_BACK): "T3",
+    (Phase.COMMIT_ATTEMPTED, Phase.COMMITTED): "T4",
+    (Phase.COMMIT_ATTEMPTED, Phase.TX_ROLLED_BACK): "T5",
+    (Phase.COMMIT_ATTEMPTED, Phase.UNKNOWN): "T6",
+    (Phase.UNKNOWN, Phase.COMMITTED): "T7",
+    (Phase.UNKNOWN, Phase.TX_ROLLED_BACK): "T8",
+}
+
+# 设计 v1.10 §2.1 的分派表：T1/T2 属迁移事务内（tx_local），T3–T8 属 durable。
+# P-1 不实现两个后端，但**表本身**必须存在且自检（PT-12）：它规定了"哪种转换
+# 需要 durable 证据"，将来接入事件链时不得改口。
+TRANSITION_DISPATCH: dict[tuple[Phase, Phase], str] = {
+    (Phase.PREPARED, Phase.TX_OPEN): "tx_local",
+    (Phase.TX_OPEN, Phase.COMMIT_ATTEMPTED): "tx_local",
+    (Phase.TX_OPEN, Phase.TX_ROLLED_BACK): "durable",
+    (Phase.COMMIT_ATTEMPTED, Phase.COMMITTED): "durable",
+    (Phase.COMMIT_ATTEMPTED, Phase.TX_ROLLED_BACK): "durable",
+    (Phase.COMMIT_ATTEMPTED, Phase.UNKNOWN): "durable",
+    (Phase.UNKNOWN, Phase.COMMITTED): "durable",
+    (Phase.UNKNOWN, Phase.TX_ROLLED_BACK): "durable",
+}
+
+
+class WriteOutcome(Enum):
+    """设计 v1.10 §2.1：事件写入结果唯一口径，禁止裸 bool（PT-13）。
+
+    `LOCAL` 只用于 tx_local 与 P-1 的非 DB 诊断通道，**不参与**任何 durable 判断。
+    """
+
+    COMMITTED = "committed"     # A：确认已提交
+    ABSENT = "absent"           # B：确认未提交
+    UNRESOLVED = "unresolved"   # C：无法确认
+    LOCAL = "local"             # 仅 tx_local / 非 DB 通道
+
+
+class PhaseResult(Enum):
+    """设计 v1.10 §2.2 的三态返回；任何上层不得用布尔替代。"""
+
+    SUCCESS = "success"
+    REJECTED = "rejected"
+    HALTED = "halted"
+
+
+class IllegalTransition(MigrationError):
+    """转换不在 `LEGAL_TRANSITIONS` 内（含 `UNKNOWN → UNKNOWN`）。"""
+
+    def __init__(self, old: Phase, new: Phase, message: str = "") -> None:
+        self.old = old
+        self.new = new
+        detail = message or "不在 LEGAL_TRANSITIONS 内"
+        super().__init__(f"illegal_transition: {old.value} -> {new.value}（{detail}）")
+
+
+class PhaseMismatch(MigrationError):
+    """`old` 与记录当前 phase 不一致（同一转换被写两次的典型症状）。"""
+
+    def __init__(self, expected: Phase, actual: Phase) -> None:
+        self.expected = expected
+        self.actual = actual
+        super().__init__(f"phase_mismatch: expected {expected.value}, actual {actual.value}")
+
+
+class MigrationHalted(MigrationError):
+    """已 `halt_tail`，此后禁止任何状态推进与事件写入（零数据库写入）。"""
+
+    def __init__(self, message: str = "迁移已停机收尾，禁止继续推进") -> None:
+        super().__init__(f"halted: {message}")
+
+
+class MigrationDisabled(MigrationError):
+    """`NODEPOOL_MIGRATION_ENABLED` 未开启：迁移入口整体不可达（PT-11）。"""
+
+    def __init__(self, message: str = "NODEPOOL_MIGRATION_ENABLED=0，迁移入口关闭") -> None:
+        super().__init__(f"migration_disabled: {message}")
+
+
+class MigrationRefused(MigrationError):
+    """前置条件不满足（维护态 / 目标库 / 备份集 / 版本状态）。"""
+
+    def __init__(self, reason: str, message: str = "") -> None:
+        self.reason = reason
+        super().__init__(f"{reason}: {message}" if message else reason)
+
+
+class AlreadyRunning(MigrationError):
+    """另一个迁移会话已持有单实例锁（设计 v1.10 §3.3 的 K1_β 单实例前提）。"""
+
+    def __init__(self, message: str = "另一个迁移会话正在运行") -> None:
+        super().__init__(f"already_running: {message}")
+
+
+class DispatchTableBroken(MigrationError):
+    """分派表自检失败：`TRANSITION_DISPATCH` 与 `LEGAL_TRANSITIONS` 不自洽。"""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(f"dispatch_table_broken: {message}")
+
+
+class FatalExit(MigrationError):
+    """停机收尾无法确认（维护态或写入封锁未回读成立）：非零退出，零数据库写入。"""
+
+    def __init__(self, reason: str, message: str = "", exit_code: int = 3) -> None:
+        self.reason = reason
+        self.exit_code = int(exit_code)
+        super().__init__(f"{reason}: {message}" if message else reason)
+
+
+@dataclass
+class MigrationRecord:
+    """单次迁移会话的进程内记录（P-1 阶段不落事件表，故只在内存与 status 行）。"""
+
+    migration_id: str
+    phase: Phase = Phase.PREPARED
+    halted: bool = False
+    commit_raised: bool = False          # 非 phase 标记（设计 v1.10 §1.1 S1）
+    pending_reason: str | None = None
+    s5_failed_ever: bool = False
+    started_at: str = field(default_factory=_utc_now)
+    meta: dict[str, Any] = field(default_factory=dict)
+
+
+def check_transition_table(legal: tuple[tuple[Phase, Phase], ...] | None = None,
+                           dispatch: dict[tuple[Phase, Phase], str] | None = None,
+                           names: dict[tuple[Phase, Phase], str] | None = None) -> bool:
+    """分派表启动自检（PT-12 / 设计 v1.10 §0.10）：显式 `if` + 抛错，不用 `assert`。
+
+    * 分派表键集合必须**恰好**等于合法转换集合（多一条、少一条都拒启动）；
+    * 后端只能是 `tx_local` / `durable`；
+    * T1/T2 必须 `tx_local`，T3–T8 必须 `durable`（防止事件层接入时改口）。
+    """
+    legal = LEGAL_TRANSITIONS if legal is None else legal
+    dispatch = TRANSITION_DISPATCH if dispatch is None else dispatch
+    names = TRANSITION_NAMES if names is None else names
+    legal_set = set(legal)
+    keys = set(dispatch)
+    if keys != legal_set:
+        raise DispatchTableBroken(
+            "keys != LEGAL_TRANSITIONS: extra=%r missing=%r"
+            % (sorted(map(lambda t: (t[0].value, t[1].value), keys - legal_set)),
+               sorted(map(lambda t: (t[0].value, t[1].value), legal_set - keys))))
+    for key, backend in dispatch.items():
+        if backend not in ("tx_local", "durable"):
+            raise DispatchTableBroken(f"unknown backend {backend!r} for {key}")
+    for key in ((Phase.PREPARED, Phase.TX_OPEN), (Phase.TX_OPEN, Phase.COMMIT_ATTEMPTED)):
+        if dispatch.get(key) != "tx_local":
+            raise DispatchTableBroken(f"T1/T2 must be tx_local: {key} -> {dispatch.get(key)}")
+    for key in legal_set - {(Phase.PREPARED, Phase.TX_OPEN), (Phase.TX_OPEN, Phase.COMMIT_ATTEMPTED)}:
+        if dispatch.get(key) != "durable":
+            raise DispatchTableBroken(f"T3-T8 must be durable: {key} -> {dispatch.get(key)}")
+    if set(names) != legal_set:
+        raise DispatchTableBroken("TRANSITION_NAMES 与 LEGAL_TRANSITIONS 不一致")
+    return True
+
+
+check_transition_table()   # 模块导入即自检：普通模式与 -O 一致拒启动
+
+
+def set_phase_memory(rec: MigrationRecord, old: Phase, new: Phase) -> PhaseResult:
+    """P-1 的 phase 推进：**只改进程内状态**，不写任何数据库。
+
+    这是 `set_phase()` 在"无事件链"阶段的可施工内核：合法性与旧值一致性检查
+    与将来接入 durable 后端时完全相同，差别只在于此处没有事件可写。
+    """
+    if rec.halted:
+        raise MigrationHalted("halt_tail 之后不得推进 phase")
+    if rec.phase is not old:
+        raise PhaseMismatch(old, rec.phase)
+    if old is Phase.UNKNOWN and new is Phase.UNKNOWN:
+        raise IllegalTransition(old, new, "记录原因请用 append_reason，不得用状态变化表达")
+    if (old, new) not in LEGAL_TRANSITIONS:
+        raise IllegalTransition(old, new)
+    rec.phase = new
+    return PhaseResult.SUCCESS
+
+
+def set_phase(rec: MigrationRecord, old: Phase, new: Phase) -> PhaseResult:
+    """durable 事件后端的 `set_phase`（设计 v1.10 §2.1）：P-1 **未实现**。
+
+    PT-09b（计划 §5）要求本阶段 `write_event()` 抛 `NotImplementedError`，
+    `schema_migrations` 也只有 running/failed/success。没有 `system_events` 就
+    无法产生"事件先成功、再改内存"的可信顺序，因此本函数不允许退化成
+    "直接改内存后假装已持久化"，一律失败关闭。
+    """
+    raise NotImplementedError(
+        "set_phase: P-1 不建 system_events/migration_tx_notes（计划 §3.2、PT-09b），"
+        "durable 事件后端未实现；P-1 会话内请使用 set_phase_memory()"
+    )
+
+
+def write_event(rec: MigrationRecord, event: str, detail: dict[str, Any] | None = None) -> WriteOutcome:
+    """durable 事件写入通道（设计 v1.10 §2.1）：P-1 **必须** NotImplementedError。"""
+    raise NotImplementedError(
+        "write_event: P-1 不实现持久化事件链（计划 §3.2 / PT-09b）；"
+        "无 system_events 表、无 seq/prev_sha/token_fp/s5_failed_ever 列"
+    )
+
+
+def write_tx_event(rec: MigrationRecord, event: str,
+                   detail: dict[str, Any] | None = None) -> WriteOutcome:
+    """tx_local 事件通道（`migration_tx_notes`）：P-1 同样未实现。"""
+    raise NotImplementedError(
+        "write_tx_event: P-1 不建 migration_tx_notes（计划 §3.2 / PT-09b）"
+    )
+
+
+def emit_event(rec: MigrationRecord, event: str, detail: dict[str, Any] | None = None) -> WriteOutcome:
+    """唯一事件入口（按 `TRANSITION_DISPATCH` 分派）：P-1 两个后端都不可用。
+
+    保留函数与分派表，是为了让 P-1.6 之后接入事件链只需填后端、不改调用方。
+    """
+    raise NotImplementedError(
+        "emit_event: P-1 无 tx_local/durable 后端（计划 §3.2 / PT-09b）；"
+        "分派表见 TRANSITION_DISPATCH"
+    )
+
+
+def append_reason(rec: MigrationRecord, code: str,
+                  detail: dict[str, Any] | None = None) -> WriteOutcome:
+    """phase 不变地追加上下文；P-1 只走非 DB 通道（`migration-fault.log`）。
+
+    设计 v1.10 §1.1/§5 禁止用 `set_phase(UNKNOWN, UNKNOWN)` 记录原因；P-1 无事件
+    表，因此原因只能落到文件日志（`WriteOutcome.LOCAL`），绝不伪造 durable 证据。
+    """
+    if rec.halted:
+        raise MigrationHalted("halt_tail 之后不得追加上下文")
+    _write_fault_log({
+        "event": "migration_reason",
+        "migration_id": rec.migration_id,
+        "phase": rec.phase.value,
+        "code": str(code),
+        "detail": detail or {},
+        "ts": _utc_now(),
+    })
+    rec.meta.setdefault("reasons", []).append({"code": str(code), "ts": _utc_now()})
+    return WriteOutcome.LOCAL
+
+
+# --- 非 DB 诊断通道 -----------------------------------------------------------
+
+def _write_fault_log(record: dict[str, Any], path: str | Path | None = None) -> str:
+    """`migration-fault.log`：K1 未成立 / halt / 失败时唯一允许的记录方式。
+
+    追加一行 JSON 并 fsync：不写任何数据库、不进事件链。
+    """
+    target = Path(path or config.MIGRATION_FAULT_LOG)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(record, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    with open(target, "a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return str(target)
+
+
+# --- 可信发射器（P-1.5 受控注册接口） -----------------------------------------
+
+_ISSUER_TOKEN: object | None = None
+_ISSUER_TOKEN_LOCK = threading.Lock()
+
+
+def _ensure_issuer_token() -> object:
+    """惰性注册 `halt_migration` 为可信发射器（同一函数对象 → 同一令牌）。
+
+    惰性是刻意的：模块 import（含 CLI/测试导入）不改变 P-1.5 的"无发射器 ⇒
+    `halt_tail()` 失败关闭"语义，只有真正进入停机收尾才注册。
+    """
+    global _ISSUER_TOKEN
+    if _ISSUER_TOKEN is None:
+        with _ISSUER_TOKEN_LOCK:
+            if _ISSUER_TOKEN is None:
+                from backend.database import pool
+                _ISSUER_TOKEN = pool.register_confirmation_issuer(_ISSUER_FN)
+    return _ISSUER_TOKEN
+
+
+def reset_issuer_token_for_tests() -> None:
+    """仅供测试：丢掉本模块持有的令牌（注册表仍由 `pool.reset_for_tests()` 清理）。"""
+    global _ISSUER_TOKEN
+    _ISSUER_TOKEN = None
+
+
+def halt_migration(reason: str, *, rec: MigrationRecord | None = None,
+                   migration_id: str | None = None,
+                   detail: dict[str, Any] | None = None,
+                   fault_log_path: str | Path | None = None) -> dict[str, Any]:
+    """停机收尾（设计 v1.10 §0.10 十二次修订）：封锁 → 回读 → 签发 → `halt_tail`。
+
+    顺序固定，且三个保护动作各自独立异常边界：
+
+    1. `pool.block_writes()`：先封锁，保证此后不存在可提交的业务写；
+    2. 读维护文件（A 类判定唯一入口 `maint.maintenance_state()`）→ `maintenance_ok`；
+    3. `pool.confirm_writes_blocked()` 回读确认写入闸/连接/在途事务；
+    4. 用**已注册令牌对象**签发凭据（`mint_confirmation` 会当场再次实证封锁）；
+    5. `pool.halt_tail(conf)` 复核，成功才置 `rec.halted`。
+
+    任一确认不成立 → `FatalExit`（非零退出、零数据库写入），绝不"尽力而为"继续。
+    本函数只写 `migration-fault.log` 与非 phase 标记。
+    """
+    from backend.database import maint, pool
+
+    mid = migration_id or (rec.migration_id if rec is not None else "unknown")
+    block_reason = pool.block_writes(pool.REASON_MAINTENANCE)
+    state = maint.maintenance_state()
+    maintenance_ok = state is maint.MaintState.ACTIVE
+    writes_ok, write_detail = pool.confirm_writes_blocked()
+
+    _write_fault_log({
+        "event": "halt_requested",
+        "migration_id": mid,
+        "reason": str(reason),
+        "maintenance": state.name,
+        "maintenance_ok": bool(maintenance_ok),
+        "writes_blocked": bool(writes_ok),
+        "block_detail": write_detail,
+        "detail": detail or {},
+        "ts": _utc_now(),
+    }, fault_log_path)
+
+    if not maintenance_ok or not writes_ok:
+        raise FatalExit(
+            "halt_unconfirmed",
+            f"维护态={state.name} maintenance_ok={maintenance_ok} writes_blocked={writes_ok}",
+        )
+    token = _ensure_issuer_token()
+    try:
+        confirmation = pool.mint_confirmation(token, mid, True, True)
+    except pool.HaltPreconditionFailed as exc:
+        raise FatalExit("halt_unconfirmed", f"mint_confirmation 拒绝：{exc.code}") from exc
+    try:
+        tail = pool.halt_tail(confirmation)
+    except pool.HaltPreconditionFailed as exc:
+        raise FatalExit("halt_unconfirmed", f"halt_tail 拒绝：{exc.code}") from exc
+
+    if rec is not None:
+        rec.halted = True
+        rec.pending_reason = str(reason)
+        rec.commit_raised = rec.commit_raised or reason == "commit_outcome_unknown"
+    _write_fault_log({
+        "event": "halt_tail",
+        "migration_id": mid,
+        "reason": str(reason),
+        "halt_tail": tail,
+        "block_reason": block_reason,
+        "ts": _utc_now(),
+    }, fault_log_path)
+    return {"halt_tail": tail, "reason": str(reason), "migration_id": mid,
+            "maintenance": state.name, "writes_blocked": True}
+
+
+def halt_tail(confirmation: Any) -> str:
+    """`migrate.py` 侧的停机收尾复核入口（计划 §3.1 归属）。
+
+    只做两件事：把凭据交给 `pool.halt_tail()` 复核（不可信/未确认即抛），
+    复核通过后返回 `halt_tail` 常量。**不读维护文件、不查库、不推进 phase**；
+    调用方（`halt_migration`）负责置 `rec.halted`，之后任何 `set_phase_memory`
+    / `append_reason` / 事件写入都会被 `MigrationHalted` 拒绝。
+    """
+    from backend.database import pool
+    code = pool.halt_tail(confirmation)
+    return code
+
+
+_ISSUER_FN = halt_migration     # 登记用的函数对象：模块级定义、__globals__ 即本模块
+
+
+# --- 单实例锁 ----------------------------------------------------------------
+
+class migration_run_lock:
+    """单实例锁（`<STATE_DIR>/migration.lock`，`flock` 非阻塞）。
+
+    设计 v1.10 §3.3 的 K1_β 前提是"只有一个迁移会话"：两个进程同时推进 phase
+    必然产生互不喜欢的状态。锁文件不承载任何状态，只承载互斥。
+    """
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        self.path = Path(path or (Path(config.STATE_DIR) / "migration.lock"))
+        self._fd: int | None = None
+
+    def __enter__(self) -> "migration_run_lock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(self.path), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            os.close(fd)
+            raise AlreadyRunning(f"{self.path} 已被持有：{exc}") from exc
+        self._fd = fd
+        return self
+
+    def __exit__(self, *exc_info: Any) -> None:
+        if self._fd is not None:
+            try:
+                fcntl.flock(self._fd, fcntl.LOCK_UN)
+            finally:
+                os.close(self._fd)
+                self._fd = None
+
+
+# --- 写后置：失败行 / 成功行 --------------------------------------------------
+
+def _next_seq(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM schema_migrations").fetchone()
+    return int(row[0]) + 1
+
+
+def _mark_failed(db_path: str | Path, migration_id: str, seq: int, version: str,
+                 started_at: str, failure: str, detail_extra: dict[str, Any] | None = None) -> bool:
+    """事务回滚后写 `failed` 行（独立短事务）。写不进去就返回 False，由调用方重封锁。"""
+    conn = open_connection(db_path)
+    try:
+        _require_autocommit(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        rowcount = conn.execute(
+            "UPDATE schema_migrations SET status='failed', finished_at=?, detail_json=?"
+            " WHERE migration_id=? AND status='running'",
+            (_utc_now(),
+             json.dumps({"failure": failure, "dry_run": True, "statements": 0,
+                         **(detail_extra or {})}, sort_keys=True, ensure_ascii=False),
+             migration_id),
+        ).rowcount
+        if int(rowcount) == 0:
+            _insert_row(conn, migration_id=migration_id, seq=seq, version=version,
+                        status="failed", started_at=started_at, finished_at=_utc_now(),
+                        detail_json=json.dumps({"failure": failure, "dry_run": True,
+                                                "statements": 0, **(detail_extra or {})},
+                                               sort_keys=True, ensure_ascii=False))
+        conn.execute("COMMIT")
+        return True
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        return False
+    finally:
+        conn.close()
+
+
+def migration_state_summary(db_path: str | Path | None = None) -> dict[str, Any]:
+    """只读状态摘要（CLI `status` 用）：preflight 判定 + 当前版本 + 未完成迁移。"""
+    conn = open_connection(db_path)
+    try:
+        pre = preflight(conn)
+        return {
+            "preflight": pre["state"],
+            "allowed": bool(pre.get("allowed")),
+            "reason": pre.get("reason"),
+            "current_version": pre.get("current_version"),
+            "expected": pre.get("expected"),
+            "pending": pre.get("pending", []),
+            "migration_incomplete": pre["state"] == "incomplete",
+        }
+    finally:
+        conn.close()
+
+
+# --- 空迁移 dry-run（计划 §8：P-1.6 = 最小状态机 + 空迁移 dry-run） -------------
+
+def run(*, db_path: str | Path | None = None, dry_run: bool = True,
+        snapshot: bool = False, snapshot_stage: str = "pre-migrate",
+        drain_rounds: int = 2, drain_min_interval: float = 10.0,
+        clock: Any = None, sleeper: Any = None, checkpoint: Any = None,
+        holders: Any = None, lock_path: str | Path | None = None,
+        fault_log_path: str | Path | None = None) -> dict[str, Any]:
+    """执行一次**空迁移**（P-1.6 只允许 dry-run，且必须指向副本）。
+
+    安全边界（任一不满足即拒绝，不动任何数据）：
+
+    * `NODEPOOL_MIGRATION_ENABLED=1`（默认 0，PT-11：关闭时入口不可达）；
+    * `dry_run=True` 且目标库**不是** `config.DB_PATH`（P-1.6 不碰生产/开发主库）；
+      非 dry-run 一律 `p17_required`；
+    * 维护态 `ACTIVE` + 写入闸已封锁（`gate.apply_state`）；
+    * 排空判据（`gate.drain`）通过，否则 `halt_migration("drain_failed")`；
+    * 可选 `snapshot=True`：`pre-migrate` 备份集生成 + 校验，失败即停机收尾；
+    * `preflight == ready`（基线已登记、无未完成迁移）。
+
+    事务与状态顺序（与设计 v1.10 §5 的 T1–T4 对齐，但 durable 后端换成 status 行）：
+
+    1. `BEGIN IMMEDIATE` → `PREPARED→TX_OPEN`（T1）→ 插 `running` 行 → `TX_OPEN→COMMIT_ATTEMPTED`（T2）；
+    2. 空迁移：零 DDL；
+    3. `COMMIT`：抛异常 ⇒ `halt_migration("commit_outcome_unknown")`，phase 停
+       `COMMIT_ATTEMPTED`（设计 T6′ 的 P-1 等价：无事件证据，不得冒充 UNKNOWN）；
+    4. `running → success`（独立事务）成功后才 `COMMIT_ATTEMPTED→COMMITTED`（T4）。
+
+    事务内任何异常：`ROLLBACK` → `TX_OPEN→TX_ROLLED_BACK`（T3）→ 独立事务写 `failed`
+    行 → 重封锁（`migration_incomplete` ⇒ 下次启动 RECOVERY_REQUIRED。）
+    """
+    from backend.database import backup, gate, maint, pool
+
+    if not config.MIGRATION_ENABLED:
+        raise MigrationDisabled()
+    target = Path(db_path or config.DB_PATH).resolve()
+    live = Path(config.DB_PATH).resolve()
+    if dry_run and target == live:
+        raise MigrationRefused(
+            "dry_run_requires_copy",
+            "P-1.6 空迁移 dry-run 只允许对副本执行；生产/开发主库要等 P-1.8",
+        )
+    if not dry_run:
+        raise MigrationRefused("p17_required", "P-1.6 只实现空迁移 dry-run，真实迁移在 P-1.7/P-1.8")
+
+    ready_state, _reason = gate.judge()
+    if ready_state is not maint.MaintState.ACTIVE:
+        raise MigrationRefused(
+            "maintenance_required",
+            f"迁移只能在维护态 ACTIVE 下执行，当前 {ready_state.name}",
+        )
+
+    with migration_run_lock(lock_path):
+        gate.apply_state(ready_state)          # 封锁写入（含关闭业务写连接）
+        rec = MigrationRecord(migration_id=f"mig-{_utc_now().replace(' ', 'T')}-{os.getpid()}")
+
+        drain_kwargs: dict[str, Any] = {"rounds": drain_rounds,
+                                        "min_interval": drain_min_interval,
+                                        "db_path": target}
+        if clock is not None:
+            drain_kwargs["clock"] = clock
+        if sleeper is not None:
+            drain_kwargs["sleeper"] = sleeper
+        if checkpoint is not None:
+            drain_kwargs["checkpoint"] = checkpoint
+        if holders is not None:
+            drain_kwargs["holders"] = holders
+        drain_result = gate.drain(**drain_kwargs)
+        if not drain_result.continue_allowed:
+            halt = halt_migration("drain_failed", rec=rec, detail={"detail": drain_result.detail},
+                                  fault_log_path=fault_log_path)
+            return {"ok": False, "code": "drain_failed", "status": "halted",
+                    "phase": rec.phase.value, "migration_id": rec.migration_id,
+                    "halt_tail": halt["halt_tail"], "requirement": "recovery_required"}
+
+        if snapshot:
+            try:
+                info = backup.snapshot_set(stage=snapshot_stage, src_db=target, stop_write=True)
+                backup.verify_set(info["path"])
+            except Exception as exc:      # noqa: BLE001 - 任何备份失败都必须停机
+                halt_migration("snapshot_failed", rec=rec, detail={"error": str(exc)},
+                               fault_log_path=fault_log_path)
+                return {"ok": False, "code": "snapshot_failed", "status": "halted",
+                        "phase": rec.phase.value, "migration_id": rec.migration_id,
+                        "requirement": "recovery_required"}
+
+        conn = open_connection(target)
+        try:
+            pre = preflight(conn)
+            if pre["state"] != "ready":
+                raise MigrationRefused(
+                    "migration_not_ready",
+                    f"preflight={pre['state']} current={pre.get('current_version')}",
+                )
+            seq = _next_seq(conn)
+            started_at = _utc_now()
+            detail = {"dry_run": True, "statements": 0, "target_version": TARGET_VERSION}
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                set_phase_memory(rec, Phase.PREPARED, Phase.TX_OPEN)
+                _insert_row(conn, migration_id=rec.migration_id, seq=seq,
+                            version=TARGET_VERSION, status="running",
+                            started_at=started_at, finished_at=None,
+                            detail_json=json.dumps(detail, sort_keys=True, ensure_ascii=False))
+                set_phase_memory(rec, Phase.TX_OPEN, Phase.COMMIT_ATTEMPTED)
+                # 空迁移：P-1.6 的 dry-run 不含任何 DDL，这里就是全部"迁移内容"
+            except Exception as exc:      # noqa: BLE001 - 事务内任何异常都要回滚
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                set_phase_memory(rec, Phase.TX_OPEN, Phase.TX_ROLLED_BACK)
+                failed_ok = _mark_failed(target, rec.migration_id, seq, TARGET_VERSION,
+                                        started_at, str(exc))
+                pool.ensure_blocked(pool.REASON_MAINTENANCE)
+                _write_fault_log({
+                    "event": "migration_failed",
+                    "migration_id": rec.migration_id,
+                    "phase": rec.phase.value,
+                    "error": str(exc),
+                    "failed_row": failed_ok,
+                    "ts": _utc_now(),
+                }, fault_log_path)
+                return {"ok": False, "code": "migration_failed", "status": "rolled_back",
+                        "phase": rec.phase.value, "migration_id": rec.migration_id,
+                        "failed_row": failed_ok, "error": str(exc),
+                        "requirement": "recovery_required"}
+
+            try:
+                conn.execute("COMMIT")
+            except Exception as exc:      # noqa: BLE001 - COMMIT 结果不可知必须在同一处判定
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                halt_migration("commit_outcome_unknown", rec=rec,
+                               detail={"error": str(exc)}, fault_log_path=fault_log_path)
+                return {"ok": False, "code": "commit_outcome_unknown", "status": "halted",
+                        "phase": rec.phase.value, "migration_id": rec.migration_id,
+                        "requirement": "recovery_required"}
+
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                updated = conn.execute(
+                    "UPDATE schema_migrations SET status='success', finished_at=?"
+                    " WHERE migration_id=? AND status='running'",
+                    (_utc_now(), rec.migration_id),
+                ).rowcount
+                conn.execute("COMMIT")
+                if int(updated) != 1:
+                    raise MigrationStateError("phase_row_missing",
+                                              "running 行未找到，无法确认迁移已落地")
+            except Exception as exc:      # noqa: BLE001 - 无 durable 证据不得推进 phase
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                halt_migration("phase_commit_failed", rec=rec,
+                               detail={"error": str(exc)}, fault_log_path=fault_log_path)
+                return {"ok": False, "code": "phase_commit_failed", "status": "halted",
+                        "phase": rec.phase.value, "migration_id": rec.migration_id,
+                        "requirement": "recovery_required"}
+
+            try:
+                set_phase_memory(rec, Phase.COMMIT_ATTEMPTED, Phase.COMMITTED)
+            except Exception as exc:      # noqa: BLE001 - A 之后落地失败 ⇒ HALTED
+                halt_migration("phase_apply_failed", rec=rec,
+                               detail={"error": str(exc)}, fault_log_path=fault_log_path)
+                return {"ok": False, "code": "phase_apply_failed", "status": "halted",
+                        "phase": rec.phase.value, "migration_id": rec.migration_id,
+                        "requirement": "recovery_required"}
+
+            return {"ok": True, "code": "migration_committed", "status": "committed",
+                    "phase": rec.phase.value, "migration_id": rec.migration_id,
+                    "seq": seq, "version": TARGET_VERSION, "dry_run": True, "statements": 0}
+        finally:
+            conn.close()
+
+
+def rollback_to_snapshot(set_path: str | Path | None = None, *,
+                         db_path: str | Path | None = None,
+                         drain_rounds: int = 2, drain_min_interval: float = 10.0,
+                         clock: Any = None, sleeper: Any = None,
+                         checkpoint: Any = None, holders: Any = None,
+                         fault_log_path: str | Path | None = None) -> dict[str, Any]:
+    """从备份集回滚（P-1.6 只接线"受维护态与排空约束"的安全入口 + 失败关闭）。
+
+    顺序：维护态 ACTIVE → 封锁 → 排空 → `restore_set`（其内部自带验证、
+    `pre-restore`、同卷临时文件、原库三件改名隔离、恢复后校验）。任何失败都
+    `halt_migration("restore_failed")`，保持封锁，绝不"再试一次覆盖原库"。
+
+    **已知的接口边界（P-1.6 不解决，留 P-1.7 停机窗口）**：`restore_set()` 的
+    恢复后校验会调用 `db.init_db()`，而它需要写连接；维护期写入闸（P-1.5）已
+    关闭业务写连接，因此"进程内 + 已封锁"的成功恢复在 P-1.6 走不通。真实恢复
+    必须在停机窗口由独立进程执行（计划 §6 的恢复步骤 = P-1.7 演练内容）。
+    本阶段保留受控入口与完整的前置检查/失败关闭语义，并用 `restore_failed`
+    暴露该边界，绝不为了"跑通"绕开写封锁。
+    """
+    from backend.database import backup, gate, maint
+
+    if not config.MIGRATION_ENABLED:
+        raise MigrationDisabled()
+    state, _reason = gate.judge()
+    if state is not maint.MaintState.ACTIVE:
+        raise MigrationRefused("maintenance_required",
+                               f"回滚只能在维护态 ACTIVE 下执行，当前 {state.name}")
+    target = Path(db_path or config.DB_PATH).resolve()
+    set_dir = Path(set_path) if set_path else None
+    if set_dir is None:
+        latest = backup.latest_set()
+        if not latest:
+            raise MigrationRefused("no_backup_set", "没有任何可用备份集")
+        set_dir = Path(latest["path"])
+
+    with migration_run_lock():
+        gate.apply_state(state)
+        rec = MigrationRecord(migration_id=f"rollback-{set_dir.name}")
+        drain_kwargs: dict[str, Any] = {"rounds": drain_rounds,
+                                        "min_interval": drain_min_interval,
+                                        "db_path": target}
+        if clock is not None:
+            drain_kwargs["clock"] = clock
+        if sleeper is not None:
+            drain_kwargs["sleeper"] = sleeper
+        if checkpoint is not None:
+            drain_kwargs["checkpoint"] = checkpoint
+        if holders is not None:
+            drain_kwargs["holders"] = holders
+        result = gate.drain(**drain_kwargs)
+        if not result.continue_allowed:
+            halt_migration("drain_failed", rec=rec, fault_log_path=fault_log_path)
+            return {"ok": False, "code": "drain_failed", "status": "halted",
+                    "phase": rec.phase.value}
+        try:
+            report = backup.restore_set(set_dir, db_path=target)
+        except Exception as exc:     # noqa: BLE001 - 回滚失败必须停机
+            halt_migration("restore_failed", rec=rec, detail={"error": str(exc)},
+                           fault_log_path=fault_log_path)
+            return {"ok": False, "code": "restore_failed", "status": "halted",
+                    "phase": rec.phase.value, "error": str(exc)}
+        return {"ok": True, "code": "restored", "set": set_dir.name,
+                "restore": report}
+
 
 __all__ = [
     "BASELINE_APP_VERSION",
@@ -558,4 +1318,35 @@ __all__ = [
     "structure_signature",
     "supported_structure_hashes",
     "tasks_state",
+    # P-1.6 迁移状态机
+    "AlreadyRunning",
+    "DispatchTableBroken",
+    "FatalExit",
+    "IllegalTransition",
+    "LEGAL_TRANSITIONS",
+    "MigrationDisabled",
+    "MigrationHalted",
+    "MigrationRecord",
+    "MigrationRefused",
+    "Phase",
+    "PhaseMismatch",
+    "PhaseResult",
+    "TARGET_VERSION",
+    "TRANSITION_DISPATCH",
+    "TRANSITION_NAMES",
+    "WriteOutcome",
+    "append_reason",
+    "check_transition_table",
+    "emit_event",
+    "halt_migration",
+    "halt_tail",
+    "migration_run_lock",
+    "migration_state_summary",
+    "reset_issuer_token_for_tests",
+    "rollback_to_snapshot",
+    "run",
+    "set_phase",
+    "set_phase_memory",
+    "write_event",
+    "write_tx_event",
 ]

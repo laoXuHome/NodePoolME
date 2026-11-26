@@ -5,8 +5,8 @@
     python -m backend.database.cli status      # 只读
     python -m backend.database.cli verify      # 只读
     python -m backend.database.cli snapshot    # 写：维护态下拒绝
-    python -m backend.database.cli run         # P-1.6 未实现
-    python -m backend.database.cli rollback    # P-1.6 未实现
+    python -m backend.database.cli run --db <副本库>   # P-1.6：空迁移 dry-run
+    python -m backend.database.cli rollback --set <备份集>  # P-1.6：受维护态/排空约束
 
 ``--allow-write`` 仅为兼容计划里的命令形态而存在，**不能**绕过维护态封锁。
 """
@@ -18,21 +18,25 @@ import sys
 from typing import Sequence
 
 from backend import config
-from backend.database import backup, gate
+from backend.database import backup, gate, migrate
 
 READ_COMMANDS = ("status", "verify")
 WRITE_COMMANDS = ("snapshot",)
-PENDING_COMMANDS = ("run", "rollback")   # P-1.6 才实现
+MIGRATE_COMMANDS = ("run", "rollback")
 
 EXIT_OK = 0
 EXIT_REFUSED = 2
-EXIT_PENDING = 3
+EXIT_HALTED = 4
+
+_RUN_ARGS: argparse.Namespace | None = None
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="backend.database.cli",
                                      description="NodePoolME 迁移 CLI（维护态受约束）")
-    parser.add_argument("command", choices=READ_COMMANDS + WRITE_COMMANDS + PENDING_COMMANDS)
+    parser.add_argument("command", choices=READ_COMMANDS + WRITE_COMMANDS + MIGRATE_COMMANDS)
+    parser.add_argument("--db", help="run：dry-run 的副本数据库路径（必填，且不得等于主库）")
+    parser.add_argument("--set", dest="set_dir", help="rollback：备份集目录（缺省用最新集）")
     parser.add_argument("--allow-write", action="store_true",
                         help="保留参数：不能绕过维护态封锁")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出结果")
@@ -49,6 +53,8 @@ def _status() -> dict:
         "db_exists": config.DB_PATH.exists(),
         "state_dir": str(config.STATE_DIR),
         "latest_set": (latest or {}).get("name"),
+        "migration_enabled": bool(config.MIGRATION_ENABLED),
+        "migrate_state": migrate.migration_state_summary(),
     }
 
 
@@ -66,14 +72,62 @@ def _snapshot() -> dict:
     return {"command": "snapshot", "ok": True, "set": info.get("name"), "detail": info}
 
 
+def _run(dry_run: bool = True) -> tuple[dict, int]:
+    """P-1.6：空迁移 dry-run（只允许副本库；开关未开即拒绝）。"""
+    db = getattr(_RUN_ARGS, "db", None)
+    try:
+        result = migrate.run(db_path=db, dry_run=dry_run)
+    except migrate.MigrationDisabled as exc:
+        return {"command": "run", "ok": False, "code": "migration_disabled",
+                "detail": str(exc)}, EXIT_REFUSED
+    except migrate.MigrationRefused as exc:
+        return {"command": "run", "ok": False, "code": exc.reason,
+                "detail": str(exc)}, EXIT_REFUSED
+    except migrate.AlreadyRunning as exc:
+        return {"command": "run", "ok": False, "code": "already_running",
+                "detail": str(exc)}, EXIT_REFUSED
+    except migrate.FatalExit as exc:
+        return {"command": "run", "ok": False, "code": exc.reason,
+                "detail": str(exc), "halt_tail": "not_confirmed"}, exc.exit_code
+    result.setdefault("command", "run")
+    return result, (EXIT_OK if result.get("ok") else EXIT_HALTED)
+
+
+def _rollback() -> tuple[dict, int]:
+    """P-1.6：从备份集回滚（维护态 + 排空约束由 migrate.rollback_to_snapshot 保证）。"""
+    try:
+        result = migrate.rollback_to_snapshot(getattr(_RUN_ARGS, "set_dir", None))
+    except migrate.MigrationDisabled as exc:
+        return {"command": "rollback", "ok": False, "code": "migration_disabled",
+                "detail": str(exc)}, EXIT_REFUSED
+    except migrate.MigrationRefused as exc:
+        return {"command": "rollback", "ok": False, "code": exc.reason,
+                "detail": str(exc)}, EXIT_REFUSED
+    except migrate.AlreadyRunning as exc:
+        return {"command": "rollback", "ok": False, "code": "already_running",
+                "detail": str(exc)}, EXIT_REFUSED
+    except migrate.FatalExit as exc:
+        return {"command": "rollback", "ok": False, "code": exc.reason,
+                "detail": str(exc), "halt_tail": "not_confirmed"}, exc.exit_code
+    result.setdefault("command", "rollback")
+    return result, (EXIT_OK if result.get("ok") else EXIT_HALTED)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     command = args.command
 
-    if command in PENDING_COMMANDS:
-        print(json.dumps({"command": command, "ok": False, "code": "not_implemented",
-                          "stage": "P-1.6"}, ensure_ascii=False))
-        return EXIT_PENDING
+    if command in MIGRATE_COMMANDS:
+        global _RUN_ARGS
+        _RUN_ARGS = args
+        try:
+            result, code = _run(True) if command == "run" else _rollback()
+        except Exception as exc:          # noqa: BLE001 - CLI 边界统一转非零退出
+            print(json.dumps({"command": command, "ok": False, "code": "error",
+                              "detail": str(exc)}, ensure_ascii=False, default=str))
+            return EXIT_REFUSED
+        print(json.dumps(result, ensure_ascii=False, default=str))
+        return code
 
     if command in WRITE_COMMANDS:
         state, reason = gate.judge()

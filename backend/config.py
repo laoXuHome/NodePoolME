@@ -21,6 +21,15 @@ STATE_DIR_CONFIG_ERROR = (
 
 DB_PATH = Path(os.getenv("NODEPOOL_DB", str(DATA_DIR / "nodepool.db"))).resolve()
 
+# 迁移入口开关（v1.10 计划 §3.4）：默认关闭。P-1.6 只允许在维护窗口内、对副本
+# 执行空迁移 dry-run；生产迁移窗口（P-1.8）才由运维显式置 1。
+MIGRATION_ENABLED = os.getenv("NODEPOOL_MIGRATION_ENABLED", "0").strip() == "1"
+
+# 非 DB 诊断通道（v1.10 设计 §1.3）：K1 未成立 / halt / 失败时唯一允许的落点。
+# 必须与业务库同卷（STATE_DIR 已由启动自检校验 st_dev），不得写进业务表。
+MIGRATION_FAULT_LOG = Path(os.getenv("NODEPOOL_MIGRATION_FAULT_LOG",
+                                     str(STATE_DIR / "migration-fault.log"))).resolve()
+
 ADMIN_PASSWORD = os.getenv("NODEPOOL_ADMIN_PASSWORD", "nodepool")
 SECRET_KEY = os.getenv("NODEPOOL_SECRET", "nodepool-default-secret-change-me")
 SESSION_HOURS = int(os.getenv("NODEPOOL_SESSION_HOURS", "72"))
