@@ -234,19 +234,40 @@ def test_pool_dead_after_block_and_readonly_still_serves(maint_file):
     assert db.readonly_query_only_ok() is True
 
 
+def _module_halt_migration():
+    import importlib
+
+    return importlib.import_module(pool._TRUSTED_ISSUER_MODULE)
+
+
 def _fake_halt_migration():
     """模拟 P-1.6：在 backend.database.migrate 的模块命名空间里定义 halt_migration。
 
     真实 P-1.6 会把函数写在 migrate.py 里；这里用 ``exec(..., module.__dict__)``
     复刻同一事实——函数对象的 ``__globals__`` 就是该模块的 ``__dict__``。
-    只改 ``__module__`` 字符串的伪造函数不会被接受（见对应反向测试）。
+    同一个进程内重复调用返回**同一个函数对象**（模块属性已是可信定义时就复用），
+    以便"同一对象重复注册 = 幂等"成立；需要新对象时用
+    :func:`_replace_module_halt_migration`。
     """
-    import importlib
+    import types
 
-    module = importlib.import_module(pool._TRUSTED_ISSUER_MODULE)
-    code = compile(f"def {pool._TRUSTED_ISSUER_FUNC}():\n    return None\n",
-                   module.__file__ or "<migrate>", "exec")
-    exec(code, module.__dict__)              # noqa: S102 - 测试内构造可信发射器
+    module = _module_halt_migration()
+    existing = getattr(module, pool._TRUSTED_ISSUER_FUNC, None)
+    if (isinstance(existing, types.FunctionType)
+            and getattr(existing, "__globals__", None) is module.__dict__):
+        return existing
+    exec(compile(f"def {pool._TRUSTED_ISSUER_FUNC}():\n    return None\n",
+                 module.__file__ or "<migrate>", "exec"),
+         module.__dict__)                     # noqa: S102 - 测试内构造可信发射器
+    return getattr(module, pool._TRUSTED_ISSUER_FUNC)
+
+
+def _replace_module_halt_migration():
+    """同名、同模块、**另一个函数对象**：重新定义并覆盖模块属性后返回新对象。"""
+    module = _module_halt_migration()
+    exec(compile(f"def {pool._TRUSTED_ISSUER_FUNC}():\n    return 'replacement'\n",
+                 module.__file__ or "<migrate>", "exec"),
+         module.__dict__)                     # noqa: S102 - 故意替换同名函数
     return getattr(module, pool._TRUSTED_ISSUER_FUNC)
 
 
@@ -947,6 +968,7 @@ def test_unregistered_and_replaced_token_cannot_mint():
     # 身份混淆 1：同一 id 位置上的登记项被换成另一个令牌对象（真实令牌被替换）
     pool._ISSUERS[id(token)] = pool._IssuerRecord(token=object(),
                                                   issuer=pool._ISSUER_ID,
+                                                  function=_fake_halt_migration(),
                                                   registered_at=1.0)
     assert pool._lookup_token(token) is None                 # 同 id 但非同一对象
     with pytest.raises(pool.HaltPreconditionFailed) as exc2:
@@ -958,6 +980,7 @@ def test_unregistered_and_replaced_token_cannot_mint():
     pool._ISSUERS.clear()
     pool._ISSUERS[id(replacement)] = pool._IssuerRecord(token=replacement,
                                                         issuer=pool._ISSUER_ID,
+                                                        function=_fake_halt_migration(),
                                                         registered_at=2.0)
     with pytest.raises(pool.HaltPreconditionFailed) as exc3:
         pool.mint_confirmation(token, "m", True, True)
@@ -986,7 +1009,8 @@ def test_confirmation_is_bound_to_issuer_token_not_issuer_string(maint_file):
     # 2) 同 issuer 字符串、换掉令牌对象 ⇒ 旧凭据立即失效
     replacement = object()
     pool._ISSUERS.clear()
-    pool._ISSUERS[id(replacement)] = pool._IssuerRecord(replacement, pool._ISSUER_ID, 2.0)
+    pool._ISSUERS[id(replacement)] = pool._IssuerRecord(replacement, pool._ISSUER_ID,
+                                                        _fake_halt_migration(), 2.0)
     with pytest.raises(pool.HaltPreconditionFailed) as exc2:
         pool.halt_tail(rec)
     assert exc2.value.code == "unconfirmed"
@@ -1021,3 +1045,116 @@ def test_p16_issuer_handoff_contract(maint_file):
     rec = pool.mint_confirmation(token, "mig-p16", True, blocked)
     assert pool.halt_tail(rec) == pool.HALT_TAIL_OK
     assert rec.migration_id == "mig-p16" and rec._issuer == pool._ISSUER_ID
+
+
+# ================= P-1.5 最后一项修复：发射器函数对象的身份绑定
+def test_same_function_object_registration_is_idempotent():
+    """同一函数对象重复注册：返回同一令牌，登记项绑定该函数对象（强引用）。"""
+    issuer = _fake_halt_migration()
+    token = pool.register_confirmation_issuer(issuer)
+    record = pool._ISSUERS[id(token)]
+    assert record.token is token
+    assert record.function is issuer            # 登记项持有函数对象本体
+    assert record.issuer == pool._ISSUER_ID
+    assert len(pool._ISSUERS) == 1
+
+    again = pool.register_confirmation_issuer(issuer)
+    assert again is token
+    assert len(pool._ISSUERS) == 1
+    assert pool._ISSUERS[id(again)].function is issuer
+
+
+def test_same_module_and_name_but_different_function_object_is_rejected():
+    """同模块、同函数名、另一个函数对象：拒绝注册，绝不交出原令牌。"""
+    original = _fake_halt_migration()
+    token = pool.register_confirmation_issuer(original)
+
+    replacement = _replace_module_halt_migration()      # 真实的新函数对象
+    assert replacement is not original
+    assert replacement.__module__ == original.__module__
+    assert replacement.__name__ == original.__name__
+
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.register_confirmation_issuer(replacement)
+    assert exc.value.code == "issuer_identity_conflict"
+    assert len(pool._ISSUERS) == 1
+    assert pool._ISSUERS[id(token)].function is original   # 原登记项未被改写
+    assert pool._ISSUERS[id(token)].token is token
+
+
+def test_replaced_module_function_breaks_token_and_confirmation(maint_file):
+    """原发射器注册后替换模块里的同名函数：旧令牌不能再签发，旧凭据失效。"""
+    pool.block_writes(pool.REASON_MAINTENANCE)
+    original = _fake_halt_migration()
+    token = pool.register_confirmation_issuer(original)
+    rec = pool.mint_confirmation(token, "mig-replace", True, True)
+    assert pool.halt_tail(rec) == pool.HALT_TAIL_OK
+
+    replacement = _replace_module_halt_migration()        # 模块属性指向新对象
+    assert getattr(_module_halt_migration(), pool._TRUSTED_ISSUER_FUNC) is replacement
+
+    # 1) 用替换后的函数尝试注册：同身份串不同对象 ⇒ 拒绝，拿不到原令牌
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.register_confirmation_issuer(replacement)
+    assert exc.value.code == "issuer_identity_conflict"
+
+    # 2) 用替换后的函数尝试签发：没有令牌，直接失败
+    with pytest.raises(pool.HaltPreconditionFailed) as exc2:
+        pool.mint_confirmation(replacement, "mig-replace", True, True)
+    assert exc2.value.code == "untrusted_issuer"
+
+    # 3) 原令牌仍在注册表里，但绑定已被替换 ⇒ 拒绝签发
+    with pytest.raises(pool.HaltPreconditionFailed) as exc3:
+        pool.mint_confirmation(token, "mig-replace", True, True)
+    assert exc3.value.code == "issuer_replaced"
+
+    # 4) 替换前签发的凭据同样失效
+    with pytest.raises(pool.HaltPreconditionFailed) as exc4:
+        pool.halt_tail(rec)
+    assert exc4.value.code == "unconfirmed"
+
+
+def test_record_binding_replacement_is_rejected(maint_file):
+    """令牌对象、登记记录、发射器对象三者错配 ⇒ 签发与确认都必须失败。"""
+    pool.block_writes(pool.REASON_MAINTENANCE)
+    module = _module_halt_migration()
+    original = _fake_halt_migration()
+    token = pool.register_confirmation_issuer(original)
+    rec = pool.mint_confirmation(token, "mig-swap", True, True)
+    assert pool.halt_tail(rec) == pool.HALT_TAIL_OK
+
+    other = _replace_module_halt_migration()              # 另一个函数对象
+    setattr(module, pool._TRUSTED_ISSUER_FUNC, original)  # 模块侧恢复原对象
+    # 登记项里的函数对象被改写成 other ⇒ 与模块当前定义不符
+    pool._ISSUERS[id(token)] = pool._IssuerRecord(token=token, issuer=pool._ISSUER_ID,
+                                                   function=other, registered_at=1.0)
+    with pytest.raises(pool.HaltPreconditionFailed) as exc:
+        pool.mint_confirmation(token, "mig-swap", True, True)
+    assert exc.value.code == "issuer_replaced"
+    with pytest.raises(pool.HaltPreconditionFailed) as exc2:
+        pool.halt_tail(rec)
+    assert exc2.value.code == "unconfirmed"
+
+    # 反过来：登记项恢复原函数对象、模块属性却指向别的对象 ⇒ 同样失效
+    pool._ISSUERS[id(token)] = pool._IssuerRecord(token=token, issuer=pool._ISSUER_ID,
+                                                   function=original, registered_at=1.0)
+    setattr(module, pool._TRUSTED_ISSUER_FUNC, other)
+    with pytest.raises(pool.HaltPreconditionFailed) as exc3:
+        pool.mint_confirmation(token, "mig-swap", True, True)
+    assert exc3.value.code == "issuer_replaced"
+    assert pool._record_binding_live(pool._ISSUERS[id(token)]) is False
+
+
+def test_no_issuer_registered_keeps_halt_tail_fail_closed(maint_file):
+    """P-1.5 不注册发射器：任何形状的凭据都得到 no_trusted_issuer。"""
+    assert pool._ISSUERS == {}
+    for candidate in (pool.MaintConfirmation("m", True, True, 1.0),
+                      type("Rec", (), {"maintenance_ok": True, "writes_blocked": True})(),
+                      {"maintenance_ok": True, "writes_blocked": True}):
+        with pytest.raises(pool.HaltPreconditionFailed) as exc:
+            pool.halt_tail(candidate)
+        assert exc.value.code in ("not_confirmation", "no_trusted_issuer")
+    pool.block_writes(pool.REASON_MAINTENANCE)
+    with pytest.raises(pool.HaltPreconditionFailed) as exc2:
+        pool.halt_tail(pool.MaintConfirmation("m", True, True, 1.0))
+    assert exc2.value.code == "no_trusted_issuer"
