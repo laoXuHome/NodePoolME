@@ -6,7 +6,8 @@
     python -m backend.database.cli verify      # 只读
     python -m backend.database.cli snapshot    # 写：维护态下拒绝
     python -m backend.database.cli run --db <副本库>   # P-1.6：空迁移 dry-run
-    python -m backend.database.cli rollback --set <备份集>  # P-1.6：受维护态/排空约束
+    python -m backend.database.cli rollback --set <备份集>  # P-1.7：停写/排空/原子替换
+    python -m backend.database.cli restore-set --set <备份集> --db <目标库>  # 内部：恢复子进程
 
 ``--allow-write`` 仅为兼容计划里的命令形态而存在，**不能**绕过维护态封锁。
 """
@@ -23,6 +24,7 @@ from backend.database import backup, gate, migrate
 READ_COMMANDS = ("status", "verify")
 WRITE_COMMANDS = ("snapshot",)
 MIGRATE_COMMANDS = ("run", "rollback")
+INTERNAL_COMMANDS = ("restore-set",)   # 仅由 `migrate.rollback_to_snapshot` 的子进程调用
 
 EXIT_OK = 0
 EXIT_REFUSED = 2
@@ -34,8 +36,11 @@ _RUN_ARGS: argparse.Namespace | None = None
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="backend.database.cli",
                                      description="NodePoolME 迁移 CLI（维护态受约束）")
-    parser.add_argument("command", choices=READ_COMMANDS + WRITE_COMMANDS + MIGRATE_COMMANDS)
-    parser.add_argument("--db", help="run：dry-run 的副本数据库路径（必填，且不得等于主库）")
+    parser.add_argument("command",
+                        choices=READ_COMMANDS + WRITE_COMMANDS + MIGRATE_COMMANDS
+                        + INTERNAL_COMMANDS)
+    parser.add_argument("--db", help="run：dry-run 的副本数据库路径（必填，且不得等于主库）；"
+                                     "rollback/restore-set：目标库（rollback 缺省为主库）")
     parser.add_argument("--set", dest="set_dir", help="rollback：备份集目录（缺省用最新集）")
     parser.add_argument("--allow-write", action="store_true",
                         help="保留参数：不能绕过维护态封锁")
@@ -94,9 +99,11 @@ def _run(dry_run: bool = True) -> tuple[dict, int]:
 
 
 def _rollback() -> tuple[dict, int]:
-    """P-1.6：从备份集回滚（维护态 + 排空约束由 migrate.rollback_to_snapshot 保证）。"""
+    """P-1.7：从备份集回滚（停写/排空/关连接/句柄复核/原子替换由 rollback_to_snapshot 保证）。"""
     try:
-        result = migrate.rollback_to_snapshot(getattr(_RUN_ARGS, "set_dir", None))
+        result = migrate.rollback_to_snapshot(
+            getattr(_RUN_ARGS, "set_dir", None),
+            db_path=getattr(_RUN_ARGS, "db", None) or None)
     except migrate.MigrationDisabled as exc:
         return {"command": "rollback", "ok": False, "code": "migration_disabled",
                 "detail": str(exc)}, EXIT_REFUSED
@@ -128,6 +135,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             return EXIT_REFUSED
         print(json.dumps(result, ensure_ascii=False, default=str))
         return code
+
+    if command in INTERNAL_COMMANDS:
+        from pathlib import Path
+        target = Path(args.db) if args.db else config.DB_PATH
+        set_dir = Path(args.set_dir) if args.set_dir else None
+        if set_dir is None:
+            print(json.dumps({"ok": False, "command": command, "code": "set_required"},
+                             ensure_ascii=False))
+            return EXIT_REFUSED
+        try:
+            report = backup.restore_set(set_dir, db_path=target,
+                                        close_connections=lambda: None)
+        except Exception as exc:          # noqa: BLE001
+            print(json.dumps({"ok": False, "command": command,
+                              "code": getattr(exc, "reason", "error"),
+                              "detail": str(exc)}, ensure_ascii=False, default=str))
+            return EXIT_REFUSED
+        print(json.dumps({"ok": True, "command": command, "set": set_dir.name,
+                          "target": str(target),
+                          "report": report if isinstance(report, dict) else str(report)},
+                         ensure_ascii=False, default=str))
+        return EXIT_OK
 
     if command in WRITE_COMMANDS:
         state, reason = gate.judge()

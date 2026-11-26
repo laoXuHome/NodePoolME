@@ -19,12 +19,15 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
+import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from backend import config
 
@@ -1113,6 +1116,11 @@ def _safe_log(record: dict[str, Any], path: str | Path | None = None) -> str | N
         return f"{type(exc).__name__}: {exc}"
 
 
+def _diag(event: str, *, path: str | Path | None = None) -> str | None:
+    """把一行诊断写进 `migration-fault.log`（不改 DB、不抛错）。"""
+    return _safe_log({"event": event, "at": _utc_now()}, path)
+
+
 def _recheck_structure_unchanged(db_path: str | Path,
                                  expected_hash: str | None) -> tuple[bool, str | None]:
     """只读复核：事务回滚后结构摘要是否仍与迁移前一致。
@@ -1159,7 +1167,8 @@ def _close_migration_connection(conn: sqlite3.Connection) -> tuple[bool, str | N
 
 def run(*, db_path: str | Path | None = None, dry_run: bool = True,
         snapshot: bool = False, snapshot_stage: str = "pre-migrate",
-        drain_rounds: int = 2, drain_min_interval: float = 10.0,
+        statements: Sequence[str] = (), drain_rounds: int = 2,
+        drain_min_interval: float = 10.0,
         clock: Any = None, sleeper: Any = None, checkpoint: Any = None,
         holders: Any = None, lock_path: str | Path | None = None,
         fault_log_path: str | Path | None = None) -> dict[str, Any]:
@@ -1252,7 +1261,8 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
             hash_before = structure_hash(conn)
             seq = _next_seq(conn)
             started_at = _utc_now()
-            detail = {"dry_run": True, "statements": 0, "target_version": TARGET_VERSION}
+            detail = {"dry_run": True, "statements": len(statements),
+                      "target_version": TARGET_VERSION}
 
             begin_ok = False
             try:
@@ -1264,7 +1274,10 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
                             started_at=started_at, finished_at=None,
                             detail_json=json.dumps(detail, sort_keys=True, ensure_ascii=False))
                 set_phase_memory(rec, Phase.TX_OPEN, Phase.COMMIT_ATTEMPTED)  # T2
-                # 空迁移：P-1.6 的 dry-run 不含任何 DDL，这里就是全部"迁移内容"
+                # 空迁移（默认）：P-1.6 dry-run 零 DDL；P-1.7 演练可注入 statements
+                # （例如真实 ALTER）以覆盖"DDL 中途抛错 → 回滚 → failed"路径。
+                for stmt in statements:
+                    conn.execute(stmt)
             except Exception as exc:      # noqa: BLE001 - 事务内任何异常都要判定能否确认失败
                 rollback_ok = False
                 rollback_error: str | None = None
@@ -1417,7 +1430,8 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
             return {"ok": True, "code": "migration_committed", "status": "committed",
                     "phase": rec.phase.value, "phase_epoch": rec.phase_epoch,
                     "migration_id": rec.migration_id, "seq": seq,
-                    "version": TARGET_VERSION, "dry_run": True, "statements": 0}
+                    "version": TARGET_VERSION, "dry_run": True,
+                    "statements": len(statements)}
         finally:
             try:
                 conn.close()
@@ -1425,28 +1439,117 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
                 pass
 
 
+RESTORE_SEQUENCE = (
+    "snapshot_verified",      # 备份集 L1/L2 只读验证
+    "stop_writes",            # 维护态 ACTIVE ⇒ 写入闸封锁
+    "drain",                  # 停写排空（两轮探测）
+    "close_connections",      # 关闭全部业务连接
+    "recheck_handles",        # /proc 复核：无第三方句柄
+    "restore_atomic",         # 同卷临时文件 + fsync + os.replace + 目录 fsync
+    "verify_restored",        # 只读 L1/行数复核（不写库）
+    "confirm_blocked",        # 写封锁确认（恢复后仍封锁，等人工确认）
+)
+
+
+def _restore_child_env(target: Path) -> dict[str, str]:
+    """子进程恢复用的环境变量。
+
+    `restore_set()` 的后置校验会调用 `db.init_db()`（需要写连接），而父进程正处于
+    维护期写封锁，因此真实恢复必须在**独立进程**执行：父进程先关闭全部连接、
+    确认无第三方句柄，再让子进程独占目标库完成原子替换与校验。
+    """
+    env = dict(os.environ)
+    mapping = {
+        "NODEPOOL_DB": target,
+        "NODEPOOL_DATA_DIR": config.DATA_DIR,
+        "NODEPOOL_CONFIG_DIR": config.CONFIG_DIR,
+        "NODEPOOL_LOG_DIR": config.LOG_DIR,
+        "NODEPOOL_BACKUP_DIR": config.BACKUP_DIR,
+        "NODEPOOL_STATE_DIR": config.STATE_DIR,
+    }
+    for key, value in mapping.items():
+        env[key] = str(value)
+    env["NODEPOOL_MIGRATION_ENABLED"] = "0"   # 子进程不得触发迁移
+    env["NODEPOOL_RESTORE_CHILD"] = "1"       # 标记：这是恢复子进程
+    return env
+
+
+def _default_restore_runner(set_dir: Path, target: Path) -> tuple[int, str]:
+    """默认恢复执行器：起独立进程跑 `cli restore-set`，返回 (退出码, 输出)。"""
+    repo_root = Path(__file__).resolve().parents[2]
+    cmd = [sys.executable, "-m", "backend.database.cli", "restore-set",
+           "--set", str(set_dir), "--db", str(target), "--json"]
+    try:
+        proc = subprocess.run(cmd, cwd=str(repo_root), env=_restore_child_env(target),
+                              capture_output=True, text=True, timeout=900)
+    except subprocess.TimeoutExpired:
+        return 124, "restore_child_timeout"
+    return proc.returncode, ((proc.stdout or "") + (proc.stderr or "")).strip()
+
+
+def _verify_restored(target: Path, set_dir: Path) -> tuple[bool, dict[str, Any]]:
+    """恢复后的**只读**复核：integrity_check + 各表行数与 manifest 比对。"""
+    detail: dict[str, Any] = {"target": str(target)}
+    if not target.exists():
+        return False, {**detail, "errors": ["target_missing"]}
+    manifest_path = Path(set_dir) / "manifest.json"
+    manifest: dict[str, Any] = {}
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as exc:                                  # noqa: BLE001
+            return False, {**detail, "errors": [f"manifest_unreadable: {exc}"]}
+    try:
+        conn = sqlite3.connect(f"{target.as_uri()}?mode=ro", uri=True, timeout=30)
+        try:
+            conn.execute("PRAGMA query_only=1")
+            check = conn.execute("PRAGMA integrity_check").fetchone()
+            detail["integrity_check"] = (check or ["?"])[0]
+            counts: dict[str, int] = {}
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+            for (name,) in rows:
+                counts[name] = conn.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
+            detail["tables"] = counts
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        return False, {**detail, "errors": [f"readonly_check_failed: {exc}"]}
+    errors: list[str] = []
+    if detail.get("integrity_check") != "ok":
+        errors.append(f"integrity_check={detail.get('integrity_check')}")
+    expected = (manifest.get("tables") or {})
+    for name, want in expected.items():
+        got = detail["tables"].get(name)
+        if got != want:
+            errors.append(f"count_mismatch:{name} want={want} got={got}")
+    detail["errors"] = errors
+    return not errors, detail
+
+
 def rollback_to_snapshot(set_path: str | Path | None = None, *,
                          db_path: str | Path | None = None,
                          drain_rounds: int = 2, drain_min_interval: float = 10.0,
                          clock: Any = None, sleeper: Any = None,
                          checkpoint: Any = None, holders: Any = None,
+                         restore_runner: Any = None,
                          fault_log_path: str | Path | None = None) -> dict[str, Any]:
-    """P-1.6 的回滚入口：**只做安全前置检查与只读验证**，不执行真实恢复。
+    """P-1.7 真实回滚入口：按 v1.10 恢复序列在**停机窗口**内替换目标库。
 
-    计划 §2.5.2-3 把"恢复"放在停机窗口：停写 → 排空 → 关闭全部连接 → 用
-    `pre-migrate` 备份集原子替换 → L1/L2 校验 → 人工确认后清维护文件 → 重启。
-    该流程属 P-1.7 演练内容，**P-1.6 不得触碰目标库**。
+    序列（设计 §3/计划 §2.5.2-3）：停写 → 排空 → 关闭全部连接 → 确认无第三方句柄
+    → 处理 WAL/SHM（`restore_set` 内隔离旧三件） → 同卷临时文件 → fsync →
+    `os.replace` 原子替换 → 目录 fsync → 恢复校验 → 失败回退 `pre-restore`。
 
-    因此本函数：
+    安全边界：
 
-    1. 要求迁移开关开启、维护态 `ACTIVE`；
-    2. 定位备份集（显式传入或最新集），用 `backup.verify_set()` 做**纯只读**验证；
-    3. 一律以 `MigrationRefused("p17_required")` 拒绝执行恢复。
-
-    **绝不调用** `backup.restore_set()`，不替换/覆盖/隔离目标数据库，也不因为
-    "失败后会还原"就提前开放真实恢复能力。
+    * 只在维护态 `ACTIVE` 下执行，且在替换前后**全程保持写入封锁**；
+    * 有第三方句柄 ⇒ 中止，不改任何文件（F10）；
+    * 恢复失败/无法确认 ⇒ `halt_migration("restore_failed")`，不开放写入、不重试；
+    * 成功后**不**移除 `maintenance.json`（PT-17：需人工确认）；
+    * 迁移连接由子进程独占，父进程不持有任何目标库句柄。
     """
-    from backend.database import backup, gate, maint
+    from backend.database import backup, db as db_module, gate, maint, pool
 
     if not config.MIGRATION_ENABLED:
         raise MigrationDisabled()
@@ -1461,17 +1564,154 @@ def rollback_to_snapshot(set_path: str | Path | None = None, *,
         if not latest:
             raise MigrationRefused("no_backup_set", "没有任何可用备份集")
         set_dir = Path(latest["path"])
-    verdict = backup.verify_set(set_dir)          # 只读：不复制、不替换、不算 L3
+    set_dir = set_dir.resolve()
+    if not target.exists():
+        raise MigrationRefused("target_missing", f"目标库不存在：{target}")
+    verdict = backup.verify_set(set_dir)
     if not verdict.get("ok"):
         raise MigrationRefused("backup_invalid", f"备份集验证未通过：{verdict.get('errors')}")
-    raise MigrationRefused(
-        "p17_required",
-        f"P-1.6 不执行真实恢复（目标 {target}，备份集 {set_dir.name}）；"
-        "停机窗口恢复属 P-1.7，本阶段只完成前置检查与只读验证",
-    )
+
+    steps: list[str] = ["snapshot_verified"]
+    timings: dict[str, float] = {}
+    started = time.monotonic()
+    result: dict[str, Any] = {
+        "command": "rollback", "target": str(target), "set": set_dir.name,
+        "restored": False, "writes_blocked": True, "maintenance_kept": True,
+        "steps": steps, "timings": timings,
+    }
+
+    # 1) 停写
+    gate.apply_state(state)
+    pool.block_writes(f"回滚恢复：{set_dir.name}")
+    steps.append("stop_writes")
+    block_ok, block_detail = pool.confirm_writes_blocked()
+    result["block_confirm"] = block_detail
+    if not block_ok:
+        _diag("rollback_writes_block_unconfirmed", path=fault_log_path)
+        raise FatalExit("writes_block_unconfirmed")
+
+    # 2) 排空
+    t0 = time.monotonic()
+    try:
+        drained = gate.drain(rounds=drain_rounds, min_interval=drain_min_interval,
+                             clock=clock or time.monotonic,
+                             sleeper=sleeper or time.sleep,
+                             checkpoint=checkpoint)
+    except Exception as exc:                                      # noqa: BLE001
+        timings["drain"] = round(time.monotonic() - t0, 3)
+        return _restore_failed(result, "drain_failed", str(exc), steps,
+                               fault_log_path=fault_log_path)
+    timings["drain"] = round(time.monotonic() - t0, 3)
+    result["drain"] = {"ok": bool(getattr(drained, "ok", False)),
+                       "detail": getattr(drained, "detail", None),
+                       "rounds": len(getattr(drained, "rounds", []) or []),
+                       "interval": getattr(drained, "interval", None)}
+    steps.append("drain")
+
+    # 3) 关闭全部业务连接
+    t0 = time.monotonic()
+    closed = db_module.close_all_connections()
+    timings["close_connections"] = round(time.monotonic() - t0, 3)
+    result["connections_closed"] = closed
+    steps.append("close_connections")
+
+    # 4) 第三方句柄复核（在替换**之前**，不满足就中止且不动文件）
+    t0 = time.monotonic()
+    probe = holders or backup.holders_of
+    try:
+        holders_list = probe(target)
+    except Exception as exc:                                      # noqa: BLE001
+        timings["recheck_handles"] = round(time.monotonic() - t0, 3)
+        return _restore_failed(result, "restore_handles_unverifiable", str(exc), steps,
+                               fault_log_path=fault_log_path)
+    timings["recheck_handles"] = round(time.monotonic() - t0, 3)
+    result["holders"] = list(holders_list)
+    if holders_list:
+        steps.append("recheck_handles")
+        result["code"] = "restore_handles_present"
+        result["restored"] = False
+        result["ok"] = False
+        _diag("restore_handles_present", path=fault_log_path)
+        return result                                     # 原库不动，封锁保持
+    steps.append("recheck_handles")
+
+    # 5) 原子替换（子进程独占目标库；父进程已无句柄）
+    t0 = time.monotonic()
+    runner = restore_runner or _default_restore_runner
+    try:
+        exit_code, output = runner(set_dir, target)
+    except Exception as exc:                                      # noqa: BLE001
+        timings["restore_atomic"] = round(time.monotonic() - t0, 3)
+        return _restore_failed(result, "restore_failed", f"{type(exc).__name__}: {exc}",
+                               steps, fault_log_path=fault_log_path)
+    timings["restore_atomic"] = round(time.monotonic() - t0, 3)
+    result["restore_exit"] = exit_code
+    result["restore_output"] = output[-2000:]
+    if exit_code != 0:
+        return _restore_failed(result, "restore_failed",
+                               f"restore_exit={exit_code}", steps,
+                               fault_log_path=fault_log_path,
+                               extra={"restore_output": output[-2000:]})
+    steps.append("restore_atomic")
+
+    # 6) 恢复后只读复核
+    t0 = time.monotonic()
+    ok, detail = _verify_restored(target, set_dir)
+    timings["verify_restored"] = round(time.monotonic() - t0, 3)
+    result["verify"] = detail
+    if not ok:
+        return _restore_failed(result, "restore_verify_failed",
+                               str(detail.get("errors")), steps,
+                               fault_log_path=fault_log_path,
+                               extra={"verify": detail})
+    steps.append("verify_restored")
+
+    # 7) 确认写入仍封锁（不自动开放），maintenance.json 保留
+    blocked, blocked_detail = pool.confirm_writes_blocked()
+    result["writes_blocked"] = bool(blocked)
+    result["block_confirm"] = blocked_detail
+    result["maintenance_file"] = str(getattr(maint, "MAINT_FILE", ""))
+    if not blocked:
+        _diag("rollback_writes_block_unconfirmed", path=fault_log_path)
+        raise FatalExit("writes_block_unconfirmed")
+    steps.append("confirm_blocked")
+    result["restored"] = True
+    result["ok"] = True
+    result["code"] = "restored"
+    timings["total"] = round(time.monotonic() - started, 3)
+    _diag(f"restore_ok set={set_dir.name}", path=fault_log_path)
+    return result
+
+
+def _restore_failed(result: dict[str, Any], code: str, reason: str,
+                    steps: list[str], *, fault_log_path: Any = None,
+                    extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """恢复失败：保持封锁并 halt，不重试、不开放写入、不伪造成功。"""
+    from backend.database import pool
+
+    result["code"] = code
+    result["error"] = reason
+    result["restored"] = False
+    result["ok"] = False
+    if extra:
+        result.update(extra)
+    if "restore_failed" not in steps:
+        steps.append("restore_failed")
+    _diag(f"{code}: {reason}", path=fault_log_path)
+    try:
+        halt = halt_migration(code, detail={"error": reason},
+                              fault_log_path=fault_log_path)
+    except Exception as exc:                                      # noqa: BLE001
+        result["halt_error"] = f"{type(exc).__name__}: {exc}"
+    else:
+        result["halt"] = halt
+    result["writes_blocked"] = bool(pool.writes_blocked())
+    result["timings"]["total"] = result["timings"].get("total") or 0.0
+    return result
 
 
 __all__ = [
+    "RESTORE_SEQUENCE",
     "BASELINE_APP_VERSION",
     "BASELINE_STRUCTURE_HASH",
     "BASELINE_VERSION",

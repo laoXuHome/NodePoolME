@@ -711,6 +711,8 @@ def restore_set(
             )
             first_error = f"{first_error} / 隔离副本还原异常：{quarantine_exc}"
         if not outcome.ok():
+            # 隔离副本已不可用：**不用** `pre-restore` 覆盖目标路径——那会毁掉刚替换进来的
+            # 新库（现场唯一可取证副本）。保留现状 + 隔离残留，报 leftover 交人工/P-1.8 处置。
             raise BackupError(
                 "restore_rolled_back_leftover",
                 f"恢复失败（{first_error}）；原库未确认还原：{outcome.detail()}",
@@ -719,16 +721,6 @@ def restore_set(
             raise BackupError("restore_replace_failed", str(first_error)) from exc
         raise BackupError("restore_rolled_back",
                           f"恢复后校验失败，已还原原库：{first_error}") from exc
-
-        # 隔离副本已不可用：退到 pre-restore 备份集
-        try:
-            _rollback_to_pre_restore(target, pre_restore["path"])
-        except Exception as rollback_exc:  # noqa: BLE001
-            raise BackupError(
-                "restore_failed",
-                f"恢复失败且回退失败：{first_error} / {rollback_exc}",
-            ) from exc
-        raise BackupError("restore_rolled_back", f"恢复失败，已回退 pre-restore：{first_error}") from exc
 
     # 成功：隔离副本与临时文件一并清理
     _drop_quarantine(quarantine)

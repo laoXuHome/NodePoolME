@@ -663,52 +663,49 @@ def test_rollback_missing_set_refused(env):
     assert exc.value.reason == "no_backup_set"
 
 
-def test_rollback_never_calls_restore_set(env, monkeypatch):
-    """P-1.6 不执行真实恢复：`restore_set` 一次都不许被调用，目标库字节不变。"""
+def test_rollback_requires_valid_set_without_touching_target(env, monkeypatch):
+    """P-1.7：回滚入口只接受 L1/L2 通过的备份集；无效备份集 ⇒ 拒绝且目标库字节不变。"""
     _activate()
     info = backup.snapshot_set(stage="pre-migrate", src_db=env.copy,
                                backup_dir=env.backups, stop_write=True)
     assert backup.verify_set(info["path"])["ok"] is True
+    (Path(info["path"]) / backup.COMPLETE_FILE).unlink()      # 三件缺一 ⇒ 判无效
     calls = {"n": 0}
 
     def forbidden(*_a, **_k):
         calls["n"] += 1
-        raise AssertionError("P-1.6 不得调用 backup.restore_set()")
+        raise AssertionError("备份集无效时不得调用 backup.restore_set()")
 
     monkeypatch.setattr(backup, "restore_set", forbidden)
     digest_before = _file_digest(env.copy)
 
     with pytest.raises(migrate.MigrationRefused) as exc:
         migrate.rollback_to_snapshot(info["path"], db_path=env.copy)
-    assert exc.value.reason == "p17_required"
+    assert exc.value.reason == "backup_invalid"
     assert calls["n"] == 0
     assert _file_digest(env.copy) == digest_before
     assert _row_counts(env.copy) == 1
 
 
-def test_cli_rollback_refuses_and_leaves_db_untouched(env, monkeypatch):
-    """CLI `rollback` 必须返回 p17_required，且不默认对主库执行恢复。"""
+def test_cli_rollback_restores_only_named_target(env, monkeypatch):
+    """P-1.7：CLI `rollback --db <副本> --set <集>` 只动指定目标；主库字节与行数不变。"""
     from backend.database import cli
 
     _activate()
     info = backup.snapshot_set(stage="pre-migrate", src_db=env.copy,
                                backup_dir=env.backups, stop_write=True)
-    calls = {"n": 0}
+    live_rows_before = _rows(env.live)
 
-    def forbidden(*_a, **_k):
-        calls["n"] += 1
-        raise AssertionError("CLI rollback 不得调用 restore_set()")
+    rc = cli.main(["rollback", "--db", str(env.copy), "--set", str(info["path"]), "--json"])
+    assert rc == cli.EXIT_OK
+    # 主库未被回滚（WAL checkpoint 会改写 -wal/-shm，故按迁移行与结构判等）
+    assert _rows(env.live) == live_rows_before
+    assert _row_counts(env.copy) == 1
 
-    monkeypatch.setattr(backup, "restore_set", forbidden)
-    live_digest = _file_digest(env.live)
-    copy_digest = _file_digest(env.copy)
-
-    rc = cli.main(["rollback", "--set", str(info["path"]), "--json"])
-    assert rc == cli.EXIT_REFUSED
-    assert calls["n"] == 0
-    assert _file_digest(env.live) == live_digest
-    assert _file_digest(env.copy) == copy_digest
-    assert _row_counts(env.live) == 1
+    # 无 --set 时取最新可用集（此处是恢复时自动生成的 pre-restore），同样只动 --db 指定的库
+    rc2 = cli.main(["rollback", "--db", str(env.copy), "--json"])
+    assert rc2 == cli.EXIT_OK
+    assert _rows(env.live) == live_rows_before
 
 
 # --- 修正 2：事务失败分支（BEGIN / ROLLBACK / 只读复核） ----------------------

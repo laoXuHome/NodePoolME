@@ -25,7 +25,7 @@ os.environ["NODEPOOL_TEST_ENGINE"] = "tcp"
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from backend.database import backup, cli, db, gate, maint, pool  # noqa: E402
+from backend.database import backup, cli, db, gate, maint, migrate, pool  # noqa: E402
 from backend.database.maint import MaintState  # noqa: E402
 from backend.scheduler import manager  # noqa: E402
 
@@ -33,10 +33,15 @@ ACTIVE_BLOB = {"maintenance": True, "migration_id": "p15-mig", "since": 17300000
                "phase": "PREPARED"}
 
 
+_ORIGINAL_HALT = migrate.halt_migration      # 伪造发射器测试会 exec 覆盖模块里的同名函数
+
+
 @pytest.fixture(autouse=True)
 def _clean_gate():
     pool.reset_for_tests()
     yield
+    # 还原本模块里被 exec 注入的伪造 `halt_migration`，避免污染后续测试模块
+    migrate.__dict__["halt_migration"] = _ORIGINAL_HALT
     pool.reset_for_tests()
     db.close_all_connections()
 
@@ -929,10 +934,14 @@ def test_forged_module_attribute_cannot_register_issuer():
     import importlib
 
     module = importlib.import_module(pool._TRUSTED_ISSUER_MODULE)
-    exec(compile("def run():\n    return None\n", module.__file__ or "<migrate>", "exec"),
+    # 注入名刻意避开模块里已有的任何符号（曾用 `run` 覆盖 `migrate.run`，污染后续测试）
+    exec(compile("def not_halt():\n    return None\n", module.__file__ or "<migrate>", "exec"),
          module.__dict__)                                     # noqa: S102
-    with pytest.raises(pool.HaltPreconditionFailed) as exc2:
-        pool.register_confirmation_issuer(module.run)
+    try:
+        with pytest.raises(pool.HaltPreconditionFailed) as exc2:
+            pool.register_confirmation_issuer(module.not_halt)
+    finally:
+        module.__dict__.pop("not_halt", None)
     assert exc2.value.code == "untrusted_issuer_identity"
 
     # 非函数（内建/实例）一律拒绝
