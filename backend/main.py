@@ -11,8 +11,8 @@ from fastapi.staticfiles import StaticFiles
 
 from backend import config
 from backend.api import routes
-from backend.database import db, gate, maint, pool
-from backend.database.maint import MaintRead, MaintState
+from backend.database import bootstrap, db, gate, instance_lock, maint, migrate, pool
+from backend.database.maint import MaintState
 from backend.scheduler import manager
 from backend.services import fetcher
 from backend.services.speed_queue import queue as speed_queue
@@ -39,68 +39,88 @@ def setup_logging() -> None:
     root.setLevel(logging.INFO)
 
 
-def startup_maintenance_state() -> dict:
-    """A 类入口 5（重启恢复）：维护态判定必须先于 ``init_db()``。
-
-    * ACTIVE ⇒ 进入维护态：写入闸置位、连接池 dead、业务写入 503；
-    * RECOVERY_REQUIRED ⇒ 进入 ``migration_recovery`` 只读态；
-    * 首次部署（库文件尚不存在且维护文件 ABSENT）视为 INACTIVE，与现状一致；
-    * 不自动推进 phase、不补写事件、不自动重试迁移。
-    """
-    state = maint.maintenance_state()
-    if state is MaintState.RECOVERY_REQUIRED and not config.DB_PATH.exists():
-        # migration_incomplete() 无从查询（库还没建），只有维护文件明确不存在
-        # 才能判定「迁移从未开始」；CORRUPT/UNREADABLE 一律保持保守恢复。
-        try:
-            read = maint.read_maint_file()
-        except Exception:
-            read = None
-        if read is not None and read.status is MaintRead.ABSENT:
-            state = MaintState.INACTIVE
-    reason = gate.write_reason(state)
-    if reason is not None:
-        gate.apply_state(state)
-        pool.block_writes(reason)
-    return {"state": state.name, "reason": reason, "blocked": reason is not None}
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    # 启动自检：STATE_DIR 同卷 + 原子写全链路。每次启动一次、结果缓存。
-    # 失败只禁用迁移入口（start_migration 拒绝执行），**不得**影响业务启动、
-    # 不得使全站 503、不得自动迁移或改动数据库。
+    # D2/D3: the process-lifetime lock is the first action.  A second process on
+    # the same STATE_DIR must fail before it can read or write the live database.
     try:
-        state_dir_check = maint.selfcheck_state_dir()
-    except Exception as exc:                      # 自检自身异常也只降级，不阻断启动
-        log.warning("STATE_DIR 自检异常，迁移入口禁用：%r", exc)
-        state_dir_check = None
-    app.state.state_dir_check = state_dir_check
-    if state_dir_check is not None and not state_dir_check.ok:
-        log.warning("STATE_DIR 自检未通过（%s）：迁移入口已禁用，业务照常启动（%s）",
-                    state_dir_check.code, state_dir_check.detail)
-    # A 类入口 5：维护态判定在 init_db() 之前完成；非 INACTIVE 不初始化、不建调度
-    startup = startup_maintenance_state()
-    app.state.maintenance = startup
-    blocked = startup["blocked"]
-    if blocked:
-        log.warning("维护态（%s）：业务写入已封锁（503），后台任务未启动，等待人工恢复",
-                    startup["state"])
-    else:
-        db.init_db()
-        migrated = fetcher.migrate_filter_defaults()
-        if migrated:
+        lock = instance_lock.acquire()
+    except instance_lock.AlreadyRunning:
+        log.error("同一 STATE_DIR 已有 NodePoolME 实例运行，拒绝启动：%s",
+                  instance_lock.lock_path())
+        raise SystemExit(2)
+    except instance_lock.LockUnsupported as exc:
+        log.error("文件系统不支持实例锁，拒绝启动：%s", exc)
+        raise SystemExit(2)
+    app.state.instance_lock = lock
+
+    try:
+        # 启动自检不触碰数据库；失败只禁用迁移入口，不改变恢复判定。
+        try:
+            state_dir_check = maint.selfcheck_state_dir()
+        except Exception as exc:
+            log.warning("STATE_DIR 自检异常，迁移入口禁用：%r", exc)
+            state_dir_check = None
+        app.state.state_dir_check = state_dir_check
+        if state_dir_check is not None and not state_dir_check.ok:
+            log.warning("STATE_DIR 自检未通过（%s）：迁移入口已禁用，业务照常启动（%s）",
+                        state_dir_check.code, state_dir_check.detail)
+
+        # Read maintenance file, block unconditionally, then probe schema and
+        # classify.  init_db()/ensure_schema_table_transactional()/record_baseline()
+        # are only reachable after a verified INACTIVE decision.
+        decision = bootstrap.inspect_startup()
+        bootstrap.apply_startup_gate(decision)
+        app.state.startup_decision = decision
+        app.state.maintenance = {
+            "state": decision.state.name,
+            "reason": gate.write_reason(decision.state),
+            "blocked": not decision.inactive,
+            "code": decision.code,
+            "phase": decision.phase,
+            "db_kind": decision.db_kind,
+        }
+        blocked = not decision.inactive
+        if blocked:
+            log.warning("启动恢复态（%s/%s）：写入已封锁，初始化/调度器/引擎未启动",
+                        decision.code, decision.db_kind)
+        else:
+            db.init_db()
+            # The new architecture needs one immutable baseline row before a
+            # later CLI `run --apply` can preflight.  This is reachable only
+            # after INACTIVE was verified; an existing non-pristine table is
+            # never repaired or overwritten.
             try:
-                builder.publish(reason="filter defaults migration")
-            except Exception as exc:
-                log.warning("过滤默认关键词迁移后重建订阅失败：%s", exc)
-        db.append_log("INFO", "系统", f"NodePool {config.VERSION} 启动，数据目录 {config.DATA_DIR}")
-        db.record_run_event("start")
-    await engine_mod.engine_manager.start()
-    if not blocked:
-        manager.start_scheduler()
-        speed_queue.start()
-    log.info("NodePool 已启动（内核：%s）", engine_mod.engine_manager.name)
+                conn = migrate.open_connection()
+                try:
+                    if not migrate.schema_table_exists(conn):
+                        baseline = migrate.record_baseline(conn)
+                        log.info("迁移基线已登记：%s/%s",
+                                 baseline["status"], baseline["structure_profile"])
+                finally:
+                    conn.close()
+            except Exception as exc:      # noqa: BLE001 - 基线失败只禁用迁移，不阻断业务
+                log.warning("迁移基线登记失败（迁移入口将不可用，业务继续）：%s", exc)
+            migrated = fetcher.migrate_filter_defaults()
+            if migrated:
+                try:
+                    builder.publish(reason="filter defaults migration")
+                except Exception as exc:
+                    log.warning("过滤默认关键词迁移后重建订阅失败：%s", exc)
+            db.append_log("INFO", "系统", f"NodePool {config.VERSION} 启动，数据目录 {config.DATA_DIR}")
+            db.record_run_event("start")
+
+        if not blocked:
+            await engine_mod.engine_manager.start()
+            manager.start_scheduler()
+            speed_queue.start()
+        log.info("NodePool 已启动（内核：%s）", engine_mod.engine_manager.name)
+    except BaseException:
+        lock.release()
+        app.state.instance_lock = None
+        raise
+
     try:
         yield
     finally:
@@ -108,8 +128,13 @@ async def lifespan(app: FastAPI):
         manager.stop_scheduler()
         await engine_mod.engine_manager.stop()
         if not blocked:
-            db.append_log("INFO", "系统", "NodePool 已停止")
-            db.record_run_event("shutdown")
+            try:
+                db.append_log("INFO", "系统", "NodePool 已停止")
+                db.record_run_event("shutdown")
+            except Exception:
+                log.warning("停机日志写入失败", exc_info=True)
+        lock.release()
+        app.state.instance_lock = None
 
 
 app = FastAPI(title="NodePoolME", version=config.VERSION, lifespan=lifespan,
@@ -125,6 +150,18 @@ async def maintenance_write_gate(request: Request, call_next):
     """
     if request.method not in WRITE_METHODS or not request.url.path.startswith(GATED_PREFIXES):
         return await call_next(request)
+    startup = getattr(request.app.state, "startup_decision", None)
+    if startup is not None and not startup.inactive:
+        # Do not trust a later re-read of the maintenance file here: startup may
+        # have classified RECOVERY_REQUIRED from the DB while a concurrent file
+        # read (or WAL visibility) disagrees.  The startup decision is authoritative
+        # for the lifetime of this process.
+        return JSONResponse(status_code=503,
+                            content={"ok": False,
+                                     "detail": "迁移恢复中，仅允许只读访问",
+                                     "reason": pool.REASON_RECOVERY,
+                                     "code": startup.code},
+                            headers={"Retry-After": "60"})
     try:
         state, reason = gate.judge()
     except Exception as exc:                       # 判定自身异常一律保守拒绝

@@ -201,10 +201,15 @@ def maint_fields_sane(blob: Any) -> bool:
 
 
 def _connect_readonly() -> sqlite3.Connection:
-    """只读连接（``mode=ro``）：不建库、不产生 ``-wal``/``-shm``、不 checkpoint。"""
+    """只读连接：``mode=rw`` + ``query_only=1``，能看到 WAL 中未 checkpoint 的页。
+
+    不用 ``mode=ro``：WAL 活库里已提交但尚未 checkpoint 的页可能不可见（实测
+    会出现漏行）。``mode=rw`` 不会创建不存在的库；写入由 ``query_only`` 拒绝。
+    """
     path = Path(config.DB_PATH).resolve()
-    conn = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=30)
+    conn = sqlite3.connect(f"file:{path}?mode=rw", uri=True, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA query_only=1")
     conn.execute("PRAGMA busy_timeout=30000")
     return conn
 

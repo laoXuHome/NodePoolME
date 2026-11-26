@@ -1581,4 +1581,6 @@ async def healthz(request: Request):
         "db": config.DB_PATH.exists(),
         "scheduler": manager.scheduler.running,
         "migration": maintenance.get("state", "unknown"),
+        "migration_code": maintenance.get("code"),
+        "migration_phase": maintenance.get("phase"),
     }

@@ -21,6 +21,7 @@ ENV PYTHONUNBUFFERED=1 \
     NODEPOOL_CONFIG_DIR=/config \
     NODEPOOL_LOG_DIR=/logs \
     NODEPOOL_BACKUP_DIR=/backup \
+    NODEPOOL_STATE_DIR=/state \
     NODEPOOL_MIHOMO_BIN=/usr/local/bin/mihomo \
     NODEPOOL_MIHOMO_API=http://127.0.0.1:9090
 
@@ -42,7 +43,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend ./backend
 COPY --from=web /backend/static ./backend/static
 
-RUN mkdir -p /data /config /logs /backup
+RUN mkdir -p /data /config /logs /backup /state
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

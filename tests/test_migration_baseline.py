@@ -19,6 +19,7 @@ from backend import config
 from backend.database import migrate
 
 REPO = Path(__file__).resolve().parents[1]
+DEV_DB = REPO / "data" / "nodepool.db"
 
 
 # --- helpers ----------------------------------------------------------------------------
@@ -27,7 +28,7 @@ REPO = Path(__file__).resolve().parents[1]
 def _copy_db(tmp_path: Path, name: str = "probe.db") -> Path:
     """WAL 安全复制：只用 sqlite3.backup()，绝不 shutil.copyfile。"""
     target = tmp_path / name
-    src = sqlite3.connect(f"file:{config.DB_PATH}?mode=ro", uri=True)
+    src = sqlite3.connect(f"file:{DEV_DB}?mode=ro", uri=True)
     dst = sqlite3.connect(target, isolation_level=None)
     src.backup(dst)
     dst.close()

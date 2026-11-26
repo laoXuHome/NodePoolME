@@ -72,7 +72,7 @@ def test_http_write_refused_when_active(maint_file):
     with TestClient(app) as client:
         resp = client.post("/api/does-not-matter", json={})
         assert resp.status_code == 503
-        assert resp.json()["reason"] == "maintenance"
+        assert resp.json()["reason"] == "recovery_required"
         # 只读请求不受影响
         assert client.get("/api/docs").status_code in (200, 404)
         assert client.get("/healthz").status_code == 200
@@ -95,7 +95,7 @@ def test_http_read_only_not_intercepted_when_active(maint_file):
 
     _write_active(maint_file)
     with TestClient(app) as client:
-        assert client.get("/healthz").json()["migration"] == "ACTIVE"
+        assert client.get("/healthz").json()["migration"] == "RECOVERY_REQUIRED"
         assert client.get("/api/settings").status_code != 503
 
 
@@ -192,38 +192,34 @@ def test_db_connection_pragmas_are_on():
 # ----------------------------------------------------------------- PT-15 入口 5
 def test_startup_blocks_before_init_on_active(maint_file):
     _write_active(maint_file)
-    called = {"init": 0}
-    import backend.main as main_mod
+    from backend.database import bootstrap
 
-    real_init = db.init_db
-    main_mod.db.init_db = lambda: called.__setitem__("init", called["init"] + 1)
-    try:
-        info = main_mod.startup_maintenance_state()
-    finally:
-        main_mod.db.init_db = real_init
-    assert info["blocked"] is True
-    assert info["state"] == "ACTIVE"
-    assert called["init"] == 0                       # 判定先于 init_db
+    decision = bootstrap.inspect_startup()
+    bootstrap.apply_startup_gate(decision)
+    assert decision.inactive is False
+    assert decision.state is MaintState.RECOVERY_REQUIRED
     with pytest.raises(pool.PoolClosed):
         db.connect()                                 # 写入闸已置位
 
 
 def test_startup_enters_recovery_on_corrupt(maint_file):
     _write_corrupt(maint_file)
-    import backend.main as main_mod
+    from backend.database import bootstrap
 
-    info = main_mod.startup_maintenance_state()
-    assert info["blocked"] is True
-    assert info["reason"] == "recovery_required"
+    decision = bootstrap.inspect_startup()
+    bootstrap.apply_startup_gate(decision)
+    assert decision.inactive is False
+    assert decision.code == "maintenance_file_invalid"
     assert gate.judge()[0] is MaintState.RECOVERY_REQUIRED
 
 
 def test_startup_proceeds_on_inactive(maint_file):
-    import backend.main as main_mod
+    from backend.database import bootstrap
 
-    info = main_mod.startup_maintenance_state()
-    assert info["blocked"] is False
-    assert info["state"] == "INACTIVE"
+    decision = bootstrap.inspect_startup()
+    bootstrap.apply_startup_gate(decision)
+    assert decision.inactive is True
+    assert decision.state is MaintState.INACTIVE
 
 
 # ------------------------------------------------------------- B 类：连接池/dead

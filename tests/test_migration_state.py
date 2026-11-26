@@ -370,9 +370,9 @@ def test_run_refuses_live_db_and_non_dry_run(env):
     with pytest.raises(migrate.MigrationRefused) as exc:
         migrate.run(db_path=env.live, **_fast_drain())
     assert exc.value.reason == "dry_run_requires_copy"
-    with pytest.raises(migrate.MigrationRefused) as exc2:
+    with pytest.raises(migrate.AlreadyRunning) as exc2:
         migrate.run(db_path=env.copy, dry_run=False, **_fast_drain())
-    assert exc2.value.reason == "p17_required"
+    assert "instance_lock_required" in str(exc2.value)
     assert _row_counts(env.live) == 1
     assert _row_counts(env.copy) == 1
 

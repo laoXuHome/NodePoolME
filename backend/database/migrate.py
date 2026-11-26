@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -776,6 +777,49 @@ def set_phase_memory(rec: MigrationRecord, old: Phase, new: Phase) -> PhaseResul
     return PhaseResult.SUCCESS
 
 
+def _persist_phase(rec: MigrationRecord, dry_run: bool) -> None:
+    """D1: persist the current phase in maintenance.json for a real apply.
+
+    Dry-run stays memory-only so existing copy-database tests do not create a
+    maintenance file.  A failure here propagates to the transaction failure
+    branch, which keeps writes blocked and reports an outcome uncertainty.
+    """
+    if dry_run:
+        return
+    from backend.database import maint
+    maint.set_maintenance(rec, reason=getattr(rec, "reason", None) or "manual_migration")
+
+
+def _r4a_barrier(rec: MigrationRecord, dry_run: bool) -> None:
+    """Test-only deterministic barrier after TX_ROLLED_BACK is durable.
+
+    No production I/O: both environment variables are absent in normal runs.
+    """
+    if dry_run:
+        return
+    if os.getenv("NODEPOOL_TEST_MODE") != "1":
+        return
+    name = os.getenv("NODEPOOL_TEST_BARRIER", "")
+    if name != "r4a_after_tx_rolled_back":
+        return
+    state_dir = Path(config.STATE_DIR)
+    marker = state_dir / "p18-r4a.reached"
+    release = state_dir / "p18-r4a.release"
+    tmp = marker.with_name(marker.name + f".tmp.{os.getpid()}")
+    payload = json.dumps({"phase": rec.phase.value, "migration_id": rec.migration_id,
+                          "pid": os.getpid()}, sort_keys=True).encode("utf-8")
+    tmp.write_bytes(payload)
+    os.replace(tmp, marker)
+    timeout = float(os.getenv("NODEPOOL_TEST_BARRIER_TIMEOUT", "60"))
+    deadline = time.monotonic() + timeout
+    while not release.exists():
+        if time.monotonic() >= deadline:
+            halt_migration("test_barrier_timeout", rec=rec,
+                           detail={"barrier": name, "marker": str(marker)})
+            raise SystemExit(70)
+        time.sleep(0.05)
+
+
 def set_phase(rec: MigrationRecord, old: Phase, new: Phase) -> PhaseResult:
     """durable 事件后端的 `set_phase`（设计 v1.10 §2.1）：P-1 **未实现**。
 
@@ -1029,7 +1073,7 @@ class migration_run_lock:
 
     def __enter__(self) -> "migration_run_lock":
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(self.path), os.O_RDWR | os.O_CREAT, 0o600)
+        fd = os.open(str(self.path), os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
@@ -1055,7 +1099,8 @@ def _next_seq(conn: sqlite3.Connection) -> int:
 
 
 def _mark_failed(db_path: str | Path, migration_id: str, seq: int, version: str,
-                 started_at: str, failure: str, detail_extra: dict[str, Any] | None = None) -> bool:
+                 started_at: str, failure: str, detail_extra: dict[str, Any] | None = None,
+                 *, dry_run: bool = True) -> bool:
     """事务回滚后写 `failed` 行（独立短事务）。写不进去就返回 False，由调用方重封锁。"""
     conn = open_connection(db_path)
     try:
@@ -1065,14 +1110,14 @@ def _mark_failed(db_path: str | Path, migration_id: str, seq: int, version: str,
             "UPDATE schema_migrations SET status='failed', finished_at=?, detail_json=?"
             " WHERE migration_id=? AND status='running'",
             (_utc_now(),
-             json.dumps({"failure": failure, "dry_run": True, "statements": 0,
+             json.dumps({"failure": failure, "dry_run": dry_run, "statements": 0,
                          **(detail_extra or {})}, sort_keys=True, ensure_ascii=False),
              migration_id),
         ).rowcount
         if int(rowcount) == 0:
             _insert_row(conn, migration_id=migration_id, seq=seq, version=version,
                         status="failed", started_at=started_at, finished_at=_utc_now(),
-                        detail_json=json.dumps({"failure": failure, "dry_run": True,
+                        detail_json=json.dumps({"failure": failure, "dry_run": dry_run,
                                                 "statements": 0, **(detail_extra or {})},
                                                sort_keys=True, ensure_ascii=False))
         conn.execute("COMMIT")
@@ -1170,7 +1215,8 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
         drain_min_interval: float = 10.0,
         clock: Any = None, sleeper: Any = None, checkpoint: Any = None,
         holders: Any = None, lock_path: str | Path | None = None,
-        fault_log_path: str | Path | None = None) -> dict[str, Any]:
+        fault_log_path: str | Path | None = None, lock_token: Any = None,
+        record: MigrationRecord | None = None) -> dict[str, Any]:
     """执行一次**空迁移**（P-1.6 只允许 dry-run，且必须指向副本）。
 
     前置边界（任一不满足即拒绝，不动任何数据）：开关开启；`dry_run=True` 且目标
@@ -1196,6 +1242,12 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
 
     if not config.MIGRATION_ENABLED:
         raise MigrationDisabled()
+    barrier_name = os.getenv("NODEPOOL_TEST_BARRIER")
+    if barrier_name and os.getenv("NODEPOOL_TEST_MODE") != "1":
+        raise MigrationRefused(
+            "test_barrier_forbidden",
+            "NODEPOOL_TEST_BARRIER 只能在 NODEPOOL_TEST_MODE=1 时使用",
+        )
     target = Path(db_path or config.DB_PATH).resolve()
     live = Path(config.DB_PATH).resolve()
     if dry_run and target == live:
@@ -1204,7 +1256,21 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
             "P-1.6 空迁移 dry-run 只允许对副本执行；生产/开发主库要等 P-1.8",
         )
     if not dry_run:
-        raise MigrationRefused("p17_required", "P-1.6 只实现空迁移 dry-run，真实迁移在 P-1.7/P-1.8")
+        # A real apply must carry the process-lifetime lock token.  Never take a
+        # second flock on the same path: that would self-deadlock/refuse.
+        from backend.database import instance_lock as _instance_lock
+        try:
+            _instance_lock.assert_owned(lock_token)
+        except _instance_lock.AlreadyRunning as exc:
+            raise AlreadyRunning(str(exc)) from exc
+    elif lock_token is not None:
+        # The CLI already owns the process-lifetime lock; a dry-run must reuse it
+        # instead of trying a second flock on the same file.
+        from backend.database import instance_lock as _instance_lock
+        try:
+            _instance_lock.assert_owned(lock_token)
+        except _instance_lock.AlreadyRunning as exc:
+            raise AlreadyRunning(str(exc)) from exc
 
     ready_state, _reason = gate.judge()
     if ready_state is not maint.MaintState.ACTIVE:
@@ -1213,9 +1279,14 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
             f"迁移只能在维护态 ACTIVE 下执行，当前 {ready_state.name}",
         )
 
-    with migration_run_lock(lock_path):
+    lock_cm = nullcontext() if lock_token is not None else migration_run_lock(lock_path)
+    with lock_cm:
         gate.apply_state(ready_state)          # 封锁写入（含关闭业务写连接）
-        rec = MigrationRecord(migration_id=f"mig-{_utc_now().replace(' ', 'T')}-{os.getpid()}")
+        rec = record or MigrationRecord(
+            migration_id=f"mig-{_utc_now().replace(' ', 'T')}-{os.getpid()}")
+        if rec.phase is not Phase.PREPARED:
+            raise MigrationRefused("record_not_prepared",
+                                   f"迁移记录 phase 必须为 PREPARED，当前 {rec.phase.value}")
 
         drain_kwargs: dict[str, Any] = {"rounds": drain_rounds,
                                         "min_interval": drain_min_interval,
@@ -1248,7 +1319,7 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
             hash_before = structure_hash(conn)
             seq = _next_seq(conn)
             started_at = _utc_now()
-            detail = {"dry_run": True, "statements": len(statements),
+            detail = {"dry_run": dry_run, "statements": len(statements),
                       "target_version": TARGET_VERSION}
 
             begin_ok = False
@@ -1256,11 +1327,13 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
                 conn.execute("BEGIN IMMEDIATE")
                 begin_ok = True
                 set_phase_memory(rec, Phase.PREPARED, Phase.TX_OPEN)          # T1
+                _persist_phase(rec, dry_run)
                 _insert_row(conn, migration_id=rec.migration_id, seq=seq,
                             version=TARGET_VERSION, status="running",
                             started_at=started_at, finished_at=None,
                             detail_json=json.dumps(detail, sort_keys=True, ensure_ascii=False))
                 set_phase_memory(rec, Phase.TX_OPEN, Phase.COMMIT_ATTEMPTED)  # T2
+                _persist_phase(rec, dry_run)
                 # 空迁移（默认）：P-1.6 dry-run 零 DDL；P-1.7 演练可注入 statements
                 # （例如真实 ALTER）以覆盖"DDL 中途抛错 → 回滚 → failed"路径。
                 for stmt in statements:
@@ -1316,10 +1389,13 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
                     old_phase = rec.phase
                     if old_phase in (Phase.TX_OPEN, Phase.COMMIT_ATTEMPTED):
                         set_phase_memory(rec, old_phase, Phase.TX_ROLLED_BACK)   # T3/T5
+                        _persist_phase(rec, dry_run)
+                        _r4a_barrier(rec, dry_run)
                     failed_ok = _mark_failed(target, rec.migration_id, seq, TARGET_VERSION,
                                              started_at, str(exc),
                                              {"known_failed": True,
-                                              "recheck": recheck_detail})
+                                              "recheck": recheck_detail},
+                                             dry_run=dry_run)
                     if not failed_ok:
                         halt_migration("failed_row_unwritable", rec=rec,
                                        detail={"error": str(exc)},
@@ -1405,6 +1481,7 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
 
             try:
                 set_phase_memory(rec, Phase.COMMIT_ATTEMPTED, Phase.COMMITTED)   # T4
+                _persist_phase(rec, dry_run)
             except Exception as exc:      # noqa: BLE001 - A 之后落地失败 ⇒ HALTED
                 pool.ensure_blocked(pool.REASON_MAINTENANCE)
                 halt_migration("phase_apply_failed", rec=rec,
@@ -1417,7 +1494,7 @@ def run(*, db_path: str | Path | None = None, dry_run: bool = True,
             return {"ok": True, "code": "migration_committed", "status": "committed",
                     "phase": rec.phase.value, "phase_epoch": rec.phase_epoch,
                     "migration_id": rec.migration_id, "seq": seq,
-                    "version": TARGET_VERSION, "dry_run": True,
+                    "version": TARGET_VERSION, "dry_run": dry_run,
                     "statements": len(statements)}
         finally:
             try:
