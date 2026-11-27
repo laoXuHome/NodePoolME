@@ -178,6 +178,8 @@ def _upsert(airport_id: int, fetched: list[dict], keywords: list[str] | None = N
     updated = 0
     filtered_added = 0
     with db.transaction() as conn:
+        from backend.nodepool import store as nodepool_store
+        nodepool_store.ingest_fetch(conn, airport_id, fetched)
         existing = {
             r["fingerprint"]: r["id"]
             for r in conn.execute("SELECT id, fingerprint FROM nodes WHERE airport_id=?",

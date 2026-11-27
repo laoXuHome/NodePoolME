@@ -94,6 +94,11 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 SUPPORTED_STRUCTURE_PROFILES: dict[str, str] = {
     "alter_history": "798c5d4be3db0885cf75421669d2872d9ec67e426f946ec5cc919f84acc3ca15",
     "fresh_init": "e9feb0bb5028a38a082f1e2a75105cd15aa963c5562e15217ea80ff70c4eeb71",
+    # P1 三层节点池的 6 张旁路表按需懒创建；它们不属于基线业务表，但会进入
+    # structure_hash。这里登记两种基线各自加上 P1 表后的形态，备份/体检才能
+    # 继续通过 structure_profile_for 校验，而无需改写已冻结的 17 表基线。
+    "alter_history_p1": "45c47bc76ac0c91b93133246a2a641d58103d931d32a9c97d7f6fa28efcaef7d",
+    "fresh_init_p1": "598f93950df9e021710e668296394595b0fdc8afd783213818b3ed431dd3c2e0",
 }
 
 # 兼容别名：默认取历史 ALTER 形态（生产端最可能的形态，但**仍待 NAS 只读实测确认**，

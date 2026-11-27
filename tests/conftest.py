@@ -11,6 +11,10 @@ _TABLES = (
     "test_groups", "results", "latency_results", "share_history", "schedule_history", "batches", "run_events",
     "logs", "speed_sources", "speed_source_checks", "speed_runs", "speed_samples",
 )
+_P1_TABLES = (
+    "np_fetch_batches", "np_node_qualifications", "np_node_events", "np_node_names",
+    "np_nodes", "np_meta",
+)
 _ORIGINAL_ENGINE = None
 
 
@@ -28,6 +32,10 @@ def clean_database():
         _ORIGINAL_ENGINE = engine_mod.engine_manager
     db.reset_connection()
     db.init_db()
+    # P1 tables are created lazily. Drop them so every test still starts from
+    # the frozen baseline structure (migration/backup tests depend on that).
+    for table in _P1_TABLES:
+        db.execute(f'DROP TABLE IF EXISTS "{table}"')
     for table in _TABLES:
         db.execute(f"DELETE FROM {table}")
     db.execute("DELETE FROM sqlite_sequence WHERE name IN (%s)" % ",".join(f"'{t}'" for t in _TABLES))

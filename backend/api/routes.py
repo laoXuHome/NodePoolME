@@ -16,12 +16,14 @@ from backend import config
 from backend.api import auth
 from backend.database import db
 from backend.models.schemas import (AirportIn, AirportPatch, GroupIn, GroupPatch, LoginIn,
-                                    NodeTestIn, PasswordIn, RunIn, SettingsIn, SubSettings,
-                                    SpeedSourcePatch, SpeedTestIn)
+                                    NodePoolCompetitionIn, NodePoolHealthIn, NodePoolLayerIn,
+                                    NodePoolQualificationIn, NodeTestIn, PasswordIn, RunIn,
+                                    SettingsIn, SubSettings, SpeedSourcePatch, SpeedTestIn)
 from backend.scheduler import manager
 from backend.services import fetcher
 from backend.services.speed_queue import queue as speed_queue, schedule_state
 from backend.services.runtime_gate import gate
+from backend.nodepool import store as nodepool_store
 from backend.scoring import eligibility, sampler
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
@@ -1457,6 +1459,90 @@ async def restore_backup(file: UploadFile = File(...)):
 
 
 # ---------------------------------------------------------------------------- public subscription
+
+# ---------------------------------------------------------------------- P1 三层节点池
+def _raise_nodepool(exc: nodepool_store.NodePoolError):
+    status = 404 if exc.code == "node_not_found" else (
+        409 if exc.code.startswith("not_") else 400)
+    raise HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+
+
+@api.get("/nodepool/summary", dependencies=protected)
+def nodepool_summary():
+    """三层逻辑池的统计；raw_total 包含健康池和观察池，不是三份副本。"""
+    return nodepool_store.summary()
+
+
+@api.get("/nodepool/nodes", dependencies=protected)
+def nodepool_nodes(layer: str | None = None, health: str | None = None,
+                   competition: str | None = None, data_status: str | None = None,
+                   airport_id: int | None = None, source_active: int | None = None,
+                   q: str | None = None, page: int = 1, per_page: int = 20):
+    try:
+        return nodepool_store.list_nodes(
+            layer=layer, health=health, competition=competition, data_status=data_status,
+            airport_id=airport_id, source_active=source_active, q=q,
+            page=page, per_page=per_page,
+        )
+    except nodepool_store.NodePoolError as exc:
+        _raise_nodepool(exc)
+
+
+@api.get("/nodepool/nodes/{node_id}", dependencies=protected)
+def nodepool_node(node_id: int):
+    try:
+        return nodepool_store.detail(node_id)
+    except nodepool_store.NodePoolError as exc:
+        _raise_nodepool(exc)
+
+
+@api.post("/nodepool/nodes/{node_id}/health", dependencies=protected)
+def nodepool_health(node_id: int, payload: NodePoolHealthIn):
+    """接收 P2/P3 的检测结论；P1 只保存状态并驱动层级，不发起探测。"""
+    try:
+        return nodepool_store.set_health(
+            node_id, health=payload.health, data_status=payload.data_status,
+            reason=payload.reason, observation_reason=payload.observation_reason,
+            last_error=payload.last_error,
+        )
+    except nodepool_store.NodePoolError as exc:
+        _raise_nodepool(exc)
+
+
+@api.post("/nodepool/nodes/{node_id}/layer", dependencies=protected)
+def nodepool_layer(node_id: int, payload: NodePoolLayerIn):
+    try:
+        return nodepool_store.set_layer(node_id, layer=payload.layer, reason=payload.reason)
+    except nodepool_store.NodePoolError as exc:
+        _raise_nodepool(exc)
+
+
+@api.post("/nodepool/nodes/{node_id}/competition", dependencies=protected)
+def nodepool_competition(node_id: int, payload: NodePoolCompetitionIn):
+    try:
+        return nodepool_store.set_competition(node_id, state=payload.state,
+                                              reason=payload.reason)
+    except nodepool_store.NodePoolError as exc:
+        _raise_nodepool(exc)
+
+
+@api.post("/nodepool/nodes/{node_id}/qualifications", dependencies=protected)
+def nodepool_grant(node_id: int, payload: NodePoolQualificationIn):
+    try:
+        return nodepool_store.grant_qualification(
+            node_id, payload.qualification, reason=payload.reason)
+    except nodepool_store.NodePoolError as exc:
+        _raise_nodepool(exc)
+
+
+@api.delete("/nodepool/nodes/{node_id}/qualifications/{qualification}", dependencies=protected)
+def nodepool_revoke(node_id: int, qualification: str, reason: str | None = None):
+    try:
+        return nodepool_store.revoke_qualification(node_id, qualification, reason=reason)
+    except nodepool_store.NodePoolError as exc:
+        _raise_nodepool(exc)
+
+
 sub_router = APIRouter()
 
 

@@ -22,9 +22,10 @@ const menus = [
   { path: '/dashboard', label: '控制总览', short: '总览', code: '01', icon: 'Odometer' },
   { path: '/airports', label: '机场接入', short: '机场', code: '02', icon: 'OfficeBuilding' },
   { path: '/nodes', label: '节点池', short: '节点', code: '03', icon: 'Connection' },
-  { path: '/groups', label: '检测标签', short: '标签', code: '04', icon: 'Aim' },
-  { path: '/subscription', label: '订阅分发', short: '订阅', code: '05', icon: 'Link' },
-  { path: '/settings', label: '系统设置', short: '设置', code: '06', icon: 'Setting' }
+  { path: '/nodepool', label: '三层节点池', short: '三层', code: '04', icon: 'Files' },
+  { path: '/groups', label: '检测标签', short: '标签', code: '05', icon: 'Aim' },
+  { path: '/subscription', label: '订阅分发', short: '订阅', code: '06', icon: 'Link' },
+  { path: '/settings', label: '系统设置', short: '设置', code: '07', icon: 'Setting' }
 ]
 
 const rail = reactive({

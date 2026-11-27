@@ -136,3 +136,28 @@ class SpeedTestIn(BaseModel):
 class NodeTestIn(BaseModel):
     group_ids: Optional[list[int]] = None
     mode: Literal["all", "latency", "tags"] = "all"
+
+
+class NodePoolHealthIn(BaseModel):
+    """P1: an externally supplied health observation; no network probe here."""
+
+    health: str
+    data_status: Optional[str] = None
+    reason: Optional[str] = Field(default=None, max_length=200)
+    observation_reason: Optional[str] = Field(default=None, max_length=80)
+    last_error: Optional[str] = Field(default=None, max_length=500)
+
+
+class NodePoolLayerIn(BaseModel):
+    layer: str
+    reason: Optional[str] = Field(default=None, max_length=200)
+
+
+class NodePoolCompetitionIn(BaseModel):
+    state: str
+    reason: Optional[str] = Field(default=None, max_length=200)
+
+
+class NodePoolQualificationIn(BaseModel):
+    qualification: str = Field(min_length=1, max_length=40)
+    reason: Optional[str] = Field(default=None, max_length=200)
