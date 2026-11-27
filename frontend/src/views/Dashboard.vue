@@ -460,16 +460,37 @@ const gradeBands = computed(() => {
   ]
   return bands.map((band) => ({ ...band, pct: Math.round(band.count / total * 100) }))
 })
-const donutStyle = computed(() => {
+const donutArcs = computed(() => {
   const segments = statusSegments.value
-  if (!segments.length) return { background: 'conic-gradient(from -90deg, #dfe9e2 0 100%)' }
-  let cursor = 0
-  const stops = segments.map((segment) => {
-    const from = cursor
-    cursor += segment.percent
-    return `${segment.color} ${from}% ${cursor}%`
-  })
-  return { background: `conic-gradient(from -90deg, ${stops.join(', ')})` }
+  if (!segments.length) return []
+  const cx = 60
+  const cy = 60
+  const inner = 33
+  const outer = 55
+  const lift = 1.4
+  const gap = 4.5
+  let cursor = -90
+  return segments.map((segment) => {
+    const sweep = segment.percent * 3.6
+    const start = cursor + gap / 2
+    const end = cursor + sweep - gap / 2
+    cursor += sweep
+    if (end <= start) return null
+    const point = (radius, angle) => {
+      const rad = angle * Math.PI / 180
+      return [cx + radius * Math.cos(rad), cy + radius * Math.sin(rad)]
+    }
+    const [x0, y0] = point(outer + lift, start)
+    const [x1, y1] = point(outer + lift, end)
+    const [x2, y2] = point(inner + lift, end)
+    const [x3, y3] = point(inner + lift, start)
+    const large = end - start > 180 ? 1 : 0
+    return {
+      key: segment.key,
+      color: segment.color,
+      d: `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${(outer + lift).toFixed(2)} ${(outer + lift).toFixed(2)} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} L ${x2.toFixed(2)} ${y2.toFixed(2)} A ${(inner + lift).toFixed(2)} ${(inner + lift).toFixed(2)} 0 ${large} 0 ${x3.toFixed(2)} ${y3.toFixed(2)} Z`,
+    }
+  }).filter(Boolean)
 })
 const batchSpectrumAll = computed(() => {
   const source = allHistoryPoints.value.filter((point) => !point.live)
@@ -590,7 +611,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.023 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.024 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -737,7 +758,10 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
               <em>最近一次 · {{ data.nodes_qualified }} / {{ data.nodes_total }}</em>
             </div>
             <div class="status-comp">
-              <div class="status-donut" :style="donutStyle">
+              <div class="status-donut" :class="{ 'is-empty': !donutArcs.length }">
+                <svg class="status-donut-svg" viewBox="0 0 120 120" aria-hidden="true">
+                  <path v-for="arc in donutArcs" :key="arc.key" :d="arc.d" :fill="arc.color" />
+                </svg>
                 <div class="status-donut-hole">
                   <b>{{ qualifiedPct }}</b>
                   <span>QUALIFIED</span>

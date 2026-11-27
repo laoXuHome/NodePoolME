@@ -1,4 +1,4 @@
-/* NodePoolME · v2.023 FROST SCORE
+/* NodePoolME · v2.024 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -1001,10 +1001,18 @@ body::before {
 .status-comp { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 10px; padding-top: 10px; }
 .status-donut {
   position: relative; width: 112px; height: 112px; margin: 0 auto; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .46), 0 6px 15px rgba(37, 72, 60, .07);
+  display: flex; align-items: center; justify-content: center; background: transparent;
 }
-.status-donut::before { content: ""; position: absolute; inset: 18px; border-radius: 50%; background: #fbfcfb; }
+.status-donut.is-empty { background: conic-gradient(from -90deg, #dfe9e2 0 100%); }
+.status-donut-svg {
+  position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible;
+  filter: drop-shadow(0 4px 8px rgba(37, 72, 60, .14));
+}
+.status-donut-svg path { shape-rendering: geometricPrecision; }
+.status-donut::before {
+  content: ""; position: absolute; inset: 32px; border-radius: 50%; background: #fbfcfb;
+  box-shadow: inset 0 1px 3px rgba(37, 72, 60, .08), 0 0 0 1px rgba(255, 255, 255, .16);
+}
 .status-donut-hole { position: relative; z-index: 1; text-align: center; }
 .status-donut-hole b { display: block; font-size: 26px; line-height: .85; font-weight: 760; letter-spacing: -.06em; color: var(--np-ink); font-variant-numeric: tabular-nums; }
 .status-donut-hole span { display: block; margin-top: 3px; font-size: 5.8px; font-weight: 700; letter-spacing: .16em; color: #96a69f; }
@@ -1082,7 +1090,7 @@ body::before {
   .status-pane { padding-top: 8px; }
   .status-comp { grid-template-columns: 104px minmax(0, 1fr); }
   .status-donut { width: 104px; height: 104px; }
-  .status-donut::before { inset: 17px; }
+  .status-donut::before { inset: 30px; }
   .status-donut-hole b { font-size: 24px; }
   .status-batch { margin: 8px 14px 0; }
   .batch-spectrum { gap: 4px; }
