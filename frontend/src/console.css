@@ -1,4 +1,4 @@
-/* NodePoolME · v2.006 FROST SCORE
+/* NodePoolME · v2.007 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -650,6 +650,15 @@ body::before {
   color: var(--np-text) !important;
   border-radius: 20px !important;
 }
+.np-node-table { width: 100%; }
+.np-node-table .cell { padding-left: 6px; padding-right: 6px; }
+.np-node-table th .cell { padding-left: 4px; padding-right: 4px; }
+.np-node-table .np-node-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-node-table .np-publish-tag { padding: 0 5px; height: 20px; font-size: 11px; }
+.np-node-table .np-last-test { font-size: 11px; white-space: nowrap; }
+.np-node-table .np-node-latency { font-size: 12px; white-space: nowrap; }
+.np-node-table .np-latency-sep { margin: 0 5px; color: #9aaba3; }
+
 .np-console .el-table {
   --el-table-bg-color: transparent;
   --el-table-tr-bg-color: transparent;

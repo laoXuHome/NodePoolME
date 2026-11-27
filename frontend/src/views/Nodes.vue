@@ -150,11 +150,26 @@ function speedText(row) {
   if (s.status === 'error') return '⚠️ 异常'
   return '待测速'
 }
+function speedTextCompact(row) {
+  const s = row?.speed
+  if (!s) return '待测速'
+  if (s.status === 'excluded') return '排除'
+  if (s.status === 'ok') {
+    if (s.mb_per_s == null) return '无数据'
+    const v = Number(s.mb_per_s)
+    const num = v >= 1000 ? String(Math.round(v)) : v >= 100 ? String(Math.round(v)) : v.toFixed(1)
+    return `${s.emoji || ''} ${num}M/s`.trim()
+  }
+  if (s.status === 'stale') return '待测速'
+  if (s.status === 'source_failed') return '全源失败'
+  if (s.status === 'error') return '异常'
+  return '待测速'
+}
 function speedSub(row) {
   const s = row?.speed
   if (!s) return '尚未测速'
   if (s.status === 'excluded') return '机场主动排除测速'
-  if (s.status === 'ok') return `${s.grade_label || ''} · ${s.sources_ok ?? '—'}/${s.sources_total ?? '—'} 源`
+  if (s.status === 'ok') return `${s.grade_label || ''} · ${Number(s.mb_per_s).toFixed(2)} MB/s · ${s.sources_ok ?? '—'}/${s.sources_total ?? '—'} 源`
   if (s.status === 'stale') return s.label || '测速结果已过期'
   return s.label || '尚未取得有效测速结果'
 }
@@ -325,17 +340,17 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
     </div>
 
     <div v-if="!isMobile" class="np-card">
-      <el-table :data="items" size="small" @row-click="openDetail">
-        <el-table-column label="节点名称" min-width="260">
+      <el-table :data="items" size="small" table-layout="fixed" class="np-node-table" @row-click="openDetail">
+        <el-table-column label="节点名称" min-width="208" show-overflow-tooltip>
           <template #default="{ row }">
-            <div style="font-weight:500">{{ row.display_name }}</div>
+            <div style="font-weight:500" class="np-node-name">{{ row.display_name }}</div>
             <div class="np-muted">{{ row.server }}:{{ row.port }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="airport_name" label="机场" width="110" />
-        <el-table-column prop="protocol" label="协议" width="92" />
-        <el-table-column prop="region" label="地区" width="70" />
-        <el-table-column v-for="g in groups" :key="g.id" :label="g.ident" width="76">
+        <el-table-column prop="airport_name" label="机场" width="62" show-overflow-tooltip />
+        <el-table-column prop="protocol" label="协议" width="54" show-overflow-tooltip />
+        <el-table-column prop="region" label="地区" width="40" />
+        <el-table-column v-for="g in groups" :key="g.id" :label="g.ident" width="40">
           <template #default="{ row }">
             <el-tooltip v-if="groupCell(row, g.id)" :content="groupCellTip(row, g.id)" placement="top">
               <el-tag :type="groupCell(row, g.id).ok ? 'success' : 'danger'"
@@ -346,38 +361,39 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             <span v-else class="np-muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column :label="`延迟 ${targetShort('G')} / ${targetShort('W')}`" width="132">
+        <el-table-column :label="`延迟 ${targetShort('G')} / ${targetShort('W')}`" width="104">
           <template #default="{ row }">
-            <div class="np-mono" style="font-size:12px">
-              {{ targetShort('G') }}
-              <span :class="{ 'np-latency-over': overCap(row, 'G') }">{{ latencyValue(row, 'G') ?? '—' }}</span>
-              /
-              {{ targetShort('W') }}
-              <span :class="{ 'np-latency-over': overCap(row, 'W') }">{{ latencyValue(row, 'W') ?? '—' }}</span>
-            </div>
-            <div class="np-muted" style="font-size:11px">上限 {{ row.latency_targets?.G?.cap }} / {{ row.latency_targets?.W?.cap }}</div>
+            <el-tooltip :content="`上限 ${targetShort('G')} ${row.latency_targets?.G?.cap} / ${targetShort('W')} ${row.latency_targets?.W?.cap}`" placement="top">
+              <div class="np-mono np-node-latency">
+                <span :class="{ 'np-latency-over': overCap(row, 'G') }">{{ latencyValue(row, 'G') ?? '—' }}</span>
+                <span class="np-latency-sep">/</span>
+                <span :class="{ 'np-latency-over': overCap(row, 'W') }">{{ latencyValue(row, 'W') ?? '—' }}</span>
+              </div>
+            </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="下发" width="110">
+        <el-table-column label="下发" width="64">
           <template #default="{ row }">
             <el-tooltip :content="row.publish_reason || '—'" placement="top">
-              <el-tag size="small" effect="plain" :type="row.publishable ? 'success' : 'info'">
+              <el-tag size="small" effect="plain" class="np-publish-tag" :type="row.publishable ? 'success' : 'info'">
                 {{ row.publishable ? '下发' : '不下发' }}
               </el-tag>
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="下载速度" width="132">
+        <el-table-column label="下载速度" width="86">
           <template #default="{ row }">
             <el-tooltip :content="speedSub(row)" placement="top">
               <span class="np-speed-chip" :style="{ color: speedTextColor(row), borderColor: speedColor(row) + '55' }">
-                {{ speedText(row) }}
+                {{ speedTextCompact(row) }}
               </span>
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="最近检测" width="160">
-          <template #default="{ row }">{{ formatTs(row.last_tested_at) }}</template>
+        <el-table-column label="最近检测" width="86">
+          <template #default="{ row }">
+            <span class="np-mono np-last-test">{{ shortTs(row.last_tested_at) }}</span>
+          </template>
         </el-table-column>
       </el-table>
       <div v-if="!items.length" class="np-empty">
