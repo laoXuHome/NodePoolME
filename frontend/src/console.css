@@ -1,4 +1,4 @@
-/* NodePoolME · v2.018 FROST SCORE
+/* NodePoolME · v2.019 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -825,24 +825,31 @@ body::before {
 .opsmap-wrap .opsmap { margin-bottom: 0; }
 
 
-/* score + status tone: keep the room on deep green / gold / sage, not generic purple-blue */
-.np-pool-score.is-good strong, .np-score-cell.is-score .np-pool-score.is-good strong { color: #b07b1e; }
-.np-pool-score.is-good em { background: #f6ecd8; color: #8a601b; }
-.np-pool-score.is-ok strong, .np-score-cell.is-score .np-pool-score.is-ok strong { color: #2f6b57; }
-.np-pool-score.is-ok em { background: #e3f0e8; color: #2b6a55; }
-.np-pool-score.is-mid strong, .np-score-cell.is-score .np-pool-score.is-mid strong { color: #5d7f70; }
-.np-pool-score.is-mid em, .np-score-cell.is-score .np-pool-score.is-mid em { background: #e8efeb; color: #526f62; }
-.np-pool-score.is-low strong, .np-score-cell.is-score .np-pool-score.is-low strong { color: #b06a32; }
-.np-pool-score.is-low em, .np-score-cell.is-score .np-pool-score.is-low em { background: #f7ebdf; color: #955a2b; }
-.np-pool-score.is-bad strong, .np-score-cell.is-score .np-pool-score.is-bad strong { color: #ad4a35; }
-.np-pool-score.is-bad em, .np-score-cell.is-score .np-pool-score.is-bad em { background: #f7e4de; color: #98402d; }
-.np-score-cell.is-status .np-data-status.is-ample b { background: #b98a2c; color: #fff; }
-.np-score-cell.is-status .np-data-status.is-normal b { background: #2f6053; color: #fff; }
-.np-score-cell.is-status .np-data-status.is-reference b,
-.np-score-cell.is-status .np-data-status.is-tentative b { background: #5d7f70; color: #fff; }
-.np-score-cell.is-status .np-data-status.is-rough b { background: #b06a32; color: #fff; }
-.np-score-cell.is-status .np-data-status.is-insufficient b,
-.np-score-cell.is-status .np-data-status.is-collecting b { background: #ad4a35; color: #fff; }
+/* 评分与等级统一五档：优绿 / 良蓝 / 中黄 / 差橙 / 劣红 */
+.np-pool-score.is-good strong, .np-score-cell.is-score .np-pool-score.is-good strong { color: #16A34A; }
+.np-pool-score.is-good em, .np-score-cell.is-score .np-pool-score.is-good em { background: #16A34A; color: #fff; }
+.np-pool-score.is-ok strong, .np-score-cell.is-score .np-pool-score.is-ok strong { color: #2563EB; }
+.np-pool-score.is-ok em, .np-score-cell.is-score .np-pool-score.is-ok em { background: #2563EB; color: #fff; }
+.np-pool-score.is-mid strong, .np-score-cell.is-score .np-pool-score.is-mid strong { color: #EAB308; }
+.np-pool-score.is-mid em, .np-score-cell.is-score .np-pool-score.is-mid em { background: #EAB308; color: #3F3200; }
+.np-pool-score.is-low strong, .np-score-cell.is-score .np-pool-score.is-low strong { color: #EA580C; }
+.np-pool-score.is-low em, .np-score-cell.is-score .np-pool-score.is-low em { background: #EA580C; color: #fff; }
+.np-pool-score.is-bad strong, .np-score-cell.is-score .np-pool-score.is-bad strong { color: #DC2626; }
+.np-pool-score.is-bad em, .np-score-cell.is-score .np-pool-score.is-bad em { background: #DC2626; color: #fff; }
+
+/* 成熟度药丸底色取成熟度得分对应的同一档位 */
+.np-score-cell.is-status .np-data-status.is-good b { background: #16A34A; color: #fff; }
+.np-score-cell.is-status .np-data-status.is-ok b { background: #2563EB; color: #fff; }
+.np-score-cell.is-status .np-data-status.is-mid b { background: #EAB308; color: #3F3200; }
+.np-score-cell.is-status .np-data-status.is-low b { background: #EA580C; color: #fff; }
+.np-score-cell.is-status .np-data-status.is-bad b { background: #DC2626; color: #fff; }
+
+/* 手机端成熟度小标签使用同一组档位色 */
+.amc-status.is-good { background: #16A34A; color: #fff; }
+.amc-status.is-ok { background: #2563EB; color: #fff; }
+.amc-status.is-mid { background: #EAB308; color: #3F3200; }
+.amc-status.is-low { background: #EA580C; color: #fff; }
+.amc-status.is-bad { background: #DC2626; color: #fff; }
 
 .console-score-table td.np-score-airport { text-align: left; }
 

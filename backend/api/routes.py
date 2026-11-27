@@ -30,26 +30,10 @@ from backend.testers import speedtest
 api = APIRouter(prefix="/api")
 protected = [Depends(auth.require_auth)]
 SCORE_WEIGHTS = {"available": 60, "publish": 35, "tag": 5}
-# 追加分：原始 10 分加 1 分，70 分及以上固定加 15 分，10–70 分之间线性递增
-BONUS_MIN, BONUS_MAX = 1.0, 15.0
-BONUS_KNEE_LOW, BONUS_KNEE_HIGH = 10.0, 70.0
-
-
-def bonus_score(raw):
-    """在原始评分上追加的分值，只按原始分算一次。"""
-    raw = float(raw)
-    return max(BONUS_MIN, min(BONUS_MAX, BONUS_MIN + (raw - BONUS_KNEE_LOW)
-                                     / (BONUS_KNEE_HIGH - BONUS_KNEE_LOW) * (BONUS_MAX - BONUS_MIN)))
-
-
-def final_score(raw):
-    """最终展示分数：原始分 + 追加分，封顶 100。"""
-    raw = float(raw)
-    return min(100.0, raw + bonus_score(raw))
 
 
 def score_grade_of(value):
-    """按最终展示分数判定五级，严格 20 分一档：优 80–100、良 60–79、中 40–59、差 20–39、劣 <20。"""
+    """按实际评分判定五级，严格 20 分一档：优 80–100、良 60–79、中 40–59、差 20–39、劣 <20。"""
     value = float(value)
     return ("优" if value >= 80 else "良" if value >= 60 else "中" if value >= 40
             else "差" if value >= 20 else "劣")
@@ -484,8 +468,7 @@ async def dashboard(days: int = 7):
             ))
             raw = max(0, min(100, score))
             payload["raw_score"] = round(raw, 1)
-            payload["bonus_score"] = round(bonus_score(raw), 2)
-            shown = final_score(raw)
+            shown = raw
             if maturity_status == "insufficient":
                 # 数据不足只表示缺证据，不代表机场质量差：评分留空，不参与正式排名
                 payload["score"] = None
@@ -504,7 +487,6 @@ async def dashboard(days: int = 7):
             payload["score"] = None
             payload["score_exact"] = None
             payload["raw_score"] = None
-            payload["bonus_score"] = None
             payload["score_grade"] = "停用" if not airport["enabled"] else "空"
             payload["data_status_detail"] = detail
         airport_list.append(payload)

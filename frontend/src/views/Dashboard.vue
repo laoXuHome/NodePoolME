@@ -181,16 +181,23 @@ const qualifiedPct = computed(() => {
   return total ? Math.round(((data.value?.nodes_qualified || 0) / total) * 100) : 0
 })
 
-function scoreTone(row) {
-  if (!row.enabled) return 'is-off'
-  if (row.score === null || row.score === undefined) return 'is-empty'
-  const shown = row.score_exact ?? row.score
+function gradeTone(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return 'is-empty'
+  const shown = Number(value)
   if (shown >= 80) return 'is-good'
-  if (shown >= 70) return 'is-ok'
-  if (shown >= 60) return 'is-mid'
+  if (shown >= 60) return 'is-ok'
   if (shown >= 40) return 'is-mid'
   if (shown >= 20) return 'is-low'
   return 'is-bad'
+}
+function scoreTone(row) {
+  if (!row.enabled) return 'is-off'
+  if (row.score === null || row.score === undefined) return 'is-empty'
+  return gradeTone(row.score_exact ?? row.score)
+}
+function maturityTone(row) {
+  if (!row.enabled) return 'is-off'
+  return gradeTone(row.maturity_score)
 }
 function dayHint(row) {
   if (row.maturity_score === undefined || row.maturity_score === null) return ''
@@ -210,8 +217,8 @@ function scoreHint(row) {
   const publish = row.publish_rate ?? Math.round((row.published_count || 0) / pool * 100)
   const tag = row.tag_rate ?? Math.round((row.tag_ok_count || 0) / pool * 100)
   const basis = row.score_samples ? `近 7 天 ${row.score_samples} 个完整检测快照` : '无完整检测快照，按当前值'
-  const rawLine = `可用率 ${health}%（×${scoreWeights.value.available}%）· 下发率 ${publish}%（×${scoreWeights.value.publish}%）· 标签合格率 ${tag}%（×${scoreWeights.value.tag}%）→ 原始 ${row.raw_score} 分 · 追加 ${row.bonus_score} 分 → 展示 ${row.score} 分（${row.score_grade}）`
-  return `${basis} · ${rawLine}。追加分按原始分线性计算，只加一次，封顶 100`
+  const rawLine = `可用率 ${health}%（×${scoreWeights.value.available}%）· 下发率 ${publish}%（×${scoreWeights.value.publish}%）· 标签合格率 ${tag}%（×${scoreWeights.value.tag}%）→ 实际评分 ${row.score} 分（${row.score_grade}）`
+  return `${basis} · ${rawLine}。评分直接按实际得分展示，不再追加分`
 }
 function scoreSampleText(row) {
   if (!row.enabled) return '未启用'
@@ -448,9 +455,11 @@ const gradeBands = computed(() => {
   const rows = scoredAirports.value
   const total = rows.length || 1
   const bands = [
-    { key: 'high', label: '85+ 优先', color: '#d6a41d', count: rows.filter((row) => Number(row.score) >= 85).length },
-    { key: 'mid', label: '70–84 稳定', color: '#3f665c', count: rows.filter((row) => Number(row.score) >= 70 && Number(row.score) < 85).length },
-    { key: 'low', label: '低于 70 复核', color: '#c8755c', count: rows.filter((row) => Number(row.score) < 70).length },
+    { key: 'excellent', label: '优 80–100', color: '#16A34A', count: rows.filter((row) => Number(row.score) >= 80).length },
+    { key: 'good', label: '良 60–79', color: '#2563EB', count: rows.filter((row) => Number(row.score) >= 60 && Number(row.score) < 80).length },
+    { key: 'mid', label: '中 40–59', color: '#EAB308', count: rows.filter((row) => Number(row.score) >= 40 && Number(row.score) < 60).length },
+    { key: 'low', label: '差 20–39', color: '#EA580C', count: rows.filter((row) => Number(row.score) >= 20 && Number(row.score) < 40).length },
+    { key: 'bad', label: '劣 0–19', color: '#DC2626', count: rows.filter((row) => Number(row.score) < 20).length },
   ]
   return bands.map((band) => ({ ...band, pct: Math.round(band.count / total * 100) }))
 })
@@ -492,7 +501,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.018 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.019 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -800,7 +809,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                   <div v-else class="state-empty">未启用或缓存池为空</div>
                 </td>
                 <td class="np-score-cell is-status" :title="statusHint(row)">
-                  <div class="np-data-status" :class="statusTone(row)"><b>{{ row.data_status_text || '—' }}<em v-if="row.data_status_detail">{{ row.data_status_detail }}</em></b></div>
+                  <div class="np-data-status" :class="[statusTone(row), maturityTone(row)]"><b>{{ row.data_status_text || '—' }}<em v-if="row.data_status_detail">{{ row.data_status_detail }}</em></b></div>
                 </td>
                 <td class="np-score-cell is-score" :title="scoreHint(row)">
                   <div class="np-pool-score" :class="scoreTone(row)"><strong>{{ row.enabled && row.score !== null ? row.score : '—' }}</strong><em>{{ row.score_grade }}</em></div>
@@ -816,7 +825,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 <span class="amc-rank">{{ String(idx + 1).padStart(2, '0') }}</span>
                 <span class="np-airport-dot" :class="!row.enabled ? 'is-off' : `is-${row.last_status || 'none'}`" />
                 <b>{{ row.name }}</b>
-                <span class="amc-status" :class="statusTone(row)">{{ row.data_status_text || '—' }}</span>
+                <span class="amc-status" :class="[statusTone(row), maturityTone(row)]">{{ row.data_status_text || '—' }}</span>
               </div>
               <div class="np-pool-score amc-score" :class="scoreTone(row)">
                 <strong>{{ row.enabled && row.score !== null ? row.score : '—' }}</strong>
