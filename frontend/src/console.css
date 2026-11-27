@@ -1,4 +1,4 @@
-/* NodePoolME · v2.029 FROST SCORE
+/* NodePoolME · v2.030 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -115,20 +115,16 @@ body::before {
   gap: 14px;
   padding: 20px 14px 16px;
   border-radius: 34px;
-  border: 1px solid rgba(255, 255, 255, .075);
+  border: 1px solid transparent;
   color: #f4f8f2;
   background:
     radial-gradient(300px 240px at 16% 0%, rgba(255, 255, 255, .06), transparent 64%),
     linear-gradient(168deg, #2b4a43 0%, #24433c 46%, #1b342e 100%);
   box-shadow:
-    0 2px 6px rgba(19, 42, 35, .10),
-    0 12px 26px rgba(19, 42, 35, .16),
-    0 30px 70px rgba(19, 42, 35, .30),
-    0 48px 110px rgba(19, 42, 35, .12),
     inset 0 0 0 1px rgba(255, 255, 255, .055),
     inset 0 1px 0 rgba(255, 255, 255, .10),
     inset 0 -1px 0 rgba(0, 0, 0, .18);
-  overflow: hidden;
+  overflow: visible;
 }
 .np-rail::after {
   content: "";
@@ -224,25 +220,21 @@ body::before {
 .np-rail-link:hover .el-icon { color: rgba(236, 244, 238, .64); }
 .np-rail-link.active {
   z-index: 2;
-  width: calc(100% + 33px);
-  margin-right: -33px;
-  background: #f8f5ec;
+  width: calc(100% + 16px);
+  margin-right: -16px;
+  background: #ebefea;
   color: #29453c;
   font-weight: 680;
-  border: 1px solid rgba(255, 255, 255, .82);
-  border-right: 0;
+  border: 0;
   border-radius: 999px 0 0 999px;
-  box-shadow:
-    0 12px 26px rgba(5, 23, 18, .28),
-    0 2px 0 rgba(255, 255, 255, .55) inset,
-    0 -1px 0 rgba(48, 73, 63, .10) inset;
+  box-shadow: none;
 }
-.np-rail-link.active:hover { background: #fbf8f0; color: #29453c; }
+.np-rail-link.active:hover { background: #f0f4ef; color: #29453c; }
 /* 右端不做圆角，而是让深色侧栏在上下各让出一个弧形缺口，白色页签直接并入内容区 */
 .np-rail-link.active::before,
 .np-rail-link.active::after {
-  content: ""; position: absolute; right: 17px; width: 25px; height: 25px;
-  background: linear-gradient(90deg, #dce8e2 0%, #c6d3cd 55%, #b0bdb8 100%);
+  content: ""; position: absolute; right: 0; width: 26px; height: 25px;
+  background: linear-gradient(90deg, #eff8f3 0%, #e6f0eb 52%, #ebf4ef 100%);
   pointer-events: none; z-index: 2;
   -webkit-mask: radial-gradient(circle 25px at 0 0, transparent 24.5px, #000 25px);
   mask: radial-gradient(circle 25px at 0 0, transparent 24.5px, #000 25px);
@@ -723,8 +715,8 @@ body::before {
   .np-rail { width: 244px; left: 34px; top: 28px; bottom: 28px; border-radius: 32px; }
   .np-rail-brandtext b { font-size: 16.5px; }
   .np-rail-link { min-height: 48px; font-size: 14.5px; }
-  .np-rail-link.active { width: calc(100% + 29px); margin-right: -29px; }
-  .np-rail-link.active::before, .np-rail-link.active::after { right: 14px; }
+  .np-rail-link.active { width: calc(100% + 16px); margin-right: -16px; }
+  .np-rail-link.active::before, .np-rail-link.active::after { right: 0; width: 26px; }
   .np-rail { gap: 10px; }
   .score-body { grid-template-columns: 150px minmax(0, 1fr) 190px; }
   .score-gauge { width: 146px; height: 146px; }
