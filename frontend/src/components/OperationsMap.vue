@@ -14,10 +14,49 @@ const enabledAirports = computed(() => airports.value.filter((a) => a.enabled).l
 const nodesTotal = computed(() => Number(props.data?.nodes_total || 0))
 const nodesUnknown = computed(() => Number(props.data?.nodes_unknown || 0))
 const published = computed(() => airports.value.reduce((sum, a) => sum + Number(a.published_count || 0), 0))
-const publishRate = computed(() => {
-  const total = nodesTotal.value || 1
-  return `${Math.round((published.value / total) * 100)}%`
+
+const running = computed(() => !!props.runtime?.running)
+const runState = computed(() => {
+  const r = props.runtime
+  if (!r?.running) return '调度空闲'
+  if (r.stop_requested) return '正在停止'
+  if (r.paused) return '已暂停'
+  return '实时检测中'
 })
+const latencyPct = computed(() => Math.round(props.runtime?.latency_pct || 0))
+const tagPct = computed(() => Math.round(props.runtime?.tag_pct || 0))
+
+const batch = computed(() => props.data?.batch || {})
+const batchId = computed(() => props.runtime?.batch_id || batch.value.id || '—')
+const processed = computed(() => Number(props.runtime?.done ?? batch.value.processed_count ?? 0))
+const target = computed(() => Number(props.runtime?.total ?? batch.value.target_count ?? nodesTotal.value))
+const progressPct = computed(() => target.value ? Math.min(100, Math.round(processed.value / target.value * 100)) : 0)
+const durationText = computed(() => {
+  const b = batch.value
+  if (!b?.started_at) return '—'
+  if (!b.finished_at) return running.value ? '进行中' : '—'
+  const seconds = Math.max(0, Math.round((new Date(b.finished_at) - new Date(b.started_at)) / 1000))
+  return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
+})
+const currentText = computed(() => {
+  const c = props.runtime?.current
+  if (running.value && c?.node) {
+    return `${c.airport || '当前机场'} · ${c.node}`
+  }
+  return target.value ? `${processed.value} / ${target.value} 项已处理` : '等待下一批次'
+})
+const liveNote = computed(() => running.value ? currentText.value : `批次 #${batchId.value} · ${durationText.value}`)
+
+const topAirport = computed(() => {
+  const rows = airports.value.filter((a) => a.enabled)
+  return [...rows].sort((a, b) => Number(b.score ?? -1) - Number(a.score ?? -1))[0] || null
+})
+const topScore = computed(() => topAirport.value?.score ?? '—')
+const topName = computed(() => topAirport.value?.name || '暂无可用评分')
+const maturityValue = computed(() => Number(topAirport.value?.maturity_score || 0))
+const maturityText = computed(() => topAirport.value?.data_status_text || '待积累')
+const scoreWindow = computed(() => props.data?.score_window_days || 7)
+
 const fetchState = computed(() => {
   const f = props.data?.fetch
   if (!f) return '等待数据'
@@ -33,365 +72,374 @@ const fetchTone = computed(() => {
   if (!f.total) return 'muted'
   return 'good'
 })
-const running = computed(() => !!props.runtime?.running)
-const runState = computed(() => {
-  const r = props.runtime
-  if (!r?.running) return '调度空闲'
-  if (r.stop_requested) return '正在停止'
-  if (r.paused) return '已暂停'
-  return '实时检测中'
-})
-const latencyPct = computed(() => Math.round(props.runtime?.latency_pct || 0))
-const tagPct = computed(() => Math.round(props.runtime?.tag_pct || 0))
-const topAirport = computed(() => {
-  const rows = airports.value.filter((a) => a.enabled)
-  return [...rows].sort((a, b) => Number(b.score ?? -1) - Number(a.score ?? -1))[0] || null
-})
-const topScore = computed(() => topAirport.value?.score ?? '—')
-const topName = computed(() => topAirport.value?.name || '暂无可用评分')
-const maturity = computed(() => topAirport.value?.data_status_text || '待积累')
-const scoreWindow = computed(() => props.data?.score_window_days || 7)
+const syncPct = computed(() => airportTotal.value ? Math.round(airportOk.value / airportTotal.value * 100) : 0)
+const detectedPct = computed(() => nodesTotal.value ? Math.round((nodesTotal.value - nodesUnknown.value) / nodesTotal.value * 100) : 0)
+const publishPct = computed(() => nodesTotal.value ? Math.round(published.value / nodesTotal.value * 100) : 0)
 
 const nodes = computed(() => [
   {
     key: 'airports', step: '01', title: '机场接入', icon: 'OfficeBuilding',
-    value: `${enabledAirports.value} / ${airportTotal.value}`,
-    unit: '启用机场',
+    value: `${enabledAirports.value} / ${airportTotal.value}`, unit: '启用机场',
     sub: `${airportOk.value} 个拉取正常 · ${fetchState.value}`,
-    tone: fetchTone.value, x: 12, y: 24,
+    flag: fetchTone.value === 'bad' ? '同步异常' : fetchTone.value === 'warn' ? '同步中' : '已同步',
+    color: fetchTone.value === 'bad' ? '#c8755c' : fetchTone.value === 'warn' ? '#c08a12' : '#3f665c',
+    tone: fetchTone.value, x: 12, y: 42,
+    meter: [{ label: '同步', value: syncPct.value, color: '#3f665c' }],
   },
   {
     key: 'cache', step: '02', title: '全量缓存', icon: 'Files',
-    value: String(nodesTotal.value),
-    unit: '缓存节点',
+    value: String(nodesTotal.value), unit: '缓存节点',
     sub: `${nodesUnknown.value} 个待检测 · 不改写原始订阅`,
-    tone: 'blue', x: 50, y: 10,
+    flag: nodesUnknown.value ? '待检测' : '已就绪',
+    color: '#587d70', tone: nodesUnknown.value ? 'warn' : 'good', x: 50, y: 14,
+    meter: [{ label: '已检测', value: detectedPct.value, color: '#587d70' }],
   },
   {
     key: 'detect', step: '03', title: '双阶段检测', icon: 'Aim',
-    value: `${latencyPct.value}%`,
-    unit: '延迟进度',
+    value: `${latencyPct.value}%`, unit: '延迟进度',
     sub: `标签检测 ${tagPct.value}% · ${runState.value}`,
-    tone: running.value ? 'cyan' : 'muted', x: 88, y: 24,
+    flag: running.value ? '检测中' : batch.value.status === 'complete' ? '已完成' : '待命',
+    color: running.value ? '#c08a12' : '#3f665c', tone: running.value ? 'active' : 'good', x: 87, y: 42,
+    active: running.value,
+    meter: [
+      { label: '延迟', value: latencyPct.value, color: '#3f665c' },
+      { label: '标签', value: tagPct.value, color: '#d6a41d' },
+    ],
   },
   {
     key: 'score', step: '04', title: '评分与成熟度', icon: 'DataAnalysis',
-    value: String(topScore.value),
-    unit: '最高展示分',
-    sub: `${topName.value} · ${maturity.value} · ${scoreWindow.value} 天窗口`,
-    tone: 'violet', x: 88, y: 74,
+    value: String(topScore.value), unit: '最高展示分',
+    sub: `${topName.value} · ${maturityText.value} · ${scoreWindow.value} 天窗口`,
+    flag: topScore.value === '—' ? '待积累' : '已评分',
+    color: '#8a6a2f', tone: topScore.value === '—' ? 'muted' : 'good', x: 74, y: 84,
+    meter: [{ label: '成熟度', value: maturityValue.value, color: '#8a6a2f' }],
   },
   {
     key: 'output', step: '05', title: '统一订阅发布', icon: 'Link',
-    value: String(published.value),
-    unit: '下发节点',
-    sub: `${publishRate.value} 下发率 · 原子替换`,
-    tone: 'green', x: 50, y: 90,
-  },
-  {
-    key: 'clients', step: '06', title: '客户端消费', icon: 'Monitor',
-    value: '4',
-    unit: '种输出格式',
-    sub: 'Clash · sing-box · Base64 · Loon',
-    tone: 'amber', x: 12, y: 74,
+    value: String(published.value), unit: '下发节点',
+    sub: `${publishPct.value}% 下发率 · 原子替换`,
+    flag: published.value ? '已发布' : '待发布',
+    color: '#2f6053', tone: published.value ? 'good' : 'muted', x: 26, y: 84,
+    meter: [{ label: '下发率', value: publishPct.value, color: '#2f6053' }],
   },
 ])
 
-function point(node) {
-  return { x: node.x * 10, y: node.y * 6 }
-}
-
 const paths = computed(() => nodes.value.map((node) => {
-  const p = point(node)
+  const p = { x: node.x * 10, y: node.y * 6 }
   const dx = p.x - 500
-  const dy = p.y - 300
-  const c1x = 500 + dx * 0.36
-  const c1y = 300 + dy * 0.08
-  const c2x = p.x - dx * 0.22
-  const c2y = p.y - dy * 0.18
+  const dy = p.y - 336
+  const c1x = 500 + dx * 0.34
+  const c1y = 336 + dy * 0.10
+  const c2x = p.x - dx * 0.24
+  const c2y = p.y - dy * 0.16
   return {
     key: node.key,
-    d: `M 500 300 C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p.x} ${p.y}`,
-    tone: node.tone,
+    d: `M 500 336 C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p.x} ${p.y}`,
+    color: node.color,
+    active: node.active,
   }
 }))
 </script>
 
 <template>
-  <section class="opsmap">
-    <div class="opsmap-glow" aria-hidden="true"></div>
+  <section class="om" :class="{ 'is-running': running }" :style="{ '--core-progress': progressPct + '%' }">
+    <div class="om-grid" aria-hidden="true"></div>
+    <div class="om-aura is-mint" aria-hidden="true"></div>
+    <div class="om-aura is-gold" aria-hidden="true"></div>
 
-    <div class="opsmap-head">
-      <div class="opsmap-copy">
-        <span class="opsmap-kicker"><i></i> LIVE OPERATIONS MAP</span>
-        <h1>节点池<em>运营全景</em></h1>
-        <p>机场接入 → 全量缓存 → 双阶段检测 → 评分成熟度 → 统一发布 → 客户端消费。</p>
+    <header class="om-head">
+      <div class="om-copy">
+        <span class="om-kicker"><i></i> NODE PIPELINE · LIVE</span>
+        <h2>节点池<em>运营全景</em></h2>
+        <p>机场接入 → 全量缓存 → 双阶段检测 → 评分成熟度 → 统一发布。</p>
       </div>
-      <div class="opsmap-state">
-        <span class="opsmap-live" :class="{ 'is-running': running }"><i></i>{{ runState }}</span>
-        <span class="opsmap-version" v-if="version">v{{ version }}</span>
+      <div class="om-headside">
+        <span class="om-live" :class="{ 'is-running': running }"><i></i>{{ runState }}</span>
+        <span v-if="version" class="om-version">v{{ version }}</span>
+      </div>
+    </header>
+
+    <div class="om-telemetry">
+      <div class="om-run">
+        <span class="om-k">RUN STATE</span>
+        <div class="om-run-main"><i :class="{ 'is-live': running }"></i><b>{{ runState }}</b></div>
+        <small>{{ liveNote }}</small>
+      </div>
+      <div class="om-batch">
+        <span class="om-k">BATCH</span>
+        <b>#{{ batchId }}</b>
+        <small>{{ durationText }} · {{ processed }} / {{ target }}</small>
+      </div>
+      <div class="om-progress">
+        <div class="om-progress-head">
+          <span class="om-k">PROGRESS</span>
+          <b>{{ progressPct }}<small>%</small></b>
+        </div>
+        <div class="om-track"><i :style="{ width: progressPct + '%' }"></i></div>
+        <small>{{ processed }} / {{ target }} 项</small>
+      </div>
+      <div class="om-vitals">
+        <div><span>机场</span><b>{{ airportOk }}<small>/{{ airportTotal }}</small></b></div>
+        <div><span>缓存</span><b>{{ nodesTotal }}</b></div>
+        <div><span>下发</span><b>{{ published }}</b></div>
       </div>
     </div>
 
-    <div class="opsmap-metrics">
-      <div><span>机场在线</span><strong>{{ airportOk }}<small>/{{ airportTotal }}</small></strong></div>
-      <div><span>缓存节点</span><strong>{{ nodesTotal }}</strong></div>
-      <div><span>本次下发</span><strong>{{ published }}</strong></div>
-      <div><span>最高评分</span><strong>{{ topScore }}</strong></div>
-    </div>
-
-    <div class="opsmap-canvas" aria-label="节点池运营流程思维导图">
-      <svg class="opsmap-lines" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true">
+    <div class="om-canvas" aria-label="节点池五段运营思维导图">
+      <svg class="om-lines" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true">
         <defs>
-          <linearGradient id="opsLineBlue" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#4fd9ff" stop-opacity=".14" />
-            <stop offset="55%" stop-color="#66f0c4" stop-opacity=".58" />
-            <stop offset="100%" stop-color="#9b7cff" stop-opacity=".92" />
-          </linearGradient>
-          <linearGradient id="opsLineCyan" x1="0" y1="1" x2="1" y2="0">
-            <stop offset="0%" stop-color="#2ee6a8" stop-opacity=".14" />
-            <stop offset="60%" stop-color="#2ee6a8" stop-opacity=".66" />
-            <stop offset="100%" stop-color="#7c9cff" stop-opacity=".92" />
-          </linearGradient>
-          <radialGradient id="opsCoreGlow" cx=".5" cy=".5" r=".5">
-            <stop offset="0%" stop-color="#2ee6a8" stop-opacity=".34" />
-            <stop offset="60%" stop-color="#7c3aed" stop-opacity=".14" />
-            <stop offset="100%" stop-color="#7c3aed" stop-opacity="0" />
-          </radialGradient>
-          <filter id="opsBlur"><feGaussianBlur stdDeviation="4" /></filter>
+          <filter id="omSparkGlow"><feGaussianBlur stdDeviation="2.4" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
         </defs>
-        <circle cx="500" cy="300" r="170" fill="url(#opsCoreGlow)" filter="url(#opsBlur)" />
-        <path v-for="p in paths" :key="p.key" class="opsmap-line" :class="`tone-${p.tone}`" :d="p.d" />
-        <circle v-for="p in paths" :key="`dot-${p.key}`" class="opsmap-spark" r="3.2" fill="#bde7ff">
-          <animateMotion :dur="`${4 + (Number(p.key.length) % 3)}s`" repeatCount="indefinite" :path="p.d" />
-        </circle>
+        <g v-for="p in paths" :key="`line-${p.key}`">
+          <path class="om-link-base" :d="p.d" />
+          <path class="om-link" :class="{ 'is-active': p.active }" :d="p.d" :style="{ stroke: p.color }" />
+          <circle class="om-spark" r="3.1" :fill="p.color">
+            <animateMotion :dur="`${4.2 + (p.key.length % 3) * .7}s`" :begin="`${(p.key.length % 4) * .35}s`" repeatCount="indefinite" :path="p.d" />
+          </circle>
+        </g>
       </svg>
 
-      <div class="ops-core">
-        <div class="ops-core-ring"></div>
-        <span class="ops-core-orb"><i></i></span>
-        <div class="ops-core-word"><b>NodePool</b><em>ME</em></div>
-        <span class="ops-core-label">调度核心</span>
-        <small>{{ airportTotal }} 机场 → {{ nodesTotal }} 节点</small>
+      <div class="om-core">
+        <div class="om-core-halo"></div>
+        <div class="om-core-orbit is-outer"></div>
+        <div class="om-core-orbit"></div>
+        <div class="om-core-progress"></div>
+        <div class="om-core-disc">
+          <span class="om-core-kicker">CORE · 调度核心</span>
+          <div class="om-core-word"><b>NodePool</b><em>ME</em></div>
+          <span class="om-core-state" :class="{ 'is-live': running }"><i></i>{{ runState }}</span>
+          <small>{{ airportTotal }} 机场 · {{ nodesTotal }} 节点</small>
+        </div>
       </div>
 
-      <article v-for="node in nodes" :key="node.key" class="ops-node" :class="`tone-${node.tone}`"
-               :style="{ '--ox': `${node.x}%`, '--oy': `${node.y}%` }">
-        <div class="ops-node-top">
-          <span class="ops-node-num">{{ node.step }}</span>
-          <el-icon class="ops-node-icon"><component :is="node.icon" /></el-icon>
+      <article v-for="(node, idx) in nodes" :key="node.key" class="om-node"
+               :class="[`tone-${node.tone}`, { 'is-active': node.active }]"
+               :style="{ '--ox': node.x + '%', '--oy': node.y + '%', '--tone': node.color, '--i': idx }">
+        <span class="om-node-accent" aria-hidden="true"></span>
+        <div class="om-node-top">
+          <span class="om-node-num">{{ node.step }}</span>
+          <span class="om-node-flag"><i></i>{{ node.flag }}</span>
         </div>
-        <b class="ops-node-title">{{ node.title }}</b>
-        <div class="ops-node-value">{{ node.value }}<small>{{ node.unit }}</small></div>
-        <span class="ops-node-sub">{{ node.sub }}</span>
+        <div class="om-node-icon"><el-icon><component :is="node.icon" /></el-icon></div>
+        <h3>{{ node.title }}</h3>
+        <div class="om-node-value">{{ node.value }}<small>{{ node.unit }}</small></div>
+        <p class="om-node-sub">{{ node.sub }}</p>
+        <div class="om-node-meters" v-if="node.meter?.length">
+          <div v-for="meter in node.meter" :key="meter.label" class="om-node-meter">
+            <div class="om-node-meter-head"><span>{{ meter.label }}</span><b>{{ Math.round(meter.value) }}%</b></div>
+            <div class="om-node-meter-track"><i :style="{ width: Math.max(0, Math.min(100, meter.value)) + '%', background: meter.color }"></i></div>
+          </div>
+        </div>
       </article>
     </div>
 
-    <div class="opsmap-mobile">
-      <div v-for="node in nodes" :key="`m-${node.key}`" class="ops-mobile-row" :class="`tone-${node.tone}`">
-        <span class="ops-mobile-num">{{ node.step }}</span>
-        <span class="ops-mobile-icon"><el-icon><component :is="node.icon" /></el-icon></span>
-        <div class="ops-mobile-body">
+    <div class="om-mobile">
+      <div v-for="(node, idx) in nodes" :key="`m-${node.key}`" class="om-mobile-row" :style="{ '--tone': node.color }">
+        <span class="om-mobile-index">{{ node.step }}</span>
+        <span class="om-mobile-icon"><el-icon><component :is="node.icon" /></el-icon></span>
+        <div class="om-mobile-body">
           <b>{{ node.title }}</b>
           <small>{{ node.sub }}</small>
         </div>
-        <div class="ops-mobile-val">{{ node.value }}<small>{{ node.unit }}</small></div>
+        <div class="om-mobile-side">
+          <strong>{{ node.value }}<small>{{ node.unit }}</small></strong>
+          <em><i></i>{{ node.flag }}</em>
+        </div>
       </div>
     </div>
 
-    <footer class="opsmap-foot">
-      <span>六段闭环</span>
-      <i>机场接入</i><i>全量缓存</i><i>双阶段检测</i><i>评分成熟度</i><i>统一发布</i><i>客户端消费</i>
-      <span class="opsmap-foot-note">检测只读本地缓存，不触发机场重新拉取</span>
+    <footer class="om-foot">
+      <span>五段闭环</span>
+      <i>机场接入</i><i>全量缓存</i><i>双阶段检测</i><i>评分成熟度</i><i>统一发布</i>
+      <span class="om-foot-note">检测只读本地缓存，不触发机场重新拉取</span>
     </footer>
   </section>
 </template>
 
 <style scoped>
-.opsmap {
+.om {
   position: relative;
   overflow: hidden;
-  margin: 4px 0 18px;
-  padding: 28px 30px 20px;
-  border-radius: 30px;
-  color: #eaf2ff;
+  margin: 18px 0;
+  padding: 28px 30px 18px;
+  border-radius: 28px;
+  color: #233a33;
   background:
-    radial-gradient(720px 430px at 14% 0%, rgba(46, 230, 168, .16), transparent 64%),
-    radial-gradient(620px 430px at 92% 16%, rgba(124, 58, 237, .22), transparent 66%),
-    radial-gradient(720px 460px at 50% 112%, rgba(45, 120, 255, .13), transparent 68%),
-    linear-gradient(135deg, #07111a 0%, #0a1622 52%, #10132a 100%);
-  border: 1px solid rgba(120, 190, 175, .19);
-  box-shadow: 0 30px 80px rgba(11, 29, 61, .28), inset 0 1px 0 rgba(255, 255, 255, .10);
+    radial-gradient(680px 390px at 8% 0%, rgba(63, 102, 92, .13), transparent 64%),
+    radial-gradient(620px 380px at 94% 8%, rgba(214, 164, 29, .10), transparent 62%),
+    linear-gradient(146deg, #fcfdfa 0%, #f2f6f0 58%, #f8f5eb 100%);
+  border: 1px solid #dde7dd;
+  box-shadow: 0 24px 56px rgba(29, 57, 47, .09), inset 0 1px 0 rgba(255, 255, 255, .90);
 }
-.opsmap::before {
-  content: "";
+.om-grid {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: .42;
-  background-image:
-    linear-gradient(rgba(120, 200, 180, .06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(120, 200, 180, .06) 1px, transparent 1px);
-  background-size: 34px 34px;
-  mask-image: radial-gradient(ellipse at 50% 45%, #000 5%, transparent 78%);
+  opacity: .48;
+  background-image: radial-gradient(rgba(63, 102, 92, .22) .8px, transparent .8px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse at 50% 44%, #000 8%, transparent 78%);
 }
-.opsmap-glow {
-  position: absolute;
-  width: 520px;
-  height: 520px;
-  right: -120px;
-  top: -230px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(124, 58, 237, .20), transparent 68%);
-  pointer-events: none;
-}
-.opsmap-head { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
-.opsmap-copy { max-width: 640px; }
-.opsmap-kicker {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-size: 10.5px; font-weight: 700; letter-spacing: .18em;
-  color: rgba(191, 219, 254, .78);
-}
-.opsmap-kicker i { width: 18px; height: 1px; background: #2ee6a8; box-shadow: 0 0 8px #2ee6a8; }
-.opsmap-copy h1 {
-  margin: 12px 0 10px;
-  font-size: clamp(30px, 3.2vw, 46px);
-  line-height: 1.12;
-  letter-spacing: -.045em;
-  font-weight: 760;
-  color: #f4f8ff;
-}
-.opsmap-copy h1 em {
-  font-style: normal;
-  background: linear-gradient(90deg, #6ff2c8, #d4f8ff 48%, #c4b5fd);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-.opsmap-copy p {
-  margin: 0;
-  max-width: 560px;
-  font-size: 13.5px;
-  line-height: 1.75;
-  color: rgba(203, 219, 244, .78);
-}
-.opsmap-state { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none; }
-.opsmap-live {
-  display: inline-flex; align-items: center; gap: 7px;
-  height: 27px; padding: 0 12px;
-  border: 1px solid rgba(160, 205, 255, .22);
-  border-radius: 999px;
-  background: rgba(110, 168, 255, .11);
-  color: #cfe4ff; font-size: 11px; font-weight: 600;
-  backdrop-filter: blur(12px);
-}
-.opsmap-live i { width: 7px; height: 7px; border-radius: 50%; background: #67e8f9; box-shadow: 0 0 0 4px rgba(103, 232, 249, .13); }
-.opsmap-live.is-running i { animation: ops-pulse 1.6s ease-in-out infinite; background: #86efac; box-shadow: 0 0 0 4px rgba(134, 239, 172, .16); }
-.opsmap-version { font-size: 10px; letter-spacing: .08em; color: rgba(191, 219, 254, .50); }
-.opsmap-metrics { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 30px; margin-top: 22px; padding-top: 16px; border-top: 1px solid rgba(168, 204, 255, .13); }
-.opsmap-metrics > div { display: flex; align-items: baseline; gap: 8px; }
-.opsmap-metrics span { color: rgba(191, 219, 254, .60); font-size: 10.5px; letter-spacing: .04em; }
-.opsmap-metrics strong { font-size: 24px; line-height: 1; letter-spacing: -.04em; font-weight: 700; color: #f2f7ff; font-variant-numeric: tabular-nums; }
-.opsmap-metrics small { font-size: 10px; color: rgba(191, 219, 254, .52); font-weight: 500; }
+.om-aura { position: absolute; border-radius: 50%; pointer-events: none; filter: blur(4px); }
+.om-aura.is-mint { width: 440px; height: 440px; left: -170px; top: -190px; background: radial-gradient(circle, rgba(63, 102, 92, .15), transparent 70%); }
+.om-aura.is-gold { width: 360px; height: 360px; right: -120px; top: 60px; background: radial-gradient(circle, rgba(214, 164, 29, .10), transparent 70%); }
 
-.opsmap-canvas { position: relative; z-index: 1; height: 520px; margin: 2px -10px -8px; }
-.opsmap-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.opsmap-line { fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 5 7; opacity: .62; }
-.opsmap-line.tone-good, .opsmap-line.tone-green, .opsmap-line.tone-amber { stroke: url(#opsLineCyan); }
-.opsmap-line.tone-blue, .opsmap-line.tone-violet, .opsmap-line.tone-cyan { stroke: url(#opsLineBlue); }
-.opsmap-line.tone-warn, .opsmap-line.tone-bad { stroke: rgba(251, 191, 36, .66); }
-.opsmap-line.tone-muted { stroke: rgba(148, 163, 184, .38); }
-.opsmap-spark { opacity: .66; filter: drop-shadow(0 0 6px rgba(147, 197, 253, .95)); }
-.ops-core {
-  position: absolute; left: 50%; top: 50%; width: 190px; height: 190px;
-  transform: translate(-50%, -50%);
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 24%, rgba(255, 255, 255, .20), transparent 44%), linear-gradient(145deg, rgba(18, 82, 82, .62), rgba(24, 26, 66, .78));
-  border: 1px solid rgba(96, 240, 194, .34);
-  box-shadow: 0 0 0 9px rgba(46, 230, 168, .05), 0 0 52px rgba(46, 230, 168, .18), inset 0 1px 0 rgba(255, 255, 255, .16);
-  backdrop-filter: blur(14px);
-}
-.ops-core-ring { position: absolute; inset: -17px; border-radius: 50%; border: 1px dashed rgba(96, 240, 194, .28); animation: ops-spin 26s linear infinite; }
-.ops-core-orb { position: absolute; top: 30px; width: 27px; height: 27px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #7dffd9 38%, #19c99a 70%); box-shadow: 0 0 22px rgba(46, 230, 168, .65); }
-.ops-core-orb i { position: absolute; inset: 9px; border-radius: 50%; background: #dff8ff; box-shadow: 0 0 14px #fff; }
-.ops-core-word { display: flex; align-items: baseline; margin-top: 16px; letter-spacing: -.045em; font-weight: 760; font-size: 21px; }
-.ops-core-word em { font-style: normal; font-size: 22.5px; color: #61f0c4; letter-spacing: -.01em; }
-.ops-core-label { margin-top: 4px; font-size: 9.5px; letter-spacing: .16em; color: rgba(191, 219, 254, .67); }
-.ops-core small { margin-top: 8px; font-size: 10px; color: rgba(191, 219, 254, .82); font-variant-numeric: tabular-nums; }
-.ops-node {
-  position: absolute; left: var(--ox); top: var(--oy); width: 190px;
-  transform: translate(-50%, -50%);
-  padding: 12px 13px 11px;
+.om-head { position: relative; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.om-copy { max-width: 650px; }
+.om-kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 750; letter-spacing: .18em; color: #6f8379; }
+.om-kicker i { width: 20px; height: 1px; background: #3f665c; }
+.om-copy h2 { margin: 11px 0 9px; font-size: clamp(30px, 3.2vw, 43px); line-height: 1.08; letter-spacing: -.048em; font-weight: 770; color: #203a32; }
+.om-copy h2 em { position: relative; font-style: normal; color: #3f665c; }
+.om-copy h2 em::after { content: ""; position: absolute; left: 0; right: 2px; bottom: 2px; height: 9px; background: rgba(214, 164, 29, .20); border-radius: 2px; z-index: -1; }
+.om-copy p { margin: 0; max-width: 560px; font-size: 13px; line-height: 1.75; color: #667a70; }
+.om-headside { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none; }
+.om-live { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px; border: 1px solid #dbe6dc; border-radius: 999px; background: rgba(255, 255, 255, .72); color: #52675e; font-size: 10.5px; font-weight: 650; box-shadow: 0 4px 14px rgba(35, 65, 53, .05); }
+.om-live i { width: 7px; height: 7px; border-radius: 50%; background: #8ca199; box-shadow: 0 0 0 4px rgba(140, 161, 153, .12); }
+.om-live.is-running { color: #84651c; border-color: #e8dbb2; background: rgba(255, 250, 236, .88); }
+.om-live.is-running i { background: #d6a41d; box-shadow: 0 0 0 4px rgba(214, 164, 29, .15); animation: om-pulse 1.5s ease-in-out infinite; }
+.om-version { font-size: 9.5px; letter-spacing: .10em; color: #93a49b; }
+
+.om-telemetry {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1.05fr .95fr 1.35fr auto;
+  align-items: stretch;
+  gap: 0;
+  margin-top: 19px;
+  padding: 12px 4px;
+  border: 1px solid #e0e9df;
   border-radius: 16px;
-  background: linear-gradient(145deg, rgba(18, 42, 52, .74), rgba(15, 25, 48, .68));
-  border: 1px solid rgba(120, 200, 180, .16);
-  box-shadow: 0 12px 30px rgba(1, 10, 28, .24), inset 0 1px 0 rgba(255, 255, 255, .07);
+  background: rgba(255, 255, 255, .62);
   backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92);
 }
-.ops-node::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(120deg, rgba(255, 255, 255, .10), transparent 42%); }
-.ops-node.tone-good, .ops-node.tone-green { border-color: rgba(134, 239, 172, .32); }
-.ops-node.tone-warn, .ops-node.tone-amber { border-color: rgba(251, 191, 36, .34); }
-.ops-node.tone-bad { border-color: rgba(251, 113, 133, .38); }
-.ops-node.tone-violet { border-color: rgba(196, 181, 253, .34); }
-.ops-node.tone-cyan { border-color: rgba(103, 232, 249, .34); }
-.ops-node-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.ops-node-num { font-size: 9px; letter-spacing: .12em; color: rgba(191, 219, 254, .52); font-variant-numeric: tabular-nums; }
-.ops-node-icon { width: 23px; height: 23px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; color: #85f2cf; background: rgba(46, 230, 168, .09); border: 1px solid rgba(96, 240, 194, .16); font-size: 14px; }
-.ops-node-title { display: block; font-size: 11.5px; font-weight: 650; color: #dfeeff; letter-spacing: .01em; }
-.ops-node-value { display: flex; align-items: baseline; gap: 5px; margin: 5px 0 6px; font-size: 27px; line-height: 1; letter-spacing: -.045em; font-weight: 750; color: #fff; font-variant-numeric: tabular-nums; }
-.ops-node-value small { font-size: 9px; color: rgba(191, 219, 254, .62); font-weight: 500; letter-spacing: 0; white-space: nowrap; }
-.ops-node-sub { display: block; min-height: 27px; font-size: 9.5px; line-height: 1.45; color: rgba(191, 219, 254, .68); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.om-run, .om-batch, .om-progress { padding: 1px 16px; border-right: 1px solid #e6ede5; }
+.om-run { display: flex; flex-direction: column; gap: 3px; }
+.om-k { display: block; margin-bottom: 4px; font-size: 8px; font-weight: 750; letter-spacing: .13em; color: #91a29a; }
+.om-run-main { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 700; color: #2d4a40; }
+.om-run-main i { width: 7px; height: 7px; border-radius: 50%; background: #7b9188; }
+.om-run-main i.is-live { background: #d6a41d; box-shadow: 0 0 0 4px rgba(214, 164, 29, .13); animation: om-pulse 1.5s infinite; }
+.om-run small, .om-batch small, .om-progress small { display: block; font-size: 8.5px; color: #8a9c93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.om-batch b { display: block; font-size: 17px; letter-spacing: -.03em; color: #2d4a40; font-variant-numeric: tabular-nums; }
+.om-progress-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.om-progress-head b { font-size: 17px; letter-spacing: -.03em; color: #2d4a40; font-variant-numeric: tabular-nums; }
+.om-progress-head b small { display: inline; font-size: 9px; color: #7e9187; }
+.om-track { height: 6px; margin: 5px 0 4px; border-radius: 999px; background: #e7eee7; overflow: hidden; }
+.om-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #3f665c, #7ca393 72%, #d6a41d); transition: width .5s ease; }
+.om-vitals { display: flex; align-items: center; gap: 16px; padding: 0 16px; }
+.om-vitals > div { min-width: 40px; }
+.om-vitals span { display: block; margin-bottom: 3px; font-size: 8px; color: #91a29a; }
+.om-vitals b { font-size: 17px; line-height: 1; letter-spacing: -.03em; color: #2d4a40; font-variant-numeric: tabular-nums; }
+.om-vitals small { font-size: 8.5px; color: #8a9c93; }
 
-.opsmap-mobile { display: none; position: relative; z-index: 1; margin: 14px 0 6px; }
-.opsmap-foot {
-  position: relative; z-index: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 7px;
-  margin-top: 4px; padding-top: 13px; border-top: 1px solid rgba(168, 204, 255, .13);
-  font-size: 10px; color: rgba(191, 219, 254, .52);
+.om-canvas { position: relative; z-index: 2; height: 600px; margin: 4px -10px -10px; }
+.om-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.om-link-base { fill: none; stroke: rgba(63, 102, 92, .20); stroke-width: 1.2; stroke-linecap: round; }
+.om-link { fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-dasharray: 4 7; opacity: .72; animation: om-dash 4.4s linear infinite; }
+.om-link.is-active { stroke-width: 2.2; opacity: .88; animation-duration: 2.2s; }
+.om-spark { opacity: .74; filter: url(#omSparkGlow); }
+
+.om-core { position: absolute; left: 50%; top: 56%; width: 218px; height: 218px; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; }
+.om-core-halo { position: absolute; inset: -46px; border-radius: 50%; background: radial-gradient(circle, rgba(63, 102, 92, .20), rgba(63, 102, 92, .04) 54%, transparent 70%); animation: om-breathe 4.8s ease-in-out infinite; }
+.om-core-orbit, .om-core-orbit.is-outer { position: absolute; border-radius: 50%; border: 1px dashed rgba(63, 102, 92, .23); pointer-events: none; }
+.om-core-orbit { inset: -13px; animation: om-spin 34s linear infinite; }
+.om-core-orbit.is-outer { inset: -25px; border-color: rgba(214, 164, 29, .19); animation: om-spin-rev 46s linear infinite; }
+.om-core-progress { position: absolute; inset: -6px; border-radius: 50%; background: conic-gradient(from -90deg, #d6a41d 0 var(--core-progress, 0%), rgba(63, 102, 92, .08) var(--core-progress, 0%) 100%); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px)); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px)); }
+.om-core-disc { position: relative; z-index: 1; width: 100%; height: 100%; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 34% 22%, #4d7768 0%, #2e5146 42%, #1b352d 77%, #12251f 100%); border: 1px solid rgba(255, 255, 255, .15); box-shadow: 0 18px 46px rgba(24, 54, 44, .28), inset 0 1px 0 rgba(255, 255, 255, .16); color: #f5faf7; overflow: hidden; }
+.om-core-disc::before { content: ""; position: absolute; width: 150px; height: 150px; left: -54px; top: -74px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 255, 255, .14), transparent 66%); }
+.om-core-disc::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(112deg, transparent 34%, rgba(255, 255, 255, .08) 47%, transparent 56%); background-size: 220% 220%; animation: om-sheen 7s ease-in-out infinite; }
+.om-core-kicker { position: relative; z-index: 1; font-size: 7.8px; letter-spacing: .15em; color: rgba(223, 242, 234, .62); }
+.om-core-word { position: relative; z-index: 1; display: flex; align-items: baseline; margin-top: 9px; font-weight: 770; font-size: 20px; letter-spacing: -.05em; }
+.om-core-word em { font-style: normal; margin-left: 1px; color: #e2bd57; font-size: 21px; }
+.om-core-state { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 6px; margin-top: 11px; height: 23px; padding: 0 9px; border-radius: 999px; border: 1px solid rgba(198, 229, 216, .18); background: rgba(255, 255, 255, .07); font-size: 9px; color: rgba(237, 249, 243, .82); }
+.om-core-state i { width: 6px; height: 6px; border-radius: 50%; background: #8fcfb9; }
+.om-core-state.is-live { color: #f6e3b0; border-color: rgba(226, 189, 87, .30); background: rgba(214, 164, 29, .10); }
+.om-core-state.is-live i { background: #e2bd57; animation: om-pulse 1.5s infinite; }
+.om-core-disc small { position: relative; z-index: 1; margin-top: 8px; font-size: 9px; color: rgba(220, 238, 231, .62); font-variant-numeric: tabular-nums; }
+
+.om-node {
+  position: absolute; left: var(--ox); top: var(--oy); width: 196px; transform: translate(-50%, -50%);
+  padding: 11px 13px 12px; border-radius: 16px; color: #2a4038;
+  background: linear-gradient(150deg, rgba(255, 255, 255, .90), rgba(250, 252, 248, .78));
+  border: 1px solid rgba(63, 102, 92, .16);
+  box-shadow: 0 14px 30px rgba(30, 58, 47, .08), inset 0 1px 0 rgba(255, 255, 255, .95);
+  backdrop-filter: blur(10px);
+  animation: om-rise .7s cubic-bezier(.18,.86,.25,1) both;
+  animation-delay: calc(var(--i) * 80ms + 120ms);
+  transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
 }
-.opsmap-foot > span:first-child { margin-right: 5px; color: rgba(191, 219, 254, .85); font-weight: 650; }
-.opsmap-foot i { font-style: normal; padding: 3px 8px; border-radius: 999px; background: rgba(46, 230, 168, .06); border: 1px solid rgba(96, 240, 194, .14); color: rgba(190, 235, 225, .68); }
-.opsmap-foot-note { margin-left: auto; color: rgba(191, 219, 254, .40); }
-@keyframes ops-pulse { 0%, 100% { opacity: .7; transform: scale(.92); } 50% { opacity: 1; transform: scale(1.12); } }
-@keyframes ops-spin { to { transform: rotate(360deg); } }
+.om-node:hover { transform: translate(-50%, calc(-50% - 3px)); box-shadow: 0 20px 36px rgba(30, 58, 47, .12), inset 0 1px 0 #fff; }
+.om-node-accent { position: absolute; left: 13px; right: 13px; top: 0; height: 3px; border-radius: 0 0 4px 4px; background: linear-gradient(90deg, var(--tone), transparent 78%); opacity: .78; }
+.om-node.is-active { border-color: rgba(214, 164, 29, .42); box-shadow: 0 16px 38px rgba(168, 124, 20, .13), 0 0 0 3px rgba(214, 164, 29, .06), inset 0 1px 0 #fff; }
+.om-node-top { display: flex; align-items: center; justify-content: space-between; }
+.om-node-num { font-size: 8.5px; letter-spacing: .14em; color: #94a59c; font-variant-numeric: tabular-nums; }
+.om-node-flag { display: inline-flex; align-items: center; gap: 4px; font-size: 8px; color: var(--tone); font-weight: 650; }
+.om-node-flag i { width: 5px; height: 5px; border-radius: 50%; background: var(--tone); opacity: .85; }
+.om-node.is-active .om-node-flag i { animation: om-pulse 1.6s infinite; }
+.om-node-icon { width: 26px; height: 26px; margin-top: 8px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--tone); background: color-mix(in srgb, var(--tone) 10%, transparent); border: 1px solid color-mix(in srgb, var(--tone) 20%, transparent); font-size: 15px; }
+.om-node h3 { margin: 7px 0 0; font-size: 11px; font-weight: 680; letter-spacing: .01em; color: #263f37; }
+.om-node-value { display: flex; align-items: baseline; gap: 5px; margin: 4px 0 4px; font-size: 27px; line-height: 1; letter-spacing: -.045em; font-weight: 770; color: #203a32; font-variant-numeric: tabular-nums; }
+.om-node-value small { font-size: 8.5px; font-weight: 520; color: #84968d; letter-spacing: 0; white-space: nowrap; }
+.om-node-sub { margin: 0; min-height: 26px; font-size: 9px; line-height: 1.45; color: #71837a; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.om-node-meters { margin-top: 7px; display: flex; flex-direction: column; gap: 5px; }
+.om-node-meter-head { display: flex; justify-content: space-between; font-size: 8px; color: #82958b; }
+.om-node-meter-head b { color: var(--tone); font-weight: 650; font-variant-numeric: tabular-nums; }
+.om-node-meter-track { height: 3px; margin-top: 2px; border-radius: 999px; background: #e7eee7; overflow: hidden; }
+.om-node-meter-track i { display: block; height: 100%; border-radius: inherit; opacity: .86; transition: width .5s ease; }
 
-@media (max-width: 1100px) {
-  .opsmap { padding: 24px 22px 16px; }
-  .opsmap-canvas { display: none; }
-  .opsmap-mobile { display: flex; flex-direction: column; gap: 0; }
-  .ops-mobile-row {
-    position: relative; display: flex; align-items: center; gap: 10px; min-height: 62px;
-    padding: 10px 12px; border-left: 2px solid rgba(147, 197, 253, .20);
-    border-bottom: 1px solid rgba(147, 197, 253, .08);
-  }
-  .ops-mobile-row:last-child { border-bottom: 0; }
-  .ops-mobile-num { width: 23px; flex: none; font-size: 9px; color: rgba(191, 219, 254, .52); font-variant-numeric: tabular-nums; }
-  .ops-mobile-icon { width: 26px; height: 26px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 9px; color: #bde7ff; background: rgba(96, 165, 250, .14); border: 1px solid rgba(147, 197, 253, .16); font-size: 15px; }
-  .ops-mobile-body { flex: 1; min-width: 0; }
-  .ops-mobile-body b { display: block; font-size: 12px; color: #e5f0ff; }
-  .ops-mobile-body small { display: block; margin-top: 2px; font-size: 9.5px; line-height: 1.4; color: rgba(191, 219, 254, .60); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ops-mobile-val { flex: none; text-align: right; font-size: 21px; line-height: 1; letter-spacing: -.04em; font-weight: 740; color: #fff; font-variant-numeric: tabular-nums; }
-  .ops-mobile-val small { display: block; margin-top: 4px; font-size: 8.5px; font-weight: 500; color: rgba(191, 219, 254, .56); letter-spacing: 0; }
-  .opsmap-head { flex-direction: column; gap: 14px; }
-  .opsmap-state { flex-direction: row; align-items: center; }
-  .opsmap-copy h1 { font-size: 29px; }
-  .opsmap-copy p { font-size: 12.5px; }
-  .opsmap-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
-  .opsmap-metrics > div { display: block; }
-  .opsmap-metrics span { display: block; margin-bottom: 4px; font-size: 9px; }
-  .opsmap-metrics strong { font-size: 20px; }
-  .opsmap-foot { margin-top: 10px; }
-  .opsmap-foot-note { display: none; }
+.om-mobile { display: none; }
+.om-foot { position: relative; z-index: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 2px; padding-top: 12px; border-top: 1px solid #e2eae2; font-size: 9.5px; color: #8a9b92; }
+.om-foot > span:first-child { margin-right: 4px; color: #53675e; font-weight: 650; }
+.om-foot i { font-style: normal; padding: 3px 8px; border-radius: 999px; background: rgba(255, 255, 255, .62); border: 1px solid #dfe8df; color: #71847a; }
+.om-foot-note { margin-left: auto; color: #9caba3; }
+
+@keyframes om-pulse { 0%, 100% { opacity: .68; transform: scale(.92); } 50% { opacity: 1; transform: scale(1.12); } }
+@keyframes om-spin { to { transform: rotate(360deg); } }
+@keyframes om-spin-rev { to { transform: rotate(-360deg); } }
+@keyframes om-breathe { 0%, 100% { transform: scale(.96); opacity: .72; } 50% { transform: scale(1.04); opacity: 1; } }
+@keyframes om-dash { to { stroke-dashoffset: -48; } }
+@keyframes om-sheen { 0%, 100% { background-position: 120% 0%; } 50% { background-position: 0% 100%; } }
+@keyframes om-rise { from { opacity: 0; transform: translate(-50%, calc(-50% + 12px)) scale(.97); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+
+@media (max-width: 1180px) {
+  .om { padding: 24px 22px 16px; }
+  .om-canvas { display: none; }
+  .om-mobile { position: relative; z-index: 2; display: flex; flex-direction: column; margin: 16px 0 6px; padding-left: 13px; }
+  .om-mobile::before { content: ""; position: absolute; left: 27px; top: 12px; bottom: 12px; width: 1px; background: linear-gradient(#cfded4, #e7dcc0); }
+  .om-mobile-row { position: relative; display: grid; grid-template-columns: 30px 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 68px; padding: 8px 0 8px 4px; }
+  .om-mobile-index { position: relative; z-index: 1; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: #fff; border: 1px solid #dbe6dd; font-size: 8px; color: #788b81; font-variant-numeric: tabular-nums; }
+  .om-mobile-icon { width: 31px; height: 31px; display: flex; align-items: center; justify-content: center; border-radius: 10px; color: var(--tone); background: color-mix(in srgb, var(--tone) 9%, #fff); border: 1px solid color-mix(in srgb, var(--tone) 18%, #fff); font-size: 16px; }
+  .om-mobile-body { min-width: 0; }
+  .om-mobile-body b { display: block; font-size: 12px; color: #29433a; }
+  .om-mobile-body small { display: block; margin-top: 2px; font-size: 9px; line-height: 1.4; color: #7e9187; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .om-mobile-side { text-align: right; }
+  .om-mobile-side strong { display: flex; align-items: baseline; justify-content: flex-end; gap: 3px; font-size: 19px; line-height: 1; letter-spacing: -.04em; color: #233c34; font-variant-numeric: tabular-nums; }
+  .om-mobile-side strong small { font-size: 8px; font-weight: 520; color: #8b9c93; }
+  .om-mobile-side em { display: block; margin-top: 4px; font-size: 8px; font-style: normal; color: var(--tone); }
+  .om-mobile-side em i { display: inline-block; width: 4px; height: 4px; margin-right: 3px; border-radius: 50%; background: var(--tone); vertical-align: 1px; }
+  .om-head { flex-direction: column; gap: 12px; }
+  .om-headside { flex-direction: row; align-items: center; }
+  .om-copy h2 { font-size: 30px; }
+  .om-telemetry { grid-template-columns: 1fr 1fr; gap: 12px 0; padding: 12px; }
+  .om-run, .om-batch { border-right: 0; }
+  .om-progress { grid-column: 1 / 2; border-right: 0; }
+  .om-vitals { grid-column: 1 / -1; border-top: 1px solid #e6ede5; padding-top: 10px; padding-left: 16px; }
+  .om-foot-note { display: none; }
 }
 @media (max-width: 640px) {
-  .opsmap { margin: 0 0 14px; padding: 22px 18px 14px; border-radius: 22px; }
-  .opsmap-copy h1 { font-size: 26px; }
-  .opsmap-metrics > div:nth-child(4) { display: none; }
-  .opsmap-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .opsmap-foot i { font-size: 9px; padding: 2px 6px; }
+  .om { margin: 0 0 14px; padding: 22px 18px 14px; border-radius: 22px; }
+  .om-foot { gap: 4px; }
+  .om-foot > span:first-child { display: none; }
+  .om-copy h2 { font-size: 26px; }
+  .om-telemetry { grid-template-columns: 1fr 1fr; }
+  .om-progress { grid-column: 1 / -1; border-top: 1px solid #e6ede5; padding-top: 8px; }
+  .om-vitals { border-top: 0; padding-top: 0; }
+  .om-vitals { gap: 12px; }
+  .om-foot i { font-size: 8.5px; padding: 2px 6px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ops-core-ring, .opsmap-spark, .opsmap-live.is-running i { animation: none; }
-  .opsmap-spark { display: none; }
+  .om-core-orbit, .om-core-orbit.is-outer, .om-core-halo, .om-core-disc::after, .om-link, .om-spark, .om-live i, .om-node { animation: none; }
+  .om-spark { display: none; }
 }
 </style>
