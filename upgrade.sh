@@ -3,8 +3,8 @@
 #
 # Usage:
 #   sudo npup                   upgrade to the image tag already in .env
-#   sudo npup v2.028            pin that version in .env, then upgrade
-#   sudo npup --offline v2.028  skip registry pull and use the release bundle
+#   sudo npup v2.029            pin that version in .env, then upgrade
+#   sudo npup --offline v2.029  skip registry pull and use the release bundle
 #   sudo npup /path/to/dir      upgrade a project living elsewhere
 #
 # The release bundle contains:
