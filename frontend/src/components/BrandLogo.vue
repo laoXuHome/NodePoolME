@@ -11,9 +11,9 @@ defineProps({
     <svg class="np-mark" :width="size" :height="size" viewBox="0 0 40 40" role="img" aria-label="NodePoolME">
       <defs>
         <linearGradient id="npBlueGrad" x1="0" y1="0" x2="0.9" y2="1">
-          <stop offset="0%" stop-color="#4A8BFF" />
-          <stop offset="52%" stop-color="#2C6AEE" />
-          <stop offset="100%" stop-color="#1B44C8" />
+          <stop offset="0%" stop-color="#5d8b7c" />
+          <stop offset="52%" stop-color="#39665a" />
+          <stop offset="100%" stop-color="#23463d" />
         </linearGradient>
         <linearGradient id="npGloss" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="#ffffff" stop-opacity=".34" />
@@ -46,7 +46,7 @@ defineProps({
       </g>
       <circle cx="20" cy="19.2" r="6.1" fill="none" stroke="#ffffff" stroke-width="1.1" stroke-opacity=".42" />
       <circle cx="20" cy="19.2" r="3.9" fill="#ffffff" />
-      <circle cx="20" cy="19.2" r="1.55" fill="#2C6AEE" fill-opacity=".55" />
+      <circle cx="20" cy="19.2" r="1.55" fill="#23463d" fill-opacity=".55" />
     </svg>
 
     <span class="np-word">
@@ -60,7 +60,7 @@ defineProps({
 .np-mark {
   display: block;
   flex: none;
-  filter: drop-shadow(0 2px 6px rgba(28, 78, 205, .28));
+  filter: drop-shadow(0 2px 6px rgba(24, 52, 44, .28));
 }
 .np-word {
   display: inline-flex;
@@ -73,11 +73,11 @@ defineProps({
 .np-word-accent {
   font-size: 19.5px;
   font-weight: 800;
-  color: #2c6aee;
+  color: #a8751c;
   letter-spacing: -.01em;
 }
 .np-brand.is-light .np-word-main { color: #f4f8ff; }
-.np-brand.is-light .np-word-accent { color: #8ec5ff; }
+.np-brand.is-light .np-word-accent { color: #ecd29a; }
 .np-brand.is-compact .np-word-main,
 .np-brand.is-compact .np-word-accent { font-size: 13.5px; }
 </style>

@@ -6,9 +6,9 @@ import TrendChart from '../components/TrendChart.vue'
 import OperationsMap from '../components/OperationsMap.vue'
 
 const data = ref(null)
-// 趋势图配色：前 5 个与评分等级同色（紫/绿/蓝/橙/红），其后按色相差距大者补充
-const AIRPORT_COLORS = ['#8b5cf6', '#16a34a', '#2563eb', '#ea580c', '#dc2626',
-  '#0e9596', '#ca8a04', '#db2777', '#475569', '#65a30d', '#0891b2', '#b45309']
+// 趋势图配色：深金、深绿、灰绿、铜棕、橄榄，和整页的磨砂评分室同一色域
+const AIRPORT_COLORS = ['#a8751c', '#2f6555', '#5d7f70', '#9a5a37', '#7c8b60',
+  '#b58a3a', '#45685d', '#8a6a2f', '#3f6d68', '#b06a32', '#6f8078', '#c0a15a']
 const loading = ref(false)
 const running = ref(false)
 const logs = ref([])
@@ -40,6 +40,7 @@ async function load() {
     data.value = await api.get(`/api/dashboard?days=${trendFetchDays.value}`)
     running.value = data.value.runtime.running
     rt.value = null
+    window.dispatchEvent(new CustomEvent('np:dashboard', { detail: data.value }))
   } catch (err) {
     ElMessage.error(err.message)
   } finally {
@@ -130,10 +131,10 @@ const statusSegments = computed(() => {
   const unknown = Math.max(0, total - available - unavailable)
   const availableOnly = Math.max(0, available - qualified)
   const raw = [
-    { key: 'qualified', label: '下发', short: '下发', count: qualified, color: '#34c759', side: '#1f8f45', light: '#7bdf95', ink: '#ffffff' },
-    { key: 'available', label: '未达标', short: '未达标', count: availableOnly, color: '#3f8cff', side: '#2563c9', light: '#7db4ff', ink: '#ffffff' },
-    { key: 'unknown', label: '未检测', short: '未检', count: unknown, color: '#c7c7cc', side: '#97979d', light: '#e2e2e6', ink: '#59595f' },
-    { key: 'unavailable', label: '不可用', short: '不可用', count: unavailable, color: '#ee7b76', side: '#c94b46', light: '#f6a6a2', ink: '#ffffff' },
+    { key: 'qualified', label: '已下发', short: '下发', count: qualified, color: '#d6a41d', side: '#a67d16', light: '#efdc9c', ink: '#ffffff' },
+    { key: 'available', label: '未达标', short: '未达标', count: availableOnly, color: '#3f665c', side: '#31524a', light: '#9bc3b4', ink: '#ffffff' },
+    { key: 'unknown', label: '未检测', short: '未检', count: unknown, color: '#c7d7cf', side: '#a9bdb3', light: '#e3eee8', ink: '#40564d' },
+    { key: 'unavailable', label: '不可用', short: '不可用', count: unavailable, color: '#c8755c', side: '#a9543e', light: '#e6ad9c', ink: '#ffffff' },
   ].filter((item) => item.count > 0)
   if (!raw.length) return []
   const sum = raw.reduce((acc, item) => acc + item.count, 0)
@@ -190,7 +191,8 @@ function scoreTone(row) {
   if (row.score === null || row.score === undefined) return 'is-empty'
   const shown = row.score_exact ?? row.score
   if (shown >= 80) return 'is-good'
-  if (shown >= 60) return 'is-ok'
+  if (shown >= 70) return 'is-ok'
+  if (shown >= 60) return 'is-mid'
   if (shown >= 40) return 'is-mid'
   if (shown >= 20) return 'is-low'
   return 'is-bad'
@@ -362,6 +364,119 @@ function shortTs(ts) {
   return String(ts).replace(/^\d{4}-/, '').replace('T', ' ').slice(0, 11)
 }
 
+/* ------------------------------------------------ v2.004 C×E 评分主卡 */
+const enabledAirports = computed(() => (data.value?.airport_list || []).filter((row) => row.enabled))
+const scoredAirports = computed(() => enabledAirports.value.filter((row) => Number.isFinite(Number(row.score))))
+const overallScoreValue = computed(() => {
+  let weight = 0
+  let sum = 0
+  for (const row of scoredAirports.value) {
+    const w = Math.max(1, Number(row.pool_count) || 1)
+    weight += w
+    sum += Number(row.score) * w
+  }
+  return weight ? Math.round((sum / weight) * 10) / 10 : null
+})
+const overallScoreText = computed(() => overallScoreValue.value === null ? '—' : overallScoreValue.value.toFixed(1))
+const overallGrade = computed(() => {
+  const value = overallScoreValue.value
+  if (value === null) return 'N/A'
+  if (value >= 90) return 'A+'
+  if (value >= 80) return 'A'
+  if (value >= 70) return 'B'
+  if (value >= 60) return 'C'
+  return 'D'
+})
+const scorePct = computed(() => Math.max(0, Math.min(100, Number(overallScoreValue.value) || 0)))
+const scoreGaugeStyle = computed(() => ({
+  background: `conic-gradient(#efc44c 0 ${scorePct.value}%, rgba(255,255,255,.12) ${scorePct.value}% 100%)`
+}))
+const orbitRows = computed(() => enabledAirports.value
+  .filter((row) => Number.isFinite(Number(row.score)))
+  .sort((a, b) => Number(b.score) - Number(a.score))
+  .slice(0, 5))
+const orbitPoints = computed(() => {
+  const rows = orbitRows.value
+  if (!rows.length) return []
+  const maxPool = Math.max(1, ...rows.map((row) => Number(row.pool_count) || 0))
+  return rows.map((row, index) => {
+    const angle = -Math.PI / 2 + index * (Math.PI * 2 / 5)
+    const radius = 48 + ((Number(row.pool_count) || 0) / maxPool) * 34
+    const x = 150 + Math.cos(angle) * radius
+    const y = 108 + Math.sin(angle) * radius
+    const right = x >= 150
+    return {
+      id: row.id,
+      x,
+      y,
+      lx: x + (right ? 9 : -9),
+      ly: y + (y < 108 ? -3 : 13),
+      anchor: right ? 'start' : 'end',
+      name: String(row.name || '').slice(0, 7),
+      score: row.score,
+      color: Number(row.score) >= 85 ? '#efc44c' : Number(row.score) >= 70 ? '#9bd0ba' : Number(row.score) >= 55 ? '#c6dbd1' : '#df9a83',
+    }
+  })
+})
+const orbitPolyline = computed(() => orbitPoints.value.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' '))
+const orbitPoolText = computed(() => orbitRows.value.reduce((sum, row) => sum + Number(row.pool_count || 0), 0))
+const weightedRate = (key) => {
+  const rows = scoredAirports.value.filter((row) => row[key] !== null && row[key] !== undefined)
+  let weight = 0
+  let sum = 0
+  for (const row of rows) {
+    const w = Math.max(1, Number(row.pool_count) || 1)
+    weight += w
+    sum += Number(row[key]) * w
+  }
+  return weight ? Math.round((sum / weight) * 10) / 10 : 0
+}
+const breakdownRows = computed(() => [
+  { key: 'available', label: '可用率', sub: `${scoreWeights.value.available}% 权重`, value: weightedRate('available_rate') },
+  { key: 'publish', label: '下发率', sub: `${scoreWeights.value.publish}% 权重`, value: weightedRate('publish_rate') },
+  { key: 'tag', label: '标签合格率', sub: `${scoreWeights.value.tag}% 权重`, value: weightedRate('tag_rate') },
+])
+const gradeBands = computed(() => {
+  const rows = scoredAirports.value
+  const total = rows.length || 1
+  const bands = [
+    { key: 'high', label: '85+ 优先', color: '#d6a41d', count: rows.filter((row) => Number(row.score) >= 85).length },
+    { key: 'mid', label: '70–84 稳定', color: '#3f665c', count: rows.filter((row) => Number(row.score) >= 70 && Number(row.score) < 85).length },
+    { key: 'low', label: '低于 70 复核', color: '#c8755c', count: rows.filter((row) => Number(row.score) < 70).length },
+  ]
+  return bands.map((band) => ({ ...band, pct: Math.round(band.count / total * 100) }))
+})
+const ringOuterStyle = computed(() => ({
+  background: `conic-gradient(#3f665c 0 ${Math.min(100, publishRatio.value)}%, #dbe9e2 ${Math.min(100, publishRatio.value)}% 100%)`
+}))
+const ringInnerStyle = computed(() => ({
+  background: `conic-gradient(#d6a41d 0 ${Math.min(100, qualifiedPct.value)}%, #eee7d4 ${Math.min(100, qualifiedPct.value)}% 100%)`
+}))
+const trendMode = ref('available')
+const activeTrend = computed(() => trendCharts.value.find((chart) => chart.key === trendMode.value) || trendCharts.value[1])
+const activeTrendCurrent = computed(() => trendMode.value === 'publish' ? publishedTotal.value : (data.value?.nodes_available || 0))
+const activeTrendLabel = computed(() => trendMode.value === 'publish' ? '下发节点' : '可用节点')
+const batchBars = computed(() => {
+  const points = allHistoryPoints.value.filter((point) => !point.live).slice(-6)
+  return points.map((point) => {
+    const total = Object.values(point.airports || {}).reduce((sum, item) => sum + Number(item.available_count || 0), 0)
+    const ts = String(point.ts || '')
+    return {
+      key: ts || String(Math.random()),
+      value: total,
+      label: ts ? ts.slice(5, 10).replace('-', '/') : '—',
+      height: 0,
+    }
+  })
+})
+const batchBarMax = computed(() => Math.max(1, ...batchBars.value.map((bar) => bar.value)))
+const modeRows = computed(() => [
+  { icon: 'Files', title: '本地缓存优先', desc: '检测不触发机场拉取', on: true },
+  { icon: 'RefreshLeft', title: '失败保留旧缓存', desc: '拉取失败不清空节点', on: true },
+  { icon: 'Switch', title: '原子替换订阅', desc: '发布时整包切换', on: true },
+  { icon: 'Timer', title: '自动发布', desc: data.value?.publish_schedule?.enabled ? `每天 ${data.value.publish_schedule.time || '04:30'}` : '当前为手动发布', on: !!data.value?.publish_schedule?.enabled, gold: true },
+])
+
 onMounted(() => {
   // 只在检测进行中才轮询，空闲时不做任何定时刷新
   load()
@@ -370,100 +485,288 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
 </script>
 
 <template>
-  <div class="np-page np-dash-page" v-loading="loading">
+  <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <span class="dash-eyebrow"><i></i> NODE POOL OPERATIONS · LIVE</span>
-        <h1>节点池<span>控制总览</span></h1>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.004 · FROST</span></div>
+        <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
       <div class="dash-headline-actions">
-        <span class="dash-live" :class="{ 'is-running': runtime.running }"><i></i>{{ runStateText }}</span>
-        <el-button class="dash-run-btn" type="primary" :disabled="runtime.running" @click="runNow">
+        <span class="dash-pill" :class="{ 'is-gold': !runtime.running }"><i></i>{{ runStateText }}</span>
+        <span class="dash-pill">批次 #{{ data.batch?.id || '—' }}</span>
+        <button class="dash-runbtn" :disabled="runtime.running" @click="runNow">
           <el-icon><VideoPlay /></el-icon>{{ runtime.running ? '检测进行中' : '启动全量检测' }}
-        </el-button>
+        </button>
       </div>
     </header>
 
-    <section v-if="data" class="kpi-grid">
-      <article class="kpi-card kpi-mint">
-        <div class="kpi-top"><span>NODE INVENTORY</span><el-icon><Connection /></el-icon></div>
-        <div class="kpi-value">{{ data.nodes_total }}<small>缓存节点</small></div>
-        <p>{{ data.nodes_unknown || 0 }} 个待检测 · {{ data.nodes_unavailable || 0 }} 个不可用</p>
-        <div class="kpi-track"><i :style="{ width: `${qualifiedPct}%` }"></i></div>
-      </article>
-      <article class="kpi-card kpi-violet">
-        <div class="kpi-top"><span>DISTRIBUTION</span><el-icon><Link /></el-icon></div>
-        <div class="kpi-value">{{ publishedTotal }}<small>下发节点</small></div>
-        <p>占缓存池 {{ publishRatio }}% · 原子替换统一订阅</p>
-        <div class="kpi-track"><i :style="{ width: `${publishRatio}%` }"></i></div>
-      </article>
-      <article class="kpi-card kpi-blue">
-        <div class="kpi-top"><span>SOURCE HEALTH</span><el-icon><OfficeBuilding /></el-icon></div>
-        <div class="kpi-value">{{ airportOk }}<small>/ {{ airportTotal }} 机场在线</small></div>
-        <p>{{ airportFailed ? `${airportFailed} 个拉取失败` : '全部机场订阅同步正常' }} · 失败保留旧缓存</p>
-        <div class="kpi-airports">
-          <i v-for="row in (data.airport_list || [])" :key="row.id"
-             :class="!row.enabled ? 'is-off' : row.last_status === 'ok' ? 'is-ok' : row.last_status === 'error' ? 'is-bad' : 'is-wait'"
-             :title="row.name" />
-        </div>
-      </article>
-      <article class="kpi-card kpi-amber">
-        <div class="kpi-top"><span>TEST PULSE</span><el-icon><Aim /></el-icon></div>
-        <div class="kpi-pulse-row">
-          <div class="kpi-value">{{ latencyPct }}<small>% 延迟检测</small></div>
-          <div class="kpi-ring" :style="{ background: `conic-gradient(#2ee6a8 ${latencyPct}%, rgba(255,255,255,.08) 0)` }">
-            <span>{{ latencyPct }}<small>%</small></span>
-          </div>
-        </div>
-        <p>标签检测 {{ tagPct }}% · 批次 {{ data.batch?.id ? `#${data.batch.id}` : '—' }} · {{ batchStatusLabel }}</p>
-        <div class="kpi-track"><i :style="{ width: `${tagPct}%` }"></i></div>
-      </article>
-    </section>
-
-    <div v-if="data" class="dash-workbench">
-      <section class="console-panel pool-panel">
-        <div class="panel-head">
+    <section v-if="data" class="dash-grid">
+      <article class="frostcard scorecard theme-dark span8">
+        <div class="card-head">
           <div>
-            <span class="panel-kicker">POOL STRUCTURE</span>
-            <h2>节点资产与机场评分</h2>
+            <div class="card-kicker"><i></i>OVERALL AIRPORT SCORE</div>
+            <h2>整体评分</h2>
+            <p class="muted">按缓存池规模加权的机场展示分</p>
           </div>
-          <div class="pool-status-pill" :class="{ 'is-warn': data.fetch?.error || data.fetch?.fetching }">
-            <i></i>{{ data.fetch?.fetching ? fetchState.text : data.fetch?.error ? `${data.fetch.error} 个机场失败` : `${data.fetch?.ok || 0}/${data.fetch?.total || 0} 机场正常` }}
+          <span class="card-chip">{{ scoredAirports.length }} / {{ enabledAirports.length }} 机场计分</span>
+        </div>
+
+        <div class="score-body">
+          <div class="score-gauge-wrap">
+            <div class="score-gauge" :style="scoreGaugeStyle">
+              <div class="score-gauge-hole">
+                <b>{{ overallScoreText }}</b>
+                <em>OVERALL</em>
+                <small>{{ overallGrade }}</small>
+              </div>
+              <span class="score-gauge-cap">{{ qualifiedPct }}% 合格</span>
+            </div>
+          </div>
+
+          <div class="orbit-wrap">
+            <svg viewBox="0 0 300 216" role="img" aria-label="机场评分轨道">
+              <circle cx="150" cy="108" r="82" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="1" />
+              <circle cx="150" cy="108" r="62" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="1" />
+              <circle cx="150" cy="108" r="42" fill="none" stroke="rgba(255,255,255,.055)" stroke-width="1" />
+              <line x1="68" y1="108" x2="232" y2="108" stroke="rgba(255,255,255,.07)" stroke-width="1" />
+              <line x1="150" y1="26" x2="150" y2="190" stroke="rgba(255,255,255,.07)" stroke-width="1" />
+              <polyline v-if="orbitPolyline" :points="orbitPolyline" fill="none" stroke="rgba(239,196,76,.24)" stroke-width="1.4" />
+              <g v-for="point in orbitPoints" :key="point.id">
+                <circle :cx="point.x" :cy="point.y" r="5.3" :fill="point.color" stroke="rgba(255,255,255,.22)" stroke-width="1" />
+                <circle :cx="point.x" :cy="point.y" r="9" fill="none" :stroke="point.color" stroke-opacity=".28" stroke-width="1" />
+                <text :x="point.lx" :y="point.ly" :text-anchor="point.anchor" fill="rgba(246,250,244,.66)" font-size="7.4" font-weight="600">{{ point.name }}</text>
+                <text :x="point.lx" :y="point.ly + 9" :text-anchor="point.anchor" :fill="point.color" font-size="7.2" font-weight="700">{{ point.score }}</text>
+              </g>
+            </svg>
+            <div class="orbit-center">
+              <b>{{ orbitRows.length }}</b>
+              <span>AIRPORTS IN ORBIT</span>
+              <i>{{ orbitPoolText }} 缓存节点</i>
+            </div>
+          </div>
+
+          <div class="score-rank">
+            <div class="score-rank-head"><span>TOP AIRPORTS</span><span>SCORE</span></div>
+            <div v-for="(row, idx) in rankedAirports.filter((r) => r.enabled).slice(0, 5)" :key="`rank-${row.id}`" class="rankrow">
+              <em>{{ String(idx + 1).padStart(2, '0') }}</em>
+              <span class="nm" :title="row.name">{{ row.name }}</span>
+              <b :class="{ low: Number(row.score) < 85, bad: Number(row.score) < 70 }">{{ Number.isFinite(Number(row.score)) ? row.score : '—' }}</b>
+            </div>
+            <div v-if="!scoredAirports.length" class="rankrow"><em>--</em><span class="nm">暂无评分</span><b class="bad">—</b></div>
           </div>
         </div>
 
-        <div class="pool-summary">
-          <div class="pool-total">
-            <span>POOL TOTAL</span>
-            <strong>{{ data.nodes_total }}</strong>
-            <small>{{ qualifiedPct }}% 已通过延迟门槛</small>
+        <div class="scoreband">
+          <div><span>ENABLED AIRPORTS</span><b>{{ enabledAirports.length }}<small>座</small></b><i>{{ airportOk }}/{{ airportTotal }} 拉取正常</i></div>
+          <div><span>POOL TOTAL</span><b>{{ data.nodes_total }}<small>节点</small></b><i>{{ statusCounts.unknown }} 待检测 · {{ statusCounts.unavailable }} 不可用</i></div>
+          <div><span>QUALIFIED</span><b>{{ data.nodes_qualified }}<small>合格</small></b><i>{{ qualifiedPct }}% 通过延迟门槛</i></div>
+          <div><span>DELIVERED</span><b>{{ publishedTotal }}<small>下发</small></b><i>{{ publishRatio }}% 下发率</i></div>
+        </div>
+
+        <div class="score-legend">
+          <span><i class="is-gold"></i>80+ 优先</span>
+          <span><i class="is-mint"></i>60–79 观察</span>
+          <span><i class="is-red"></i>低于 60 复核</span>
+          <span class="np-flex"></span>
+          <span>评分窗口 {{ data.score_window_days || 7 }} 天</span>
+        </div>
+      </article>
+
+      <article class="frostcard scorebreak span4">
+        <div class="break-head">
+          <div class="card-kicker"><i></i>SCORE DECOMPOSITION</div>
+          <h2>评分拆解</h2>
+          <div class="break-main">
+            <b>{{ overallScoreText }}</b><em>{{ overallGrade }}</em><span>加权展示分</span>
           </div>
-          <div class="pool-mix-wrap">
-            <div class="pool-mix" aria-label="节点池分布">
-              <span v-for="segment in statusSegments" :key="segment.key"
-                    :style="{ width: `${segment.percent}%`, background: segment.color }"
-                    :title="`${segment.label} ${segment.count} 个 · ${segment.percent}%`" />
+        </div>
+        <div class="break-rows">
+          <div v-for="item in breakdownRows" :key="item.key" class="break-row">
+            <div class="break-row-top">
+              <b>{{ item.label }}</b><span>{{ item.sub }}</span><em>{{ item.value.toFixed(1) }}%</em>
             </div>
-            <div class="pool-legend">
-              <span v-for="segment in statusSegments" :key="`lg-${segment.key}`">
-                <i :style="{ background: segment.color }"></i>{{ segment.label }} <b>{{ segment.count }}</b>
-              </span>
-              <span v-if="!statusSegments.length" class="np-muted">暂无节点状态</span>
+            <div class="break-track"><i :style="{ width: `${Math.max(0, Math.min(100, item.value))}%` }" :class="{ 'is-gold': item.key === 'publish' }" /></div>
+          </div>
+        </div>
+        <div class="break-note"><span>权重来自后端 <b>score_weights</b></span><span>{{ data.score_window_days || 7 }} 天动态采样</span></div>
+        <div class="grade-band">
+          <div class="grade-band-head"><span>评分档位分布</span><b>{{ scoredAirports.length }} 座机场</b></div>
+          <div v-for="band in gradeBands" :key="band.key" class="grade-band-row">
+            <i :style="{ background: band.color }" />
+            <span>{{ band.label }}</span>
+            <b>{{ band.count }}</b>
+            <em>{{ band.pct }}%</em>
+          </div>
+        </div>
+        <div class="break-spacer" />
+        <div class="break-foot">
+          <b>{{ data.nodes_qualified }}</b> / {{ data.nodes_total }} 节点已通过延迟门槛；<b>{{ publishedTotal }}</b> 个节点进入统一订阅。
+        </div>
+      </article>
+
+      <article class="frostcard trendbig span7">
+        <div class="trend-head">
+          <div class="trend-title">
+            <div class="k"><i></i>POOL TREND · {{ trendRangeText }}</div>
+            <h2>{{ activeTrendLabel }}走势</h2>
+            <div class="num"><b>{{ activeTrendCurrent }}</b><small>{{ activeTrendLabel }} · {{ activeTrend.points.length }} 个采样点</small></div>
+          </div>
+          <div class="trend-tools">
+            <div class="seg" role="group" aria-label="趋势指标">
+              <button :class="{ active: trendMode === 'available' }" @click="trendMode = 'available'">可用</button>
+              <button :class="{ active: trendMode === 'publish' }" @click="trendMode = 'publish'">下发</button>
+            </div>
+            <div class="seg" role="group" aria-label="趋势区间">
+              <button :class="{ active: trendRange === '1d' }" @click="trendRange = '1d'">1D</button>
+              <button :class="{ active: trendRange === '7d' }" @click="trendRange = '7d'">7D</button>
+              <button :class="{ active: trendRange === '30d' }" @click="trendRange = '30d'">30D</button>
             </div>
           </div>
-          <div class="pool-side-stats">
-            <div><span>待检测</span><b>{{ statusCounts.unknown }}</b></div>
-            <div><span>不可用</span><b>{{ statusCounts.unavailable }}</b></div>
-            <div><span>已下发</span><b>{{ statusCounts.qualified }}</b></div>
+        </div>
+        <div class="trend-chart">
+          <TrendChart :points="activeTrend.points" :rows="activeTrend.rows" :field="activeTrend.field"
+                      :range="trendRange" :title="''" :palette="AIRPORT_COLORS" />
+        </div>
+        <div class="trend-foot"><span>{{ trendRangeText }} · {{ trendSampleText }}</span><b>{{ activeTrendLabel }} {{ activeTrendCurrent }} / {{ data.nodes_total }}</b></div>
+      </article>
+
+      <article class="frostcard ringcard span5">
+        <div class="card-head">
+          <div>
+            <div class="card-kicker"><i></i>DETECTION COMPOSITION</div>
+            <h2>检测构成</h2>
+            <p class="muted">外环下发占比，内环合格节点</p>
+          </div>
+          <span class="card-chip">{{ qualifiedPct }}% 合格</span>
+        </div>
+        <div class="ring-body">
+          <div class="double-ring" :style="ringOuterStyle">
+            <div class="double-ring-inner" :style="ringInnerStyle">
+              <div class="double-ring-hole">
+                <b>{{ qualifiedPct }}</b>
+                <span>QUALIFIED</span>
+                <small>{{ data.nodes_qualified }} / {{ data.nodes_total }}</small>
+              </div>
+            </div>
+          </div>
+          <div class="ring-legend">
+            <div v-for="segment in statusSegments" :key="segment.key" class="ring-row">
+              <i :style="{ background: segment.color }" />
+              <span>{{ segment.label }}</span>
+              <b>{{ segment.count }}</b>
+              <em>{{ segment.percent }}%</em>
+            </div>
+            <div v-if="!statusSegments.length" class="ring-row"><i style="background:#c7d7cf" /><span>暂无节点</span><b>0</b><em>0%</em></div>
+          </div>
+        </div>
+        <div class="ring-foot"><span>外环 下发 {{ publishRatio }}%</span><b>{{ publishedTotal }} DELIVERED</b></div>
+      </article>
+
+      <article class="frostcard detectcard span4">
+        <div class="card-head">
+          <div>
+            <div class="card-kicker"><i></i>LIVE BATCH</div>
+            <h2>检测任务</h2>
+            <p class="muted">{{ runtime.engine || 'mihomo' }} · {{ runtime.batch_id ? `#${runtime.batch_id}` : '等待批次' }}</p>
+          </div>
+          <span class="card-chip">{{ runStateText }}</span>
+        </div>
+        <div class="detect-rings">
+          <div class="detect-ring">
+            <div class="gauge-ring" :style="{ background: `conic-gradient(#3f665c 0 ${latencyPct}%, #edf3ef ${latencyPct}% 100%)` }"><b>{{ latencyPct }}<small>%</small></b></div>
+            <span>延迟检测</span>
+          </div>
+          <div class="detect-ring">
+            <div class="gauge-ring" :style="{ background: `conic-gradient(#d6a41d 0 ${tagPct}%, #edf3ef ${tagPct}% 100%)` }"><b>{{ tagPct }}<small>%</small></b></div>
+            <span>标签检测</span>
+          </div>
+        </div>
+        <div class="detect-current">
+          <template v-if="runtime.running && runtime.current">
+            <b :title="runtime.current.node">{{ runtime.current.node }}</b>
+            <span>{{ runtime.current.airport || '—' }} · G {{ runtime.current.g ?? '—' }}ms · W {{ runtime.current.w ?? '—' }}ms · {{ runtime.current.result }}</span>
+          </template>
+          <template v-else>
+            <b>调度空闲</b>
+            <span>已处理 {{ runtime.done || 0 }} / {{ runtime.total || 0 }} 项 · 批次 #{{ runtime.batch_id || data.batch?.id || '—' }}</span>
+          </template>
+        </div>
+        <div class="detect-actions">
+          <el-button v-if="!runtime.running" size="small" type="primary" @click="runNow">立即检测</el-button>
+          <el-button v-if="runtime.running && !runtime.paused" size="small" :disabled="runtime.stop_requested" @click="pauseCycle">暂停</el-button>
+          <el-button v-if="runtime.running && runtime.paused" size="small" type="success" :disabled="runtime.stop_requested" @click="resumeCycle">继续</el-button>
+          <el-button v-if="runtime.running" size="small" type="danger" plain :disabled="runtime.stop_requested" @click="stopCycle">{{ runtime.stop_requested ? '正在停止' : '停止检测' }}</el-button>
+        </div>
+        <div class="detect-stats">
+          <div><span>批次</span><b>#{{ data.batch?.id || '—' }}</b></div>
+          <div><span>耗时</span><b>{{ batchDuration }}</b></div>
+          <div><span>剩余</span><b>{{ batchRemaining }}</b></div>
+        </div>
+      </article>
+
+      <article class="frostcard batchcard span4">
+        <div class="card-head">
+          <div>
+            <div class="card-kicker"><i></i>BATCH ANALYSIS</div>
+            <h2>批次分析</h2>
+            <p class="muted">近 6 次检测快照的可用节点</p>
+          </div>
+          <span class="card-chip">{{ batchStatusLabel }}</span>
+        </div>
+        <div class="batch-top">
+          <b>#{{ data.batch?.id || '—' }}</b>
+          <span>{{ data.batch?.processed_count || runtime.done || 0 }} / {{ data.batch?.target_count || data.nodes_total || 0 }} 处理</span>
+          <em>{{ batchRemaining }} 剩余</em>
+        </div>
+        <div v-if="batchBars.length" class="chart-cols">
+          <div v-for="bar in batchBars" :key="bar.key" class="col">
+            <b>{{ bar.value }}</b>
+            <div class="col-bar" :class="{ 'is-mutet': bar.value === 0 }" :style="{ height: `${Math.max(7, Math.round(bar.value / batchBarMax * 100))}%` }" />
+            <span>{{ bar.label }}</span>
+          </div>
+        </div>
+        <div v-else class="batch-empty">暂无检测快照</div>
+        <div class="batch-foot"><span>{{ trendRangeText }} · {{ trendSampleText }}</span><b>{{ data.batch?.status || 'idle' }}</b></div>
+      </article>
+
+      <article class="frostcard modecard span4">
+        <div class="card-head">
+          <div>
+            <div class="card-kicker"><i></i>RUN POLICY</div>
+            <h2>运行策略</h2>
+            <p class="muted">状态来自后端运行与发布计划</p>
+          </div>
+          <span class="card-chip">POLICY</span>
+        </div>
+        <div class="mode-list">
+          <div v-for="row in modeRows" :key="row.title" class="mode-row">
+            <span class="mode-icon"><el-icon><component :is="row.icon" /></el-icon></span>
+            <div class="mode-copy"><b>{{ row.title }}</b><span>{{ row.desc }}</span></div>
+            <span class="ios-switch" :class="{ on: row.on, 'is-gold': row.gold }" role="img" :aria-label="`${row.title}${row.on ? '开启' : '关闭'}`" />
+          </div>
+        </div>
+        <div class="mode-note">开关呈现当前策略状态；自动发布由发布计划控制，不在页面内直接改写。</div>
+      </article>
+
+      <article class="frostcard tablecard span12">
+        <div class="table-head">
+          <div>
+            <div class="card-kicker"><i></i>AIRPORT LEDGER</div>
+            <h2>机场资产与评分</h2>
+            <p>可用率、下发率、标签率与成熟度；评分按后端权重计算。</p>
+          </div>
+          <div class="chips">
+            <span class="card-chip">评分 = {{ scoreWeights.available }} / {{ scoreWeights.publish }} / {{ scoreWeights.tag }}</span>
+            <span class="card-chip">近 {{ data.score_window_days || 7 }} 天</span>
           </div>
         </div>
 
-        <div v-if="data.airport_list?.length" class="score-desktop">
+        <div v-if="data.airport_list?.length" class="airport-table-wrap">
           <table class="np-score-table console-score-table">
             <colgroup>
               <col class="np-score-col-rank" />
-              <col class="np-score-col-name" />
+              <col />
               <col class="np-score-col-rate" />
               <col class="np-score-col-rate" />
               <col class="np-score-col-rate" />
@@ -499,175 +802,83 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                   </div>
                 </td>
                 <td class="np-score-cell is-status" :title="statusHint(row)">
-                  <div class="np-data-status" :class="statusTone(row)">
-                    <b>{{ row.data_status_text || '—' }}<em v-if="row.data_status_detail">{{ row.data_status_detail }}</em></b>
-                  </div>
+                  <div class="np-data-status" :class="statusTone(row)"><b>{{ row.data_status_text || '—' }}<em v-if="row.data_status_detail">{{ row.data_status_detail }}</em></b></div>
                 </td>
                 <td class="np-score-cell is-score" :title="scoreHint(row)">
-                  <div class="np-pool-score" :class="scoreTone(row)">
-                    <strong>{{ row.enabled && row.score !== null ? row.score : '—' }}</strong><em>{{ row.score_grade }}</em>
-                  </div>
+                  <div class="np-pool-score" :class="scoreTone(row)"><strong>{{ row.enabled && row.score !== null ? row.score : '—' }}</strong><em>{{ row.score_grade }}</em></div>
                 </td>
               </tr>
             </tbody>
           </table>
-          <div class="score-footline">
-            <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 标签 {{ scoreWeights.tag }}%；近 {{ data.score_window_days || 7 }} 天动态采样。</span>
-            <span>成熟度只表示数据可信度，不参与评分。</span>
-          </div>
         </div>
-
-        <div v-if="data.airport_list?.length" class="score-mobile">
-          <article v-for="(row, idx) in rankedAirports" :key="`m-${row.id}`" class="score-mobile-card" :class="{ 'is-off': !row.enabled }">
-            <div class="score-mobile-head">
-              <span class="score-mobile-rank">{{ String(idx + 1).padStart(2, '0') }}</span>
-              <div>
+        <div v-if="data.airport_list?.length" class="airport-mcards">
+          <div v-for="(row, idx) in rankedAirports" :key="`m-${row.id}`" class="amc" :class="{ 'is-off': !row.enabled }">
+            <div class="amc-top">
+              <div class="amc-name">
+                <span class="amc-rank">{{ String(idx + 1).padStart(2, '0') }}</span>
+                <span class="np-airport-dot" :class="!row.enabled ? 'is-off' : `is-${row.last_status || 'none'}`" />
                 <b>{{ row.name }}</b>
-                <small>{{ row.enabled ? `${row.pool_count} 节点` : '未启用' }} · {{ row.data_status_text || '—' }}</small>
+                <span class="amc-status" :class="statusTone(row)">{{ row.data_status_text || '—' }}</span>
               </div>
-              <div class="np-pool-score" :class="scoreTone(row)">
-                <strong>{{ row.enabled && row.score !== null ? row.score : '—' }}</strong><em>{{ row.score_grade }}</em>
+              <div class="np-pool-score amc-score" :class="scoreTone(row)">
+                <strong>{{ row.enabled && row.score !== null ? row.score : '—' }}</strong>
+                <em>{{ row.score_grade }}</em>
               </div>
             </div>
-            <div class="score-mobile-metrics">
-              <span>可用 <b>{{ rateText(row, 'available_rate') }}</b></span>
-              <span>下发 <b>{{ rateText(row, 'publish_rate') }}</b></span>
-              <span>标签 <b>{{ rateText(row, 'tag_rate') }}</b></span>
+            <div class="amc-sub">{{ row.enabled ? `${row.pool_count} 节点` : `${row.node_count} 缓存` }} · {{ scoreSampleText(row) }}</div>
+            <div class="amc-metrics">
+              <div v-for="metric in rateMetrics" :key="`m-${row.id}-${metric.key}`" class="amc-metric">
+                <label>{{ metric.key === 'available_rate' ? '可用' : metric.key === 'publish_rate' ? '下发' : '标签' }}</label>
+                <b>{{ rateText(row, metric.key) }}</b>
+                <i class="np-meter"><s :style="{ width: metricWidth(row, metric.key) + '%' }" /></i>
+              </div>
             </div>
-          </article>
+          </div>
         </div>
+        <div v-else class="np-empty">缓存池为空，先到「机场接入」添加并拉取订阅。</div>
 
-        <div v-if="!data.airport_list?.length" class="np-empty">缓存池为空，先到「机场接入」添加并拉取订阅。</div>
-      </section>
-
-      <aside class="dash-side">
-        <section class="console-panel detect-panel">
-          <div class="panel-head compact">
-            <div>
-              <span class="panel-kicker">LIVE BATCH</span>
-              <h2>检测任务</h2>
-            </div>
-            <el-tag v-if="runtime.running" :type="runTagType" size="small">{{ runStateText }}</el-tag>
-            <el-tag v-else type="success" size="small">空闲</el-tag>
-          </div>
-
-          <div class="detect-rings">
-            <div class="ring-item">
-              <div class="np-batch-gauge is-ring" :class="`is-${runTone}`">
-                <svg viewBox="0 0 120 120" aria-hidden="true">
-                  <circle class="np-batch-gauge-track" cx="60" cy="60" r="48" pathLength="100" />
-                  <circle class="np-batch-gauge-value" cx="60" cy="60" r="48" pathLength="100"
-                          :style="{ strokeDasharray: `${latencyPct} 100` }" />
-                </svg>
-                <div class="np-batch-gauge-label"><strong>{{ latencyPct }}</strong><span>%</span></div>
-              </div>
-              <b>延迟检测</b>
-              <small>{{ runtime.latency_done || 0 }} / {{ runtime.latency_total || 0 }}</small>
-            </div>
-            <div class="ring-item">
-              <div class="np-batch-gauge is-ring is-tag" :class="`is-${runTone}`">
-                <svg viewBox="0 0 120 120" aria-hidden="true">
-                  <circle class="np-batch-gauge-track" cx="60" cy="60" r="48" pathLength="100" />
-                  <circle class="np-batch-gauge-value" cx="60" cy="60" r="48" pathLength="100"
-                          :style="{ strokeDasharray: `${tagPct} 100` }" />
-                </svg>
-                <div class="np-batch-gauge-label"><strong>{{ tagPct }}</strong><span>%</span></div>
-              </div>
-              <b>标签检测</b>
-              <small>{{ runtime.tag_done || 0 }} / {{ runtime.tag_total || 0 }}</small>
-            </div>
-          </div>
-
-          <div class="current-node" :class="{ 'is-idle': !runtime.running }">
-            <template v-if="runtime.running && runtime.current">
-              <div class="current-head"><i class="np-current-dot" /><span>正在检测</span><span class="np-flex" /><em>{{ runtime.current.stage }}</em></div>
-              <b class="current-name" :title="runtime.current.node">{{ runtime.current.node }}</b>
-              <div class="current-meta">
-                <span>{{ runtime.current.airport || '—' }}</span>
-                <span v-if="runtime.current.g || runtime.current.w">G {{ runtime.current.g ?? '—' }}ms · W {{ runtime.current.w ?? '—' }}ms</span>
-                <span class="np-current-result" :class="{ 'is-bad': ['未达标','未通过'].includes(runtime.current.result) }">{{ runtime.current.result }}</span>
-              </div>
-            </template>
-            <template v-else>
-              <div class="current-head"><i class="np-current-dot is-idle" /><span>调度空闲</span><span class="np-flex" /><em>{{ runtime.engine || 'mihomo' }}</em></div>
-              <div class="current-meta"><span>批次 #{{ runtime.batch_id || data.batch?.id || '—' }}</span><span>已处理 {{ runtime.done || 0 }} / {{ runtime.total || 0 }} 项</span></div>
-            </template>
-          </div>
-
-          <div class="detect-actions">
-            <el-button v-if="!runtime.running" size="small" type="primary" @click="runNow">立即检测</el-button>
-            <el-button v-if="runtime.running && !runtime.paused" size="small" :disabled="runtime.stop_requested" @click="pauseCycle">暂停</el-button>
-            <el-button v-if="runtime.running && runtime.paused" size="small" type="success" :disabled="runtime.stop_requested" @click="resumeCycle">继续</el-button>
-            <el-button v-if="runtime.running" size="small" type="danger" plain :disabled="runtime.stop_requested" @click="stopCycle">
-              {{ runtime.stop_requested ? '正在停止' : '停止检测' }}
-            </el-button>
-          </div>
-
-          <div class="detect-stats">
-            <div><span>批次</span><b>#{{ data.batch?.id || '—' }}</b></div>
-            <div><span>耗时</span><b>{{ batchDuration }}</b></div>
-            <div><span>剩余</span><b>{{ batchRemaining }}</b></div>
-          </div>
-        </section>
-
-        <section class="console-panel logs-panel">
-          <div class="panel-head compact">
-            <div>
-              <span class="panel-kicker">SYSTEM LOG</span>
-              <h2>运行日志</h2>
-            </div>
-            <div class="log-tools">
-              <el-select v-model="logLevel" size="small" style="width:88px" @change="loadLogs">
-                <el-option label="全部" value="ALL" />
-                <el-option label="信息" value="INFO" />
-                <el-option label="警告" value="WARN" />
-                <el-option label="错误" value="ERROR" />
-                <el-option label="调试" value="DEBUG" />
-              </el-select>
-              <el-button size="small" :loading="logsLoading" @click="loadLogs">刷新</el-button>
-            </div>
-          </div>
-          <div class="console-log" v-loading="logsLoading">
-            <div v-for="log in logs" :key="log.id">
-              <time>{{ formatTs(log.ts) }}</time>
-              <span :class="`lv-${log.level}`">{{ logLevelLabel(log.level) }}</span>
-              <span class="src">{{ logSourceLabel(log.source) }}</span>
-              <p>{{ log.message }}</p>
-            </div>
-            <div v-if="!logs.length" class="np-empty">暂无日志</div>
-          </div>
-          <span class="log-count">{{ logs.length }}/300 · 自动刷新</span>
-        </section>
-      </aside>
-    </div>
-
-    <OperationsMap v-if="data" :data="data" :runtime="runtime" :version="state.version" />
-
-    <section v-if="data?.airport_list?.length" class="console-panel trend-panel">
-      <div class="panel-head">
-        <div>
-          <span class="panel-kicker">POOL HISTORY</span>
-          <h2>节点趋势</h2>
-          <p>{{ trendRangeText }} · {{ trendSampleText }}</p>
+        <div class="table-foot">
+          <span>评分 = 可用率 {{ scoreWeights.available }}% + 下发率 {{ scoreWeights.publish }}% + 标签 {{ scoreWeights.tag }}%；近 {{ data.score_window_days || 7 }} 天动态采样。</span>
+          <span>成熟度只表示数据可信度，不参与评分。</span>
         </div>
-        <div class="trend-range" role="group" aria-label="趋势区间">
-          <button type="button" :class="{ 'is-active': trendRange === '1d' }" @click="trendRange = '1d'">1D</button>
-          <button type="button" :class="{ 'is-active': trendRange === '7d' }" @click="trendRange = '7d'">7D</button>
-          <button type="button" :class="{ 'is-active': trendRange === '30d' }" @click="trendRange = '30d'">30D</button>
-        </div>
+      </article>
+
+      <div class="opsmap-wrap span12">
+        <OperationsMap :data="data" :runtime="runtime" :version="state.version" />
       </div>
-      <div class="trend-grid">
-        <div v-for="chart in trendCharts" :key="chart.key" class="trend-card">
-          <TrendChart :points="chart.points" :rows="chart.rows" :field="chart.field"
-                      :range="trendRange" :title="chart.title" :palette="AIRPORT_COLORS" />
+
+      <article class="frostcard logcard span12">
+        <div class="log-head">
+          <div>
+            <div class="card-kicker"><i></i>SYSTEM LOG</div>
+            <h2>运行日志</h2>
+          </div>
+          <div class="log-tools">
+            <el-select v-model="logLevel" size="small" style="width:88px" @change="loadLogs">
+              <el-option label="全部" value="ALL" />
+              <el-option label="信息" value="INFO" />
+              <el-option label="警告" value="WARN" />
+              <el-option label="错误" value="ERROR" />
+              <el-option label="调试" value="DEBUG" />
+            </el-select>
+            <el-button size="small" :loading="logsLoading" @click="loadLogs">刷新</el-button>
+            <span class="np-muted">{{ logs.length }}/300</span>
+          </div>
         </div>
-      </div>
+        <div v-if="logs.length" class="log-body" v-loading="logsLoading">
+          <div v-for="log in logs" :key="log.id" class="log-line" :class="`lv-${log.level}`">
+            <time>{{ formatTs(log.ts) }}</time>
+            <b>{{ logLevelLabel(log.level) }}</b>
+            <span>{{ logSourceLabel(log.source) }} · {{ log.message }}</span>
+          </div>
+        </div>
+        <div v-else class="log-empty" v-loading="logsLoading">暂无日志</div>
+      </article>
     </section>
 
     <div v-if="data" class="dash-footer">
-      <span>ALL SYSTEMS LOCAL</span>
-      <p>检测只读取本地缓存 · 机场失败保留旧版本 · 订阅发布使用原子替换</p>
-      <span>v{{ state.version || '—' }}</span>
+      <span>ALL SYSTEMS LOCAL · 检测只读本地缓存 · 失败保留旧版本 · 原子替换订阅</span>
+      <p>NodePoolME · FROST SCORE · v{{ state.version || '—' }}</p>
     </div>
   </div>
 </template>
