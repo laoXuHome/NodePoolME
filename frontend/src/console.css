@@ -1,4 +1,4 @@
-/* NodePoolME · v2.007 FROST SCORE
+/* NodePoolME · v2.008 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -106,21 +106,26 @@ body::before {
 .np-rail {
   position: fixed;
   z-index: 60;
-  top: 22px;
-  bottom: 22px;
-  left: 22px;
+  top: 30px;
+  bottom: 30px;
+  left: 34px;
   width: 268px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   padding: 20px 14px 16px;
-  border-radius: 30px;
+  border-radius: 34px;
+  border: 1px solid rgba(255, 255, 255, .075);
   color: #f4f8f2;
   background:
     radial-gradient(300px 240px at 16% 0%, rgba(255, 255, 255, .06), transparent 64%),
     linear-gradient(168deg, #2b4a43 0%, #24433c 46%, #1b342e 100%);
   box-shadow:
-    0 30px 60px rgba(19, 42, 35, .34),
+    0 2px 6px rgba(19, 42, 35, .10),
+    0 12px 26px rgba(19, 42, 35, .16),
+    0 30px 70px rgba(19, 42, 35, .30),
+    0 48px 110px rgba(19, 42, 35, .12),
+    inset 0 0 0 1px rgba(255, 255, 255, .055),
     inset 0 1px 0 rgba(255, 255, 255, .10),
     inset 0 -1px 0 rgba(0, 0, 0, .18);
   overflow: hidden;
@@ -695,7 +700,7 @@ body::before {
 /* ---------------------------------------------------------------- responsive */
 @media (max-width: 1280px) {
   .np-shell.np-console { padding-left: 292px; }
-  .np-rail { width: 244px; }
+  .np-rail { width: 244px; left: 34px; top: 28px; bottom: 28px; border-radius: 32px; }
   .np-rail-brandtext b { font-size: 16.5px; }
   .np-rail-score { padding: 11px 10px; gap: 9px; }
   .np-rail-ring { width: 52px; height: 52px; padding-top: 15px; }
