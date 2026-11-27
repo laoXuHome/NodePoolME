@@ -11,6 +11,7 @@ const blank = () => ({ name: '', ident: '', url: '', method: 'GET', expect_statu
                        expect_body: '', max_latency: 0, enabled: true, sort_order: 10 })
 const form = ref(blank())
 const isMobile = ref(false)
+const isCompact = ref(false)
 const speedForm = ref({})
 const speedSources = ref([])
 const speedChecking = ref(false)
@@ -29,7 +30,9 @@ const GRADE_ROWS = [
 ]
 const THRESHOLD_ROWS = GRADE_ROWS.slice(0, 3)
 let mq = null
+let mqCompact = null
 function syncMobile(e) { isMobile.value = e.matches }
+function syncCompact(e) { isCompact.value = e.matches }
 
 async function load() {
   loading.value = true
@@ -196,12 +199,16 @@ onMounted(() => {
   mq = window.matchMedia('(max-width: 768px)')
   isMobile.value = mq.matches
   mq.addEventListener('change', syncMobile)
+  mqCompact = window.matchMedia('(max-width: 1100px)')
+  isCompact.value = mqCompact.matches
+  mqCompact.addEventListener('change', syncCompact)
   load()
   loadSpeed()
   speedTimer = setInterval(() => refreshSpeedStatus(true), 15000)
 })
 onUnmounted(() => {
   if (mq) mq.removeEventListener('change', syncMobile)
+  if (mqCompact) mqCompact.removeEventListener('change', syncCompact)
   if (speedTimer) clearInterval(speedTimer)
 })
 </script>
@@ -254,11 +261,11 @@ onUnmounted(() => {
                 <el-switch :model-value="row.enabled" size="small" @change="(v) => toggle(row, v)" />
               </template>
             </el-table-column>
-            <el-table-column prop="name" label="名称" min-width="82" show-overflow-tooltip />
+            <el-table-column prop="name" label="名称" width="108" show-overflow-tooltip />
             <el-table-column label="标识" width="52" align="center">
               <template #default="{ row }"><el-tag effect="plain" size="small">{{ row.ident }}</el-tag></template>
             </el-table-column>
-            <el-table-column label="检测目标" min-width="150" show-overflow-tooltip>
+            <el-table-column label="检测目标" min-width="140" show-overflow-tooltip>
               <template #default="{ row }">
                 <div class="np-mono np-tag-url"
                      :title="row.url + ' · ' + row.method + ' ' + row.expect_status + (row.expect_body ? ' · 包含 ' + row.expect_body : '') + (row.max_latency ? ' · ≤' + row.max_latency + 'ms' : '')">
@@ -270,11 +277,15 @@ onUnmounted(() => {
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="passed" label="通过" width="46" align="center" />
-            <el-table-column label="最近" width="84">
-              <template #default="{ row }">{{ shortTs(row.last_run_at) }}</template>
+            <el-table-column label="通过" width="72" align="center">
+              <template #default="{ row }">
+                <div class="np-tag-passed">{{ row.passed }}</div>
+                <el-tooltip :content="`最近检测 ${formatTs(row.last_run_at)}`" placement="top">
+                  <div class="np-tag-pass-time">{{ shortTs(row.last_run_at) }}</div>
+                </el-tooltip>
+              </template>
             </el-table-column>
-            <el-table-column label="操作" width="82" align="center">
+            <el-table-column label="操作" width="78" align="center">
               <template #default="{ row }">
                 <el-button link size="small" @click="openEdit(row)">编辑</el-button>
                 <el-button link size="small" type="danger" :disabled="row.is_default" @click="remove(row)">删</el-button>
@@ -285,16 +296,19 @@ onUnmounted(() => {
       </div>
 
       <div class="np-card np-quad-cell speed-panel" style="padding:18px">
-      <div class="np-section-title">
-        下载测速
-        <el-tag size="small" effect="plain" type="info" style="margin-left:10px">独立模块 · 不参与评分</el-tag>
-        <div class="np-flex" />
+      <div class="speed-panel-head">
+        <div class="speed-panel-title">
+          <span class="speed-title-text">下载测速</span>
+          <el-tag size="small" effect="plain" type="info">独立模块 · 不参与评分</el-tag>
+        </div>
+        <el-button size="small" type="primary" :loading="speedSaving" @click="saveSpeed">保存测速设置</el-button>
+      </div>
+      <div class="speed-queue-line">
         <span class="speed-queue-strip">
           运行 {{ speedOverview.queue?.counts?.running || 0 }} ·
           排队 {{ (speedOverview.queue?.counts?.queued || 0) + (speedOverview.queue?.counts?.waiting || 0) }} ·
           近 24 小时有效 {{ speedOverview.runs_ok_24h || 0 }}
         </span>
-        <el-button size="small" type="primary" :loading="speedSaving" @click="saveSpeed">保存测速设置</el-button>
       </div>
       <div class="np-muted speed-desc">
         通过节点本地 SOCKS 端口分段下载公共 HTTPS 测速源。定时任务只在晚高峰窗口内随机分散启动，手动任务立即入队；全部任务共用独立测速并发与防重复队列；与节点检测评分互斥，任一方进行中时另一方自动延迟。
@@ -432,67 +446,65 @@ onUnmounted(() => {
       </el-form>
       </div>
 
-      <div class="np-card np-quad-cell speed-panel" style="padding:18px">
-        <div class="speed-table-block">
-          <div class="speed-table-head">
-            机场测速范围
-            <span class="np-muted">排除后不创建任务、不消耗流量，显示浅灰点</span>
+      <div class="np-card np-quad-cell speed-panel speed-resources" style="padding:18px">
+        <div class="speed-table-head">
+          <div class="speed-table-title">
+            测速范围与源
+            <span class="np-muted">机场范围与直连测速源统一管理</span>
           </div>
-          <el-table :data="speedAirports" size="small">
-            <el-table-column label="参与测速" width="110">
-              <template #default="{ row }">
-                <el-switch :model-value="!row.speed_excluded"
-                           style="margin-right:6px" @change="v => toggleAirportSpeed(row, v)" />
-                <span :style="{ color: row.speed_excluded ? '#94A3B8' : '#64748b', fontSize: '12px' }">
-                  {{ row.speed_excluded ? '排除' : '参与' }}
-                </span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="name" label="机场" min-width="120" show-overflow-tooltip />
-            <el-table-column label="节点" width="70" align="right">
-              <template #default="{ row }">
-                <span class="np-muted">{{ speedNodes.filter(n => n.airport === row.name).length }}</span>
-              </template>
-            </el-table-column>
-          </el-table>
+          <el-button size="small" :loading="speedChecking" @click="checkSpeedSources">测试源健康检测</el-button>
         </div>
-      </div>
-
-      <div class="np-card np-quad-cell speed-panel" style="padding:18px">
-        <div class="speed-table-block">
-          <div class="speed-table-head">
-            <div class="speed-table-title">
-              测速源
-              <span class="np-muted">检测直连源站，不经过节点</span>
+        <div class="speed-resource-grid">
+          <section class="speed-range-block">
+            <div class="speed-resource-subhead">
+              机场测速范围
+              <span>排除后不创建任务、不消耗流量</span>
             </div>
-            <el-button size="small" :loading="speedChecking" @click="checkSpeedSources">测试源健康检测</el-button>
-          </div>
-          <el-table :data="speedSources" size="small">
-            <el-table-column label="启用" width="56" align="center">
-              <template #default="{ row }">
-                <el-switch v-model="row.enabled" :active-value="1" :inactive-value="0" @change="toggleSpeedSource(row)" />
-              </template>
-            </el-table-column>
-            <el-table-column prop="name" label="测速源" min-width="120" show-overflow-tooltip />
-            <el-table-column prop="region" label="地区" width="60" />
-            <el-table-column label="健康" width="64">
-              <template #default="{ row }">
-                <el-tag size="small" effect="plain"
-                        :type="row.health === 'ok' ? 'success' : (row.health === 'fail' ? 'danger' : 'info')">
-                  {{ row.health === 'ok' ? '正常' : (row.health === 'fail' ? '异常' : '未检查') }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="Range" width="56">
-              <template #default="{ row }"><span class="np-mono">{{ row.range_ok ? '206' : '—' }}</span></template>
-            </el-table-column>
-            <el-table-column label="连接 ms" width="66">
-              <template #default="{ row }">{{ row.latency_ms ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column label="地址" min-width="150" show-overflow-tooltip>
-              <template #default="{ row }"><span class="np-muted">{{ row.url }}</span></template>
-            </el-table-column>
-          </el-table>
+            <div class="speed-airport-list">
+              <div v-for="row in speedAirports" :key="row.id" class="speed-airport-row" :class="{ 'is-off': row.speed_excluded }">
+                <el-tooltip :content="row.speed_excluded ? '当前排除：不创建测速任务、不消耗流量' : '当前参与测速'" placement="top">
+                  <el-switch :model-value="!row.speed_excluded" size="small" @change="v => toggleAirportSpeed(row, v)" />
+                </el-tooltip>
+                <span class="speed-airport-name">{{ row.name }}</span>
+                <span class="speed-airport-count">
+                  {{ row.speed_excluded ? '已排除' : '参与' }} · {{ speedNodes.filter(n => n.airport === row.name).length }} 节点
+                </span>
+              </div>
+              <div v-if="!speedAirports.length" class="np-empty">暂无机场</div>
+            </div>
+          </section>
+          <section class="speed-source-block">
+            <div class="speed-resource-subhead">
+              测速源
+              <span>检测直连源站，不经过节点</span>
+            </div>
+            <el-table :data="speedSources" size="small" class="speed-source-table">
+              <el-table-column label="启用" width="52" align="center">
+                <template #default="{ row }">
+                  <el-switch v-model="row.enabled" :active-value="1" :inactive-value="0" @change="toggleSpeedSource(row)" />
+                </template>
+              </el-table-column>
+              <el-table-column prop="name" label="测速源" min-width="126" show-overflow-tooltip />
+              <el-table-column prop="region" label="地区" width="56" />
+              <el-table-column label="健康" width="66">
+                <template #default="{ row }">
+                  <el-tag size="small" effect="plain"
+                          :type="row.health === 'ok' ? 'success' : (row.health === 'fail' ? 'danger' : 'info')">
+                    {{ row.health === 'ok' ? '正常' : (row.health === 'fail' ? '异常' : '未检查') }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="!isCompact" label="Range" width="56">
+                <template #default="{ row }"><span class="np-mono">{{ row.range_ok ? '206' : '—' }}</span></template>
+              </el-table-column>
+              <el-table-column v-if="!isCompact" label="连接 ms" width="66">
+                <template #default="{ row }">{{ row.latency_ms ?? '—' }}</template>
+              </el-table-column>
+              <el-table-column v-if="!isCompact" label="地址" min-width="150" show-overflow-tooltip>
+                <template #default="{ row }"><span class="np-muted">{{ row.url }}</span></template>
+              </el-table-column>
+            </el-table>
+          </section>
         </div>
       </div>
     </div>
@@ -562,29 +574,45 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.speed-panel {
-  border-top: 2px solid rgba(46, 230, 168, .55);
+.speed-panel { border-top: 2px solid rgba(63, 102, 92, .22); }
+.speed-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
 }
+.speed-panel-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.speed-title-text {
+  flex: none;
+  font-size: 18px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  color: #29433a;
+  white-space: nowrap;
+}
+.speed-queue-line { margin: -2px 0 3px; }
 .speed-queue-strip {
-  font-size: 12px;
-  color: var(--np-muted, #64748b);
-  margin-right: 10px;
+  font-size: 11px;
+  color: #788b81;
   white-space: nowrap;
 }
 .speed-desc {
   margin: 2px 0 10px;
-  line-height: 1.55;
+  line-height: 1.6;
+  color: #71847a;
 }
 .speed-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  padding: 8px 12px;
-  margin-bottom: 6px;
-  border: 1px solid rgba(139, 168, 205, .12);
-  border-radius: 10px;
-  background: rgba(9, 16, 26, .56);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid #e0e8df;
+  border-radius: 12px;
+  background: #f6f9f4;
 }
 .speed-action-main {
   display: flex;
@@ -592,9 +620,9 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 .speed-note {
-  font-size: 12px;
-  color: #8b9fb6;
-  margin: 0 2px 8px;
+  font-size: 11px;
+  color: #7a8d83;
+  margin: 0 2px 10px;
 }
 .speed-num {
   width: 100% !important;
@@ -611,13 +639,14 @@ onUnmounted(() => {
   font-size: 12px;
   line-height: 30px;
   padding-right: 8px;
+  color: #62766c;
 }
 .speed-subhead {
-  font-size: 13px;
-  font-weight: 600;
-  color: #dce8f7;
-  padding: 8px 0 4px;
-  border-top: 1px dashed rgba(139, 168, 205, .14);
+  font-size: 12.5px;
+  font-weight: 650;
+  color: #355247;
+  padding: 8px 0 5px;
+  border-top: 1px dashed #e1e9df;
   margin-top: 2px;
 }
 .speed-form > .speed-subhead:first-child {
@@ -634,10 +663,10 @@ onUnmounted(() => {
 }
 .speed-config-panel {
   min-width: 0;
-  padding: 0 14px 6px;
-  border: 1px solid rgba(139, 168, 205, .10);
-  border-radius: 10px;
-  background: rgba(8, 15, 24, .54);
+  padding: 0 14px 8px;
+  border: 1px solid #e1e9e0;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fbfdfa, #f5f9f3);
 }
 .speed-config-panel .speed-subhead {
   border-top: 0;
@@ -649,22 +678,22 @@ onUnmounted(() => {
 }
 .speed-subhead-note {
   font-weight: 400;
-  font-size: 11px;
-  color: #71869d;
-  margin-left: 8px;
+  font-size: 10.5px;
+  color: #899a91;
+  margin-left: 7px;
 }
 .speed-field-hint {
   width: 100%;
-  font-size: 11px;
-  line-height: 1.3;
-  color: #71869d;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #8b9c93;
   margin-top: 2px;
 }
 .speed-cap-note {
-  margin: -6px 0 6px 102px;
-  font-size: 11px;
+  margin: -4px 0 7px 102px;
+  font-size: 10px;
   line-height: 1.5;
-  color: #71869d;
+  color: #8a9b92;
 }
 .speed-threshold-grid {
   display: grid;
@@ -683,7 +712,7 @@ onUnmounted(() => {
   align-items: center;
   flex: 0 0 auto;
   font-size: 12px;
-  color: #b9cade;
+  color: #5d7167;
 }
 .speed-threshold .speed-num-wide {
   flex: 1 1 auto;
@@ -697,11 +726,11 @@ onUnmounted(() => {
   gap: 4px 16px;
   margin-top: 4px;
   padding-top: 6px;
-  border-top: 1px dashed rgba(139, 168, 205, .14);
-  font-size: 12px;
+  border-top: 1px dashed #e1e9df;
+  font-size: 11px;
   line-height: 1.6;
-  color: #9db0c6;
-  margin-bottom: 6px;
+  color: #6f8378;
+  margin-bottom: 4px;
 }
 .speed-status {
   display: inline-flex;
@@ -714,8 +743,8 @@ onUnmounted(() => {
 .speed-status i {
   font-style: normal;
   margin-left: 4px;
-  font-size: 11px;
-  color: #71869d;
+  font-size: 10px;
+  color: #8a9b92;
 }
 .speed-legend {
   display: flex;
@@ -730,11 +759,65 @@ onUnmounted(() => {
 }
 .np-quad {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: stretch;
 }
 .np-quad-cell { min-width: 0; }
+.speed-resources { grid-column: 1 / -1; }
+.speed-resource-grid {
+  display: grid;
+  grid-template-columns: minmax(210px, .72fr) minmax(0, 2.28fr);
+  gap: 20px;
+  align-items: start;
+}
+.speed-range-block {
+  min-width: 0;
+  padding-right: 20px;
+  border-right: 1px solid #e4ece3;
+}
+.speed-source-block { min-width: 0; }
+.speed-resource-subhead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 8px;
+  font-size: 12px;
+  font-weight: 650;
+  color: #355247;
+  margin-bottom: 8px;
+}
+.speed-resource-subhead span {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: #899a91;
+}
+.speed-airport-list { display: flex; flex-direction: column; }
+.speed-airport-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border-bottom: 1px dashed #e6eee5;
+}
+.speed-airport-row:last-child { border-bottom: 0; }
+.speed-airport-row.is-off { opacity: .55; }
+.speed-airport-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: #3c564b;
+}
+.speed-airport-count {
+  flex: none;
+  font-size: 10.5px;
+  color: #7e9187;
+  white-space: nowrap;
+}
+.speed-source-table :deep(.el-table__header th) { background: transparent; }
 .np-tags-cell { padding: 16px; }
 .np-quad-toolbar { margin: 0 0 10px; }
 .np-tag-url {
@@ -746,6 +829,20 @@ onUnmounted(() => {
 }
 .np-tag-rule { font-size: 10.5px; line-height: 1.45; white-space: nowrap; }
 .np-tag-table .cell { padding: 0 6px; }
+.np-tag-passed {
+  font-size: 12px;
+  line-height: 1.25;
+  font-weight: 650;
+  color: #365247;
+}
+.np-tag-pass-time {
+  margin-top: 1px;
+  font-size: 9.5px;
+  line-height: 1.3;
+  color: #85978d;
+  white-space: nowrap;
+  cursor: help;
+}
 .speed-table-block {
   min-width: 0;
 }
@@ -755,10 +852,10 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   gap: 8px 12px;
-  font-weight: 600;
-  font-size: 13px;
-  color: #dce8f7;
-  margin-bottom: 8px;
+  font-weight: 650;
+  font-size: 14px;
+  color: #304a40;
+  margin-bottom: 10px;
 }
 .speed-table-title {
   display: flex;
@@ -774,7 +871,13 @@ onUnmounted(() => {
   margin-left: auto;
 }
 @media (max-width: 1100px) {
-  .np-quad { grid-template-columns: 1fr; }
+  .speed-resource-grid { grid-template-columns: 1fr; gap: 14px; }
+  .speed-range-block {
+    padding-right: 0;
+    padding-bottom: 12px;
+    border-right: 0;
+    border-bottom: 1px solid #e4ece3;
+  }
 }
 @media (max-width: 768px) {
   .speed-queue-strip { width: 100%; margin: 4px 0; }
@@ -789,6 +892,15 @@ onUnmounted(() => {
   }
   .speed-config-panel {
     padding: 0 12px 4px;
+  }
+  .speed-panel-head { align-items: flex-start; }
+  .speed-panel-title { flex-wrap: wrap; }
+  .speed-resource-grid { grid-template-columns: 1fr; gap: 14px; }
+  .speed-range-block {
+    padding-right: 0;
+    padding-bottom: 12px;
+    border-right: 0;
+    border-bottom: 1px solid #e4ece3;
   }
   .speed-num,
   .speed-num-wide {
