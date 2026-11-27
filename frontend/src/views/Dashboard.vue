@@ -364,7 +364,7 @@ function shortTs(ts) {
   return String(ts).replace(/^\d{4}-/, '').replace('T', ' ').slice(0, 11)
 }
 
-/* ------------------------------------------------ v2.009 C×E 评分主卡 */
+/* ------------------------------------------------ v2.010 合并评分拆解卡 */
 const enabledAirports = computed(() => (data.value?.airport_list || []).filter((row) => row.enabled))
 const scoredAirports = computed(() => enabledAirports.value.filter((row) => Number.isFinite(Number(row.score))))
 const overallScoreValue = computed(() => {
@@ -488,7 +488,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.009 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.010 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -502,29 +502,34 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
     </header>
 
     <section v-if="data" class="dash-grid">
-      <article class="frostcard scorecard theme-dark span8">
-        <div class="card-head">
+      <article class="frostcard scorecard theme-dark span12 scorecard-merged">
+        <div class="card-head scorecard-head">
           <div>
-            <div class="card-kicker"><i></i>OVERALL AIRPORT SCORE</div>
-            <h2>整体评分</h2>
-            <p class="muted">按缓存池规模加权的机场展示分</p>
+            <div class="card-kicker"><i></i>SCORE DECOMPOSITION</div>
+            <h2>评分拆解</h2>
+            <p class="muted">可用率、下发率与标签合格率的加权展示分；轨道中保留机场分布。</p>
           </div>
           <span class="card-chip">{{ scoredAirports.length }} / {{ enabledAirports.length }} 机场计分</span>
         </div>
 
-        <div class="score-body">
-          <div class="score-gauge-wrap">
-            <div class="score-gauge" :style="scoreGaugeStyle">
-              <div class="score-gauge-hole">
-                <b>{{ overallScoreText }}</b>
-                <em>OVERALL</em>
-                <small>{{ overallGrade }}</small>
-              </div>
-              <span class="score-gauge-cap">{{ qualifiedPct }}% 合格</span>
+        <div class="score-merged-body">
+          <div class="score-total">
+            <span class="score-total-kicker">OVERALL</span>
+            <div class="score-total-num">
+              <b>{{ overallScoreText }}</b>
+              <em>{{ overallGrade }}</em>
+            </div>
+            <small>加权展示分</small>
+            <div class="score-total-line"></div>
+            <div class="score-total-foot">
+              <b>{{ qualifiedPct }}%</b>
+              <span>合格</span>
+              <i>·</i>
+              <span>{{ data.score_window_days || 7 }} 天窗口</span>
             </div>
           </div>
 
-          <div class="orbit-wrap">
+          <div class="orbit-wrap score-orbit">
             <svg viewBox="0 0 300 216" role="img" aria-label="机场评分轨道">
               <circle cx="150" cy="108" r="82" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="1" />
               <circle cx="150" cy="108" r="62" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="1" />
@@ -546,62 +551,47 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
             </div>
           </div>
 
-          <div class="score-rank">
-            <div class="score-rank-head"><span>TOP AIRPORTS</span><span>SCORE</span></div>
-            <div v-for="(row, idx) in rankedAirports.filter((r) => r.enabled).slice(0, 5)" :key="`rank-${row.id}`" class="rankrow">
-              <em>{{ String(idx + 1).padStart(2, '0') }}</em>
-              <span class="nm" :title="row.name">{{ row.name }}</span>
-              <b :class="{ low: Number(row.score) < 85, bad: Number(row.score) < 70 }">{{ Number.isFinite(Number(row.score)) ? row.score : '—' }}</b>
+          <div class="score-metrics">
+            <div class="score-metrics-head"><span>评分构成</span><span>加权结果</span></div>
+            <div v-for="item in breakdownRows" :key="item.key" class="score-metric-row" :class="`is-${item.key}`">
+              <div class="score-metric-top">
+                <b>{{ item.label }}</b>
+                <span>{{ item.sub }}</span>
+                <em>{{ item.value.toFixed(1) }}%</em>
+              </div>
+              <div class="score-metric-track">
+                <i :style="{ width: `${Math.max(0, Math.min(100, item.value))}%` }" />
+              </div>
             </div>
-            <div v-if="!scoredAirports.length" class="rankrow"><em>--</em><span class="nm">暂无评分</span><b class="bad">—</b></div>
-          </div>
-        </div>
-
-        <div class="scoreband">
-          <div><span>ENABLED AIRPORTS</span><b>{{ enabledAirports.length }}<small>座</small></b><i>{{ airportOk }}/{{ airportTotal }} 拉取正常</i></div>
-          <div><span>POOL TOTAL</span><b>{{ data.nodes_total }}<small>节点</small></b><i>{{ statusCounts.unknown }} 待检测 · {{ statusCounts.unavailable }} 不可用</i></div>
-          <div><span>QUALIFIED</span><b>{{ data.nodes_qualified }}<small>合格</small></b><i>{{ qualifiedPct }}% 通过延迟门槛</i></div>
-          <div><span>DELIVERED</span><b>{{ publishedTotal }}<small>下发</small></b><i>{{ publishRatio }}% 下发率</i></div>
-        </div>
-
-        <div class="score-legend">
-          <span><i class="is-gold"></i>80+ 优先</span>
-          <span><i class="is-mint"></i>60–79 观察</span>
-          <span><i class="is-red"></i>低于 60 复核</span>
-          <span class="np-flex"></span>
-          <span>评分窗口 {{ data.score_window_days || 7 }} 天</span>
-        </div>
-      </article>
-
-      <article class="frostcard scorebreak span4">
-        <div class="break-head">
-          <div class="card-kicker"><i></i>SCORE DECOMPOSITION</div>
-          <h2>评分拆解</h2>
-          <div class="break-main">
-            <b>{{ overallScoreText }}</b><em>{{ overallGrade }}</em><span>加权展示分</span>
-          </div>
-        </div>
-        <div class="break-rows">
-          <div v-for="item in breakdownRows" :key="item.key" class="break-row">
-            <div class="break-row-top">
-              <b>{{ item.label }}</b><span>{{ item.sub }}</span><em>{{ item.value.toFixed(1) }}%</em>
+            <div class="score-metrics-note">
+              <span>权重来自后端 <b>score_weights</b></span>
+              <span>{{ data.score_window_days || 7 }} 天动态采样</span>
             </div>
-            <div class="break-track"><i :style="{ width: `${Math.max(0, Math.min(100, item.value))}%` }" :class="{ 'is-gold': item.key === 'publish' }" /></div>
           </div>
         </div>
-        <div class="break-note"><span>权重来自后端 <b>score_weights</b></span><span>{{ data.score_window_days || 7 }} 天动态采样</span></div>
-        <div class="grade-band">
-          <div class="grade-band-head"><span>评分档位分布</span><b>{{ scoredAirports.length }} 座机场</b></div>
-          <div v-for="band in gradeBands" :key="band.key" class="grade-band-row">
-            <i :style="{ background: band.color }" />
-            <span>{{ band.label }}</span>
-            <b>{{ band.count }}</b>
-            <em>{{ band.pct }}%</em>
+
+        <div class="score-lower">
+          <div class="scoreband scoreband-merged">
+            <div><span>ENABLED AIRPORTS</span><b>{{ enabledAirports.length }}<small>座</small></b><i>{{ airportOk }}/{{ airportTotal }} 拉取正常</i></div>
+            <div><span>POOL TOTAL</span><b>{{ data.nodes_total }}<small>节点</small></b><i>{{ statusCounts.unknown }} 待检测 · {{ statusCounts.unavailable }} 不可用</i></div>
+            <div><span>QUALIFIED</span><b>{{ data.nodes_qualified }}<small>合格</small></b><i>{{ qualifiedPct }}% 通过延迟门槛</i></div>
+            <div><span>DELIVERED</span><b>{{ publishedTotal }}<small>下发</small></b><i>{{ publishRatio }}% 下发率</i></div>
+          </div>
+
+          <div class="grade-summary">
+            <div class="grade-summary-head"><span>评分档位分布</span><b>{{ scoredAirports.length }} 座机场</b></div>
+            <div v-for="band in gradeBands" :key="band.key" class="grade-summary-row">
+              <i :style="{ background: band.color }" />
+              <span>{{ band.label }}</span>
+              <b>{{ band.count }}</b>
+              <em>{{ band.pct }}%</em>
+            </div>
           </div>
         </div>
-        <div class="break-spacer" />
-        <div class="break-foot">
-          <b>{{ data.nodes_qualified }}</b> / {{ data.nodes_total }} 节点已通过延迟门槛；<b>{{ publishedTotal }}</b> 个节点进入统一订阅。
+
+        <div class="score-merged-foot">
+          <b>{{ data.nodes_qualified }}</b> / {{ data.nodes_total }} 节点已通过延迟门槛；
+          <b>{{ publishedTotal }}</b> 个节点进入统一订阅。
         </div>
       </article>
 

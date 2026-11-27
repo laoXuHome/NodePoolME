@@ -1,4 +1,4 @@
-/* NodePoolME · v2.009 FROST SCORE
+/* NodePoolME · v2.010 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -864,3 +864,113 @@ body::before {
 .np-header-tools .np-logout:hover { color: #2f4d46; background: #eef5f1; border-color: #dbe8e1; }
 .np-mobile-gh { text-decoration: none; }
 .np-mobile-gh svg { width: 17px; height: 17px; fill: currentColor; }
+
+/* ------------------------------------------------ 合并评分拆解卡（v2.010） */
+.scorecard-merged { grid-column: span 12; padding-bottom: 14px; }
+.scorecard-head { align-items: flex-start; }
+.scorecard-head .muted { max-width: 520px; }
+.score-merged-body {
+  display: grid;
+  grid-template-columns: minmax(150px, .60fr) minmax(280px, 1.30fr) minmax(248px, 1.02fr);
+  gap: 16px;
+  align-items: stretch;
+  padding: 8px 22px 0;
+}
+.score-total {
+  display: flex; flex-direction: column; justify-content: center; min-width: 0;
+  padding: 8px 0 6px 2px;
+}
+.score-total-kicker { font-size: 7px; font-weight: 700; letter-spacing: .16em; color: rgba(244, 248, 242, .42); }
+.score-total-num { display: flex; align-items: flex-end; gap: 7px; margin-top: 8px; min-width: 0; }
+.score-total-num b {
+  font-size: 66px; line-height: .82; font-weight: 760; letter-spacing: -.075em;
+  color: #fff; font-variant-numeric: tabular-nums;
+}
+.score-total-num em {
+  margin-bottom: 3px; padding: 3px 8px; border-radius: 999px;
+  background: #efc44c; color: #2e463f; font-style: normal;
+  font-size: 8.5px; font-weight: 780; letter-spacing: .03em;
+}
+.score-total small { margin-top: 8px; font-size: 7.5px; letter-spacing: .10em; color: rgba(244, 248, 242, .46); }
+.score-total-line { width: 38px; height: 1px; margin: 13px 0 10px; background: rgba(239, 196, 76, .44); }
+.score-total-foot { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; font-size: 8px; color: rgba(244, 248, 242, .50); }
+.score-total-foot b { font-size: 13px; font-weight: 720; color: #efc44c; font-variant-numeric: tabular-nums; }
+.score-total-foot i { font-style: normal; color: rgba(244, 248, 242, .28); }
+
+.score-orbit { height: auto; min-height: 236px; }
+.score-metrics {
+  display: flex; flex-direction: column; justify-content: center; min-width: 0;
+  padding-left: 18px; border-left: 1px solid rgba(255, 255, 255, .09);
+}
+.score-metrics-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 7px; border-bottom: 1px solid rgba(255, 255, 255, .09);
+  font-size: 7px; font-weight: 700; letter-spacing: .13em; color: rgba(244, 248, 242, .40);
+}
+.score-metric-row { margin-top: 12px; }
+.score-metric-top { display: flex; align-items: baseline; gap: 6px; }
+.score-metric-top b { font-size: 11.5px; font-weight: 640; color: rgba(249, 252, 248, .90); }
+.score-metric-top span { font-size: 7.5px; color: rgba(244, 248, 242, .42); }
+.score-metric-top em { margin-left: auto; font-style: normal; font-size: 20px; line-height: 1; font-weight: 740; letter-spacing: -.03em; color: #fff; font-variant-numeric: tabular-nums; }
+.score-metric-track { height: 5px; margin-top: 7px; border-radius: 99px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+.score-metric-track i { display: block; height: 100%; border-radius: inherit; }
+.score-metric-row.is-available .score-metric-track i { background: #8fc6b1; }
+.score-metric-row.is-publish .score-metric-track i { background: #efc44c; }
+.score-metric-row.is-tag .score-metric-track i { background: #cfe2d8; }
+.score-metrics-note {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px;
+  margin-top: 13px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .07);
+  font-size: 7.5px; color: rgba(244, 248, 242, .42);
+}
+.score-metrics-note b { color: rgba(244, 248, 242, .64); font-weight: 600; }
+
+.score-lower {
+  display: grid; grid-template-columns: minmax(0, 1.28fr) minmax(210px, .72fr); gap: 18px;
+  margin: 14px 22px 0; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, .10);
+}
+.scoreband-merged { margin: 0; padding: 0; border-top: 0; align-self: start; }
+.scoreband-merged > div { padding: 0 9px; }
+.scoreband-merged > div:first-child { padding-left: 0; }
+.scoreband-merged b { font-size: 17px; }
+.grade-summary { min-width: 0; padding-left: 16px; border-left: 1px solid rgba(255, 255, 255, .08); }
+.grade-summary-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 5px; font-size: 7.5px; color: rgba(244, 248, 242, .40);
+}
+.grade-summary-head b { font-size: 7.5px; font-weight: 500; color: rgba(244, 248, 242, .54); }
+.grade-summary-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 8px; color: rgba(244, 248, 242, .62); }
+.grade-summary-row i { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+.grade-summary-row span { min-width: 0; }
+.grade-summary-row b { margin-left: auto; font-size: 10px; color: #f5f9f4; font-variant-numeric: tabular-nums; }
+.grade-summary-row em { width: 25px; text-align: right; font-style: normal; font-size: 7.5px; color: rgba(244, 248, 242, .42); font-variant-numeric: tabular-nums; }
+
+.score-merged-foot {
+  margin: 11px 22px 0; padding-top: 9px; border-top: 1px solid rgba(255, 255, 255, .07);
+  font-size: 7.8px; color: rgba(244, 248, 242, .44);
+}
+.score-merged-foot b { color: rgba(244, 248, 242, .76); font-weight: 650; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1080px) {
+  .score-merged-body { grid-template-columns: 156px minmax(0, 1fr); padding: 6px 20px 0; }
+  .score-metrics {
+    grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px 16px; padding: 12px 0 0; border-left: 0; border-top: 1px solid rgba(255, 255, 255, .09);
+  }
+  .score-metrics-head, .score-metrics-note { grid-column: 1 / -1; }
+  .score-metric-row { margin-top: 0; }
+  .score-lower { grid-template-columns: 1fr; gap: 11px; }
+  .grade-summary { padding: 10px 0 0; border-left: 0; border-top: 1px solid rgba(255, 255, 255, .08); }
+}
+@media (max-width: 860px) {
+  .score-merged-body { grid-template-columns: 1fr; gap: 10px; padding: 10px 14px 0; }
+  .score-total { padding: 0; }
+  .score-total-num b { font-size: 60px; }
+  .score-orbit { min-height: 190px; }
+  .score-metrics { grid-column: auto; grid-template-columns: 1fr; gap: 0; padding-top: 10px; }
+  .score-metric-row { margin-top: 10px; }
+  .score-lower { margin: 12px 14px 0; padding-top: 10px; gap: 10px; }
+  .scoreband-merged { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 0; }
+  .scoreband-merged > div { padding: 0 8px; }
+  .scoreband-merged > div:nth-child(3) { padding-left: 0; border-left: 0; }
+  .score-merged-foot { margin: 10px 14px 0; padding-top: 8px; }
+}
