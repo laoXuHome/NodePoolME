@@ -126,15 +126,13 @@ const statusSegments = computed(() => {
   if (!d?.nodes_total) return []
   const total = d.nodes_total
   const available = Math.min(d.nodes_available || 0, total)
-  const qualified = Math.min(d.nodes_qualified || 0, available)
-  const unavailable = Math.min(d.nodes_unavailable || 0, total)
-  const unknown = Math.max(0, total - available - unavailable)
-  const availableOnly = Math.max(0, available - qualified)
+  const published = Math.min(d.nodes_qualified || 0, total)
+  const availableOnly = Math.max(0, available - published)
+  const unavailable = Math.max(0, total - published - availableOnly)
   const raw = [
-    { key: 'qualified', label: '已下发', short: '下发', count: qualified, color: '#d6a41d', side: '#a67d16', light: '#efdc9c', ink: '#ffffff' },
-    { key: 'available', label: '未达标', short: '未达标', count: availableOnly, color: '#3f665c', side: '#31524a', light: '#9bc3b4', ink: '#ffffff' },
-    { key: 'unknown', label: '未检测', short: '未检', count: unknown, color: '#c7d7cf', side: '#a9bdb3', light: '#e3eee8', ink: '#40564d' },
-    { key: 'unavailable', label: '不可用', short: '不可用', count: unavailable, color: '#c8755c', side: '#a9543e', light: '#e6ad9c', ink: '#ffffff' },
+    { key: 'published', label: '已下发', short: '下发', count: published, color: '#16A34A' },
+    { key: 'available', label: '可用', short: '可用', count: availableOnly, color: '#EAB308' },
+    { key: 'unavailable', label: '不可用', short: '不可用', count: unavailable, color: '#9CA3AF' },
   ].filter((item) => item.count > 0)
   if (!raw.length) return []
   const sum = raw.reduce((acc, item) => acc + item.count, 0)
@@ -151,7 +149,6 @@ const statusSegments = computed(() => {
     ...item, percent: floors[index], height: item.count / sum * 100,
   }))
 })
-const statusTopColor = computed(() => statusSegments.value[0]?.color || '#c7c7cc')
 const scoreWeights = computed(() => {
   const weights = data.value?.score_weights || {}
   return {
@@ -463,26 +460,64 @@ const gradeBands = computed(() => {
   ]
   return bands.map((band) => ({ ...band, pct: Math.round(band.count / total * 100) }))
 })
-const ringOuterStyle = computed(() => ({
-  background: `conic-gradient(#3f665c 0 ${Math.min(100, publishRatio.value)}%, #dbe9e2 ${Math.min(100, publishRatio.value)}% 100%)`
-}))
-const ringInnerStyle = computed(() => ({
-  background: `conic-gradient(#d6a41d 0 ${Math.min(100, qualifiedPct.value)}%, #eee7d4 ${Math.min(100, qualifiedPct.value)}% 100%)`
-}))
-const batchBars = computed(() => {
-  const points = allHistoryPoints.value.filter((point) => !point.live).slice(-6)
-  return points.map((point) => {
-    const total = Object.values(point.airports || {}).reduce((sum, item) => sum + Number(item.available_count || 0), 0)
-    const ts = String(point.ts || '')
-    return {
-      key: ts || String(Math.random()),
-      value: total,
-      label: ts ? ts.slice(5, 10).replace('-', '/') : '—',
-      height: 0,
-    }
+const donutStyle = computed(() => {
+  const segments = statusSegments.value
+  if (!segments.length) return { background: 'conic-gradient(from -90deg, #dfe9e2 0 100%)' }
+  let cursor = 0
+  const stops = segments.map((segment) => {
+    const from = cursor
+    cursor += segment.percent
+    return `${segment.color} ${from}% ${cursor}%`
   })
+  return { background: `conic-gradient(from -90deg, ${stops.join(', ')})` }
 })
-const batchBarMax = computed(() => Math.max(1, ...batchBars.value.map((bar) => bar.value)))
+const batchSpectrum = computed(() => {
+  const source = allHistoryPoints.value.filter((point) => !point.live)
+  const byBatch = new Map()
+  for (const point of source) {
+    const key = point.batch_id ?? point.ts
+    const previous = byBatch.get(key)
+    if (!previous || String(point.ts || '') > String(previous.ts || '')) byBatch.set(key, point)
+  }
+  let points = [...byBatch.values()].sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')))
+  // 环图显示最近一次结果，下方频谱明确排除同一批次
+  const currentBatch = data.value?.batch?.id
+  points = points.filter((point) => currentBatch == null || String(point.batch_id ?? '') !== String(currentBatch))
+  points = points.slice(-36)
+  return points.map((point, index) => {
+    const total = Number(point.total_nodes) || Object.values(point.airports || {})
+      .reduce((sum, item) => sum + Number(item.pool_count || 0), 0)
+    if (!total) return null
+    const published = Math.min(total, Math.max(0, Number(point.total_published) || 0))
+    const available = Math.min(total, Math.max(0, Number(point.total_available) || 0))
+    const availableOnly = Math.max(0, available - published)
+    const unavailable = Math.max(0, total - published - availableOnly)
+    const publishedPct = published / total * 100
+    const availablePct = availableOnly / total * 100
+    const unavailablePct = unavailable / total * 100
+    const date = String(point.ts || '').slice(5, 10).replace('-', '/')
+    const stamp = String(point.ts || '').slice(5, 16).replace('-', '/')
+    return {
+      key: `${point.batch_id ?? 'batch'}-${point.ts ?? index}`,
+      batchId: point.batch_id ?? '—',
+      date,
+      stamp,
+      published,
+      availableOnly,
+      unavailable,
+      publishedPct: Math.round(publishedPct),
+      availablePct: Math.round(availablePct),
+      unavailablePct: Math.round(unavailablePct),
+      title: `批次 #${point.batch_id ?? '—'} · ${stamp} · 已下发 ${published} (${Math.round(publishedPct)}%) · 可用 ${availableOnly} (${Math.round(availablePct)}%) · 不可用 ${unavailable} (${Math.round(unavailablePct)}%)`,
+    }
+  }).filter(Boolean)
+})
+const batchSpectrumSummary = computed(() => {
+  const bars = batchSpectrum.value
+  if (!bars.length) return '暂无历史批次'
+  const last = bars[bars.length - 1]
+  return `${bars.length} 个历史批次 · 最近 ${last.publishedPct}% 已下发`
+})
 const modeRows = computed(() => [
   { icon: 'Files', title: '本地缓存优先', desc: '检测不触发机场拉取', on: true },
   { icon: 'RefreshLeft', title: '失败保留旧缓存', desc: '拉取失败不清空节点', on: true },
@@ -501,7 +536,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.019 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.020 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -635,7 +670,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           <div>
             <div class="card-kicker"><i></i>POOL STATUS</div>
             <h2>节点池状态</h2>
-            <p class="muted">检测构成、实时任务与最近批次合并为一张状态板。</p>
+            <p class="muted">环图取最近一次检测结果，下方频谱只统计更早的历史批次。</p>
           </div>
           <span class="card-chip">{{ qualifiedPct }}% 合格</span>
         </div>
@@ -645,16 +680,14 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
             <div class="status-pane-head">
               <span>COMPOSITION</span>
               <b>检测构成</b>
-              <em>{{ data.nodes_qualified }} / {{ data.nodes_total }}</em>
+              <em>最近一次 · {{ data.nodes_qualified }} / {{ data.nodes_total }}</em>
             </div>
             <div class="status-comp">
-              <div class="double-ring status-ring" :style="ringOuterStyle">
-                <div class="double-ring-inner" :style="ringInnerStyle">
-                  <div class="double-ring-hole">
-                    <b>{{ qualifiedPct }}</b>
-                    <span>QUALIFIED</span>
-                    <small>{{ data.nodes_qualified }} / {{ data.nodes_total }}</small>
-                  </div>
+              <div class="status-donut" :style="donutStyle">
+                <div class="status-donut-hole">
+                  <b>{{ qualifiedPct }}</b>
+                  <span>QUALIFIED</span>
+                  <small>{{ data.nodes_qualified }} / {{ data.nodes_total }}</small>
                 </div>
               </div>
               <div class="status-legend">
@@ -667,7 +700,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 <div v-if="!statusSegments.length" class="status-legend-row">
                   <i style="background:#c7d7cf" /><span>暂无节点</span><b>0</b><em>0%</em>
                 </div>
-                <div class="status-legend-foot">外环下发 {{ publishRatio }}% · {{ publishedTotal }} delivered</div>
+                <div class="status-legend-foot">绿 已下发 · 黄 可用未下发 · 灰 不可用 / 未检测</div>
               </div>
             </div>
           </section>
@@ -709,17 +742,33 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
 
         <div class="status-batch">
           <div class="status-batch-head">
-            <div class="status-batch-id"><b>#{{ data.batch?.id || '—' }}</b><span>{{ data.batch?.processed_count || runtime.done || 0 }} / {{ data.batch?.target_count || data.nodes_total || 0 }} 处理</span></div>
+            <div class="status-batch-id"><b>#{{ data.batch?.id || '—' }}</b><span>{{ data.batch?.processed_count || runtime.done || 0 }} / {{ data.batch?.target_count || data.nodes_total || 0 }} 处理</span><em>最近一次</em></div>
             <div class="status-batch-side"><em>{{ batchRemaining }} 剩余</em><span>{{ batchStatusLabel }}</span></div>
           </div>
-          <div v-if="batchBars.length" class="chart-cols status-bars">
-            <div v-for="bar in batchBars" :key="bar.key" class="col">
-              <b>{{ bar.value }}</b>
-              <div class="col-bar" :class="{ 'is-mutet': bar.value === 0 }" :style="{ height: `${Math.max(7, Math.round(bar.value / batchBarMax * 100))}%` }" />
-              <span>{{ bar.label }}</span>
+          <div class="batch-spectrum-head">
+            <div><span>RECENT BATCHES</span><b>历史批次合格率</b><em>{{ batchSpectrumSummary }}</em></div>
+            <div class="batch-spectrum-legend">
+              <span><i class="is-published" />已下发</span>
+              <span><i class="is-available" />可用</span>
+              <span><i class="is-unavailable" />不可用</span>
             </div>
           </div>
-          <div v-else class="batch-empty status-bars-empty">暂无检测快照</div>
+          <div v-if="batchSpectrum.length" class="batch-spectrum">
+            <div class="batch-spectrum-axis"><span>100%</span><span>50%</span><span>0</span></div>
+            <div class="batch-spectrum-main">
+              <div class="batch-spectrum-cols">
+                <div v-for="bar in batchSpectrum" :key="bar.key" class="batch-spectrum-col" :title="bar.title">
+                  <div class="batch-spectrum-stack">
+                    <i class="is-unavailable" :style="{ flexGrow: bar.unavailablePct }" />
+                    <i class="is-available" :style="{ flexGrow: bar.availablePct }" />
+                    <i class="is-published" :style="{ flexGrow: bar.publishedPct }" />
+                  </div>
+                </div>
+              </div>
+              <div class="batch-spectrum-x"><span>{{ batchSpectrum[0].date }}</span><span>{{ batchSpectrum[Math.floor(batchSpectrum.length / 2)].date }}</span><span>{{ batchSpectrum[batchSpectrum.length - 1].date }}</span></div>
+            </div>
+          </div>
+          <div v-else class="batch-empty status-bars-empty">暂无历史批次</div>
         </div>
 
         <div class="status-foot">

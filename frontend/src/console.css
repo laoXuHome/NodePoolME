@@ -1,4 +1,4 @@
-/* NodePoolME · v2.019 FROST SCORE
+/* NodePoolME · v2.020 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -999,11 +999,16 @@ body::before {
 .status-pane-head b { font-size: 11px; font-weight: 650; color: #355048; }
 .status-pane-head em { margin-left: auto; font-style: normal; font-size: 7.5px; color: #8b9d95; font-variant-numeric: tabular-nums; }
 .status-comp { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 10px; padding-top: 10px; }
-.status-ring { width: 112px; height: 112px; margin: 0 auto; }
-.status-ring .double-ring-inner { inset: 14px; }
-.status-ring .double-ring-hole b { font-size: 26px; }
-.status-ring .double-ring-hole span { margin-top: 3px; font-size: 5.8px; }
-.status-ring .double-ring-hole small { margin-top: 2px; font-size: 6.5px; }
+.status-donut {
+  position: relative; width: 112px; height: 112px; margin: 0 auto; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .46), 0 6px 15px rgba(37, 72, 60, .07);
+}
+.status-donut::before { content: ""; position: absolute; inset: 18px; border-radius: 50%; background: #fbfcfb; }
+.status-donut-hole { position: relative; z-index: 1; text-align: center; }
+.status-donut-hole b { display: block; font-size: 26px; line-height: .85; font-weight: 760; letter-spacing: -.06em; color: var(--np-ink); font-variant-numeric: tabular-nums; }
+.status-donut-hole span { display: block; margin-top: 3px; font-size: 5.8px; font-weight: 700; letter-spacing: .16em; color: #96a69f; }
+.status-donut-hole small { display: block; margin-top: 2px; font-size: 6.5px; color: #8d9e97; }
 .status-legend { min-width: 0; }
 .status-legend-row { display: flex; align-items: center; gap: 5px; padding: 4px 0; border-bottom: 1px solid #f1f5f2; font-size: 8px; color: #63776f; }
 .status-legend-row i { width: 5px; height: 5px; border-radius: 50%; flex: none; }
@@ -1027,13 +1032,33 @@ body::before {
 .status-batch-id { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
 .status-batch-id b { font-size: 18px; line-height: 1; font-weight: 740; letter-spacing: -.04em; color: #1d352e; }
 .status-batch-id span { font-size: 8px; color: #8d9e97; }
+.status-batch-id em { font-style: normal; padding: 1px 6px; border-radius: 99px; background: #f4f8f5; color: #7c9087; font-size: 6.5px; font-weight: 600; }
 .status-batch-side { display: flex; align-items: center; gap: 6px; }
 .status-batch-side em { font-style: normal; padding: 2px 7px; border-radius: 99px; background: #eef6f1; color: #52796a; font-size: 7px; font-weight: 650; }
 .status-batch-side span { font-size: 7px; color: #9aa9a2; }
-.status-bars { min-height: 104px; padding: 7px 2px 3px; }
-.status-bars .col-bar { max-width: 44px; }
-.status-bars .col b { font-size: 8px; }
-.status-bars .col span { font-size: 6.5px; }
+.batch-spectrum-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: 9px; }
+.batch-spectrum-head > div:first-child { min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.batch-spectrum-head > div:first-child span { font-size: 6.4px; font-weight: 700; letter-spacing: .12em; color: #9aa9a2; }
+.batch-spectrum-head > div:first-child b { font-size: 10px; font-weight: 650; color: #355048; }
+.batch-spectrum-head > div:first-child em { font-style: normal; font-size: 6.8px; color: #8fa199; }
+.batch-spectrum-legend { display: flex; align-items: center; gap: 9px; flex: none; }
+.batch-spectrum-legend span { display: inline-flex; align-items: center; gap: 3px; font-size: 6.5px; color: #7d9087; white-space: nowrap; }
+.batch-spectrum-legend i { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+.batch-spectrum-legend .is-published { background: #16A34A; }
+.batch-spectrum-legend .is-available { background: #EAB308; }
+.batch-spectrum-legend .is-unavailable { background: #9CA3AF; }
+.batch-spectrum { display: flex; gap: 6px; margin-top: 7px; padding: 0 2px; }
+.batch-spectrum-axis { width: 22px; height: 90px; flex: none; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; padding-bottom: 1px; font-size: 6px; color: #a1afa8; font-variant-numeric: tabular-nums; }
+.batch-spectrum-main { flex: 1; min-width: 0; }
+.batch-spectrum-cols { height: 90px; display: flex; align-items: stretch; gap: 2px; padding-bottom: 1px; border-bottom: 1px solid #dce8e1; background-image: linear-gradient(to top, transparent calc(50% - 1px), #eef4f0 calc(50% - 1px), #eef4f0 50%); }
+.batch-spectrum-col { flex: 1 1 0; min-width: 2px; display: flex; flex-direction: column; cursor: default; }
+.batch-spectrum-stack { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: 2px 2px 0 0; background: #9CA3AF; transition: filter .14s, opacity .14s; }
+.batch-spectrum-col:hover .batch-spectrum-stack { filter: brightness(1.08); opacity: .92; }
+.batch-spectrum-stack i { display: block; min-height: 0; width: 100%; }
+.batch-spectrum-stack .is-unavailable { background: #9CA3AF; }
+.batch-spectrum-stack .is-available { background: #EAB308; }
+.batch-spectrum-stack .is-published { background: #16A34A; }
+.batch-spectrum-x { display: flex; justify-content: space-between; gap: 8px; padding: 3px 1px 0; font-size: 6px; color: #a0aea7; font-variant-numeric: tabular-nums; }
 .status-bars-empty { min-height: 98px; }
 .status-foot { display: flex; justify-content: space-between; gap: 8px; margin: auto 20px 0; padding-top: 9px; border-top: 1px solid #edf3ef; font-size: 7.5px; color: #8d9e97; }
 .status-foot span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1054,9 +1079,15 @@ body::before {
   .status-pane + .status-pane { padding-left: 0; border-left: 0; border-top: 1px solid #edf3ef; }
   .status-pane { padding-top: 8px; }
   .status-comp { grid-template-columns: 104px minmax(0, 1fr); }
-  .status-ring { width: 104px; height: 104px; }
+  .status-donut { width: 104px; height: 104px; }
+  .status-donut::before { inset: 17px; }
+  .status-donut-hole b { font-size: 24px; }
   .status-batch { margin: 8px 14px 0; }
-  .status-bars { min-height: 96px; }
+  .batch-spectrum { gap: 4px; }
+  .batch-spectrum-axis { width: 18px; height: 84px; }
+  .batch-spectrum-cols { height: 84px; gap: 1.5px; }
+  .batch-spectrum-head { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .batch-spectrum-legend { gap: 7px; }
   .status-foot { margin: 8px 14px 0; flex-wrap: wrap; }
 }
 
