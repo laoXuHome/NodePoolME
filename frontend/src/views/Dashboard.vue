@@ -460,14 +460,29 @@ const gradeBands = computed(() => {
   ]
   return bands.map((band) => ({ ...band, pct: Math.round(band.count / total * 100) }))
 })
+const ringTint = (hex, ratio) => {
+  const value = parseInt(hex.slice(1), 16)
+  const channel = (shift) => {
+    const base = (value >> shift) & 255
+    const target = ratio >= 0 ? 255 : 0
+    const mixed = Math.round(base + (target - base) * Math.abs(ratio))
+    return Math.max(0, Math.min(255, mixed)).toString(16).padStart(2, '0')
+  }
+  return `#${channel(16)}${channel(8)}${channel(0)}`
+}
+// 已下发段向外凸出更多，其余两段轻微外扩，让环的外缘有起伏与厚度
+const donutLift = {
+  published: { outer: 4.6, inner: -0.8 },
+  available: { outer: 1.6, inner: 0.8 },
+  unavailable: { outer: 2.4, inner: 0.4 },
+}
 const donutArcs = computed(() => {
   const segments = statusSegments.value
   if (!segments.length) return []
   const cx = 60
   const cy = 60
-  const inner = 33
-  const outer = 55
-  const lift = 1.4
+  const inner = 34
+  const outer = 53
   const gap = 4.5
   let cursor = -90
   return segments.map((segment) => {
@@ -476,19 +491,24 @@ const donutArcs = computed(() => {
     const end = cursor + sweep - gap / 2
     cursor += sweep
     if (end <= start) return null
+    const lift = donutLift[segment.key] || { outer: 0, inner: 0 }
+    const outerR = outer + lift.outer
+    const innerR = inner + lift.inner
     const point = (radius, angle) => {
       const rad = angle * Math.PI / 180
       return [cx + radius * Math.cos(rad), cy + radius * Math.sin(rad)]
     }
-    const [x0, y0] = point(outer + lift, start)
-    const [x1, y1] = point(outer + lift, end)
-    const [x2, y2] = point(inner + lift, end)
-    const [x3, y3] = point(inner + lift, start)
+    const [x0, y0] = point(outerR, start)
+    const [x1, y1] = point(outerR, end)
+    const [x2, y2] = point(innerR, end)
+    const [x3, y3] = point(innerR, start)
     const large = end - start > 180 ? 1 : 0
     return {
       key: segment.key,
       color: segment.color,
-      d: `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${(outer + lift).toFixed(2)} ${(outer + lift).toFixed(2)} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} L ${x2.toFixed(2)} ${y2.toFixed(2)} A ${(inner + lift).toFixed(2)} ${(inner + lift).toFixed(2)} 0 ${large} 0 ${x3.toFixed(2)} ${y3.toFixed(2)} Z`,
+      light: ringTint(segment.color, 0.14),
+      deep: ringTint(segment.color, -0.08),
+      d: `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${outerR.toFixed(2)} ${outerR.toFixed(2)} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} L ${x2.toFixed(2)} ${y2.toFixed(2)} A ${innerR.toFixed(2)} ${innerR.toFixed(2)} 0 ${large} 0 ${x3.toFixed(2)} ${y3.toFixed(2)} Z`,
     }
   }).filter(Boolean)
 })
@@ -611,7 +631,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.024 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.025 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -760,7 +780,14 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
             <div class="status-comp">
               <div class="status-donut" :class="{ 'is-empty': !donutArcs.length }">
                 <svg class="status-donut-svg" viewBox="0 0 120 120" aria-hidden="true">
-                  <path v-for="arc in donutArcs" :key="arc.key" :d="arc.d" :fill="arc.color" />
+                  <defs>
+                    <linearGradient v-for="arc in donutArcs" :id="`donut-grad-${arc.key}`" :key="`def-${arc.key}`" x1="0.18" y1="0" x2="0.82" y2="1">
+                      <stop offset="0" :stop-color="arc.light" />
+                      <stop offset="0.55" :stop-color="arc.color" />
+                      <stop offset="1" :stop-color="arc.deep" />
+                    </linearGradient>
+                  </defs>
+                  <path v-for="arc in donutArcs" :key="arc.key" :d="arc.d" :fill="`url(#donut-grad-${arc.key})`" />
                 </svg>
                 <div class="status-donut-hole">
                   <b>{{ qualifiedPct }}</b>
