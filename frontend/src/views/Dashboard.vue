@@ -130,9 +130,9 @@ const statusSegments = computed(() => {
   const availableOnly = Math.max(0, available - published)
   const unavailable = Math.max(0, total - published - availableOnly)
   const raw = [
-    { key: 'published', label: '已下发', short: '下发', count: published, color: '#16A34A' },
-    { key: 'available', label: '可用', short: '可用', count: availableOnly, color: '#EAB308' },
-    { key: 'unavailable', label: '不可用', short: '不可用', count: unavailable, color: '#9CA3AF' },
+    { key: 'published', label: '已下发', short: '下发', count: published, color: '#d6a41d' },
+    { key: 'available', label: '可用', short: '可用', count: availableOnly, color: '#3f665c' },
+    { key: 'unavailable', label: '不可用', short: '不可用', count: unavailable, color: '#c8755c' },
   ].filter((item) => item.count > 0)
   if (!raw.length) return []
   const sum = raw.reduce((acc, item) => acc + item.count, 0)
@@ -471,7 +471,7 @@ const donutStyle = computed(() => {
   })
   return { background: `conic-gradient(from -90deg, ${stops.join(', ')})` }
 })
-const batchSpectrum = computed(() => {
+const batchSpectrumAll = computed(() => {
   const source = allHistoryPoints.value.filter((point) => !point.live)
   const byBatch = new Map()
   for (const point of source) {
@@ -483,7 +483,6 @@ const batchSpectrum = computed(() => {
   // 环图显示最近一次结果，下方频谱明确排除同一批次
   const currentBatch = data.value?.batch?.id
   points = points.filter((point) => currentBatch == null || String(point.batch_id ?? '') !== String(currentBatch))
-  points = points.slice(-36)
   return points.map((point, index) => {
     const total = Number(point.total_nodes) || Object.values(point.airports || {})
       .reduce((sum, item) => sum + Number(item.pool_count || 0), 0)
@@ -512,6 +511,61 @@ const batchSpectrum = computed(() => {
     }
   }).filter(Boolean)
 })
+const spectrumEl = ref(null)
+const spectrumWidth = ref(0)
+let spectrumObserver = null
+watch(spectrumEl, (el) => {
+  spectrumObserver?.disconnect()
+  spectrumObserver = null
+  if (!el) return
+  spectrumWidth.value = el.getBoundingClientRect().width
+  if (typeof ResizeObserver === 'undefined') return
+  spectrumObserver = new ResizeObserver((entries) => {
+    spectrumWidth.value = entries[0]?.contentRect?.width || el.getBoundingClientRect().width
+  })
+  spectrumObserver.observe(el)
+}, { flush: 'post' })
+const spectrumPointCount = computed(() => {
+  if (!spectrumWidth.value) return 36
+  return Math.max(10, Math.min(60, Math.floor(spectrumWidth.value / 15)))
+})
+const batchSpectrum = computed(() => batchSpectrumAll.value.slice(-spectrumPointCount.value))
+const smoothTopPath = (values, total = 100) => {
+  const n = values.length
+  if (!n) return ''
+  const y = (value) => total - Math.max(0, Math.min(100, value))
+  if (n === 1) return `M 0 ${y(values[0]).toFixed(2)} L 1000 ${y(values[0]).toFixed(2)}`
+  const step = 1000 / (n - 1)
+  let d = `M 0 ${y(values[0]).toFixed(2)}`
+  for (let i = 1; i < n; i += 1) {
+    const x0 = (i - 1) * step
+    const x1 = i * step
+    const y0 = y(values[i - 1])
+    const y1 = y(values[i])
+    d += ` C ${(x0 + step / 3).toFixed(2)} ${y0.toFixed(2)}, ${(x1 - step / 3).toFixed(2)} ${y1.toFixed(2)}, ${x1.toFixed(2)} ${y1.toFixed(2)}`
+  }
+  return d
+}
+const spectrumPaths = computed(() => {
+  const bars = batchSpectrum.value
+  if (!bars.length) return null
+  const topPath = (values) => smoothTopPath(values)
+  const area = (top) => `${top} L 1000 100 L 0 100 Z`
+  return {
+    available: area(topPath(bars.map((bar) => Math.min(100, bar.publishedPct + bar.availablePct)))),
+    published: area(topPath(bars.map((bar) => bar.publishedPct))),
+  }
+})
+const spectrumHits = computed(() => {
+  const bars = batchSpectrum.value
+  const n = bars.length
+  if (!n) return []
+  return bars.map((bar, index) => {
+    const left = n === 1 ? 0 : Math.max(0, (index - 0.5) / (n - 1) * 1000)
+    const right = n === 1 ? 1000 : Math.min(1000, (index + 0.5) / (n - 1) * 1000)
+    return { key: bar.key, x: left, width: Math.max(0.2, right - left), title: bar.title }
+  })
+})
 const batchSpectrumSummary = computed(() => {
   const bars = batchSpectrum.value
   if (!bars.length) return '暂无历史批次'
@@ -529,14 +583,14 @@ onMounted(() => {
   // 只在检测进行中才轮询，空闲时不做任何定时刷新
   load()
 })
-onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) })
+onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); spectrumObserver?.disconnect() })
 </script>
 
 <template>
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.020 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.021 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -670,7 +724,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           <div>
             <div class="card-kicker"><i></i>POOL STATUS</div>
             <h2>节点池状态</h2>
-            <p class="muted">环图取最近一次检测结果，下方频谱只统计更早的历史批次。</p>
+            <p class="muted">环图取最近一次检测结果，下方波浪图只统计更早的历史批次。</p>
           </div>
           <span class="card-chip">{{ qualifiedPct }}% 合格</span>
         </div>
@@ -700,7 +754,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                 <div v-if="!statusSegments.length" class="status-legend-row">
                   <i style="background:#c7d7cf" /><span>暂无节点</span><b>0</b><em>0%</em>
                 </div>
-                <div class="status-legend-foot">绿 已下发 · 黄 可用未下发 · 灰 不可用 / 未检测</div>
+                <div class="status-legend-foot">金 已下发 · 深绿 可用未下发 · 砖红 不可用 / 未检测</div>
               </div>
             </div>
           </section>
@@ -753,18 +807,19 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               <span><i class="is-unavailable" />不可用</span>
             </div>
           </div>
-          <div v-if="batchSpectrum.length" class="batch-spectrum">
+          <div v-if="batchSpectrum.length && spectrumPaths" class="batch-spectrum">
             <div class="batch-spectrum-axis"><span>100%</span><span>50%</span><span>0</span></div>
-            <div class="batch-spectrum-main">
-              <div class="batch-spectrum-cols">
-                <div v-for="bar in batchSpectrum" :key="bar.key" class="batch-spectrum-col" :title="bar.title">
-                  <div class="batch-spectrum-stack">
-                    <i class="is-unavailable" :style="{ flexGrow: bar.unavailablePct }" />
-                    <i class="is-available" :style="{ flexGrow: bar.availablePct }" />
-                    <i class="is-published" :style="{ flexGrow: bar.publishedPct }" />
-                  </div>
-                </div>
-              </div>
+            <div ref="spectrumEl" class="batch-spectrum-main">
+              <svg class="batch-spectrum-svg" viewBox="0 0 1000 100" preserveAspectRatio="none" role="img" aria-label="历史批次合格率波浪图">
+                <rect x="0" y="0" width="1000" height="100" fill="#c8755c" />
+                <path class="is-available" :d="spectrumPaths.available" fill="#3f665c" />
+                <path class="is-published" :d="spectrumPaths.published" fill="#d6a41d" />
+                <g class="batch-spectrum-hit">
+                  <rect v-for="hit in spectrumHits" :key="hit.key" :x="hit.x" :width="hit.width" y="0" height="100" fill="transparent" pointer-events="all">
+                    <title>{{ hit.title }}</title>
+                  </rect>
+                </g>
+              </svg>
               <div class="batch-spectrum-x"><span>{{ batchSpectrum[0].date }}</span><span>{{ batchSpectrum[Math.floor(batchSpectrum.length / 2)].date }}</span><span>{{ batchSpectrum[batchSpectrum.length - 1].date }}</span></div>
             </div>
           </div>

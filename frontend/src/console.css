@@ -1,4 +1,4 @@
-/* NodePoolME · v2.020 FROST SCORE
+/* NodePoolME · v2.021 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -1044,20 +1044,16 @@ body::before {
 .batch-spectrum-legend { display: flex; align-items: center; gap: 9px; flex: none; }
 .batch-spectrum-legend span { display: inline-flex; align-items: center; gap: 3px; font-size: 6.5px; color: #7d9087; white-space: nowrap; }
 .batch-spectrum-legend i { width: 5px; height: 5px; border-radius: 50%; flex: none; }
-.batch-spectrum-legend .is-published { background: #16A34A; }
-.batch-spectrum-legend .is-available { background: #EAB308; }
-.batch-spectrum-legend .is-unavailable { background: #9CA3AF; }
+.batch-spectrum-legend .is-published { background: #d6a41d; }
+.batch-spectrum-legend .is-available { background: #3f665c; }
+.batch-spectrum-legend .is-unavailable { background: #c8755c; }
 .batch-spectrum { display: flex; gap: 6px; margin-top: 7px; padding: 0 2px; }
-.batch-spectrum-axis { width: 22px; height: 90px; flex: none; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; padding-bottom: 1px; font-size: 6px; color: #a1afa8; font-variant-numeric: tabular-nums; }
+.batch-spectrum-axis { width: 22px; height: 94px; flex: none; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; padding-bottom: 1px; font-size: 6px; color: #a1afa8; font-variant-numeric: tabular-nums; }
 .batch-spectrum-main { flex: 1; min-width: 0; }
-.batch-spectrum-cols { height: 90px; display: flex; align-items: stretch; gap: 2px; padding-bottom: 1px; border-bottom: 1px solid #dce8e1; background-image: linear-gradient(to top, transparent calc(50% - 1px), #eef4f0 calc(50% - 1px), #eef4f0 50%); }
-.batch-spectrum-col { flex: 1 1 0; min-width: 2px; display: flex; flex-direction: column; cursor: default; }
-.batch-spectrum-stack { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: 2px 2px 0 0; background: #9CA3AF; transition: filter .14s, opacity .14s; }
-.batch-spectrum-col:hover .batch-spectrum-stack { filter: brightness(1.08); opacity: .92; }
-.batch-spectrum-stack i { display: block; min-height: 0; width: 100%; }
-.batch-spectrum-stack .is-unavailable { background: #9CA3AF; }
-.batch-spectrum-stack .is-available { background: #EAB308; }
-.batch-spectrum-stack .is-published { background: #16A34A; }
+.batch-spectrum-svg { display: block; width: 100%; height: 90px; overflow: hidden; border-bottom: 1px solid #d5e2da; border-radius: 8px 8px 3px 3px; box-shadow: 0 8px 18px rgba(63, 102, 92, .08); }
+.batch-spectrum-svg path { shape-rendering: geometricPrecision; }
+.batch-spectrum-hit rect { cursor: crosshair; }
+.batch-spectrum-hit rect:hover { fill: rgba(255, 255, 255, .12); }
 .batch-spectrum-x { display: flex; justify-content: space-between; gap: 8px; padding: 3px 1px 0; font-size: 6px; color: #a0aea7; font-variant-numeric: tabular-nums; }
 .status-bars-empty { min-height: 98px; }
 .status-foot { display: flex; justify-content: space-between; gap: 8px; margin: auto 20px 0; padding-top: 9px; border-top: 1px solid #edf3ef; font-size: 7.5px; color: #8d9e97; }
@@ -1084,8 +1080,8 @@ body::before {
   .status-donut-hole b { font-size: 24px; }
   .status-batch { margin: 8px 14px 0; }
   .batch-spectrum { gap: 4px; }
-  .batch-spectrum-axis { width: 18px; height: 84px; }
-  .batch-spectrum-cols { height: 84px; gap: 1.5px; }
+  .batch-spectrum-axis { width: 18px; height: 88px; }
+  .batch-spectrum-svg { height: 84px; }
   .batch-spectrum-head { align-items: flex-start; flex-direction: column; gap: 4px; }
   .batch-spectrum-legend { gap: 7px; }
   .status-foot { margin: 8px 14px 0; flex-wrap: wrap; }
