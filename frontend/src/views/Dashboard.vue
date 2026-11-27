@@ -552,8 +552,8 @@ const spectrumPaths = computed(() => {
   const topPath = (values) => smoothTopPath(values)
   const area = (top) => `${top} L 1000 100 L 0 100 Z`
   return {
-    available: area(topPath(bars.map((bar) => Math.min(100, bar.publishedPct + bar.availablePct)))),
-    published: area(topPath(bars.map((bar) => bar.publishedPct))),
+    available: area(topPath(bars.map((bar) => Math.min(100, bar.unavailablePct + bar.availablePct)))),
+    unavailable: area(topPath(bars.map((bar) => bar.unavailablePct))),
   }
 })
 const spectrumHits = computed(() => {
@@ -590,7 +590,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.021 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.022 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -811,9 +811,35 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
             <div class="batch-spectrum-axis"><span>100%</span><span>50%</span><span>0</span></div>
             <div ref="spectrumEl" class="batch-spectrum-main">
               <svg class="batch-spectrum-svg" viewBox="0 0 1000 100" preserveAspectRatio="none" role="img" aria-label="历史批次合格率波浪图">
-                <rect x="0" y="0" width="1000" height="100" fill="#c8755c" />
-                <path class="is-available" :d="spectrumPaths.available" fill="#3f665c" />
-                <path class="is-published" :d="spectrumPaths.published" fill="#d6a41d" />
+                <defs>
+                  <linearGradient id="np-wave-published" x1="0" y1="0" x2="0.12" y2="1">
+                    <stop offset="0" stop-color="#f1da95" />
+                    <stop offset=".55" stop-color="#e9c45d" />
+                    <stop offset="1" stop-color="#d5a31c" />
+                  </linearGradient>
+                  <linearGradient id="np-wave-available" x1="0" y1="0" x2="0.12" y2="1">
+                    <stop offset="0" stop-color="#bdd8cc" />
+                    <stop offset=".55" stop-color="#8db5a5" />
+                    <stop offset="1" stop-color="#618b7c" />
+                  </linearGradient>
+                  <linearGradient id="np-wave-unavailable" x1="0" y1="0" x2="0.12" y2="1">
+                    <stop offset="0" stop-color="#eccfc4" />
+                    <stop offset=".55" stop-color="#dda593" />
+                    <stop offset="1" stop-color="#cc8570" />
+                  </linearGradient>
+                  <linearGradient id="np-wave-sheen" x1="0" y1="0" x2="0.18" y2="1">
+                    <stop offset="0" stop-color="#ffffff" stop-opacity=".18" />
+                    <stop offset=".3" stop-color="#ffffff" stop-opacity=".06" />
+                    <stop offset=".72" stop-color="#ffffff" stop-opacity="0" />
+                    <stop offset="1" stop-color="#ffffff" stop-opacity=".07" />
+                  </linearGradient>
+                </defs>
+                <rect x="0" y="0" width="1000" height="100" fill="url(#np-wave-published)" />
+                <path class="is-available" :d="spectrumPaths.available" fill="url(#np-wave-available)" />
+                <path class="is-unavailable" :d="spectrumPaths.unavailable" fill="url(#np-wave-unavailable)" />
+                <path class="batch-spectrum-glint" :d="spectrumPaths.available" />
+                <path class="batch-spectrum-glint" :d="spectrumPaths.unavailable" />
+                <rect x="0" y="0" width="1000" height="100" fill="url(#np-wave-sheen)" pointer-events="none" />
                 <g class="batch-spectrum-hit">
                   <rect v-for="hit in spectrumHits" :key="hit.key" :x="hit.x" :width="hit.width" y="0" height="100" fill="transparent" pointer-events="all">
                     <title>{{ hit.title }}</title>
