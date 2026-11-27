@@ -1,4 +1,4 @@
-/* NodePoolME · v2.012 FROST SCORE
+/* NodePoolME · v2.013 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -1033,6 +1033,7 @@ body::before {
   .dash-grid .modecard .mode-list { flex: 1; justify-content: space-evenly; }
 }
 @media (max-width: 1080px) {
+  .scorecard-merged, .statuscard { grid-column: 1 / -1; }
   .statuscard { min-height: 0; }
 }
 @media (max-width: 860px) {
@@ -1044,4 +1045,74 @@ body::before {
   .status-batch { margin: 8px 14px 0; }
   .status-bars { min-height: 96px; }
   .status-foot { margin: 8px 14px 0; flex-wrap: wrap; }
+}
+
+/* ------------------------------------------------ 机场状态评分条（v2.013） */
+.status-score-table .np-score-col-airport { width: 232px; }
+.status-score-table .np-score-col-status { width: 86px; }
+.status-score-table .np-score-col-score { width: 62px; }
+.status-score-table th.is-state { padding-left: 12px; text-align: left; color: #52675e; }
+.status-score-table th.is-state i {
+  display: inline; margin-left: 7px; font-size: 7.5px; font-weight: 500;
+  color: #a1aea8; letter-spacing: 0;
+}
+.status-score-table .np-score-cell.is-state { padding: 8px 12px 9px 12px; text-align: left; }
+.state-score {
+  display: grid; grid-template-columns: minmax(150px, 1fr) auto;
+  align-items: center; gap: 16px; min-width: 0;
+}
+.state-rail { position: relative; min-width: 0; }
+.state-track {
+  position: relative; height: 8px; border-radius: 99px; overflow: hidden;
+  background: #eef4f0; box-shadow: inset 0 1px 1px rgba(40, 70, 58, .05);
+}
+.state-fill { position: absolute; top: 0; bottom: 0; display: block; }
+.state-fill.is-available { left: 0; border-radius: 99px 0 0 99px; background: linear-gradient(90deg, #9bc9b6, #3f665c); }
+.state-fill.is-unavailable { border-radius: 0 99px 99px 0; background: linear-gradient(90deg, #dca28e, #c8755c); }
+.state-fill.is-publish { left: 0; top: auto; bottom: 0; height: 3px; border-radius: 0 2px 2px 0; background: #d6a41d; z-index: 1; }
+.state-pin {
+  position: absolute; top: -4px; width: 3px; height: 16px; border-radius: 3px;
+  background: #d6a41d; transform: translateX(-1.5px); z-index: 2;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .45), 0 2px 5px rgba(170, 124, 12, .22);
+}
+.state-pin::after {
+  content: ""; position: absolute; left: 50%; top: -3px; width: 5px; height: 5px;
+  border-radius: 50%; background: #d6a41d; transform: translateX(-50%);
+}
+.state-metrics { display: grid; grid-template-columns: repeat(4, minmax(62px, auto)); gap: 12px; align-items: end; }
+.state-metric { position: relative; min-width: 0; padding-left: 9px; }
+.state-metric i { position: absolute; left: 0; top: 3px; width: 5px; height: 5px; border-radius: 50%; }
+.state-metric em { display: block; font-style: normal; font-size: 8px; line-height: 1; color: #95a39d; white-space: nowrap; }
+.state-metric b {
+  display: block; margin-top: 4px; font-size: 15.5px; line-height: 1;
+  font-weight: 730; letter-spacing: -.035em; color: #2d463e;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.state-metric.is-available i { background: #3f665c; }
+.state-metric.is-publish i { background: #d6a41d; }
+.state-metric.is-tag i { background: #a9c7b9; }
+.state-metric.is-unavailable i { background: #c8755c; }
+.state-metric.is-publish b { color: #916619; }
+.state-metric.is-tag b { color: #506c5f; }
+.state-metric.is-unavailable b { color: #a44f39; }
+.state-metric b:empty { color: #b9c4bf; }
+.state-empty { font-size: 9px; color: #a3aea8; }
+
+.amc-state { margin-top: 8px; }
+.amc-state .state-metrics.is-compact { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin-top: 8px; }
+.amc-state .state-metric { padding-left: 7px; }
+.amc-state .state-metric i { width: 4px; height: 4px; top: 2px; }
+.amc-state .state-metric em { font-size: 6.5px; }
+.amc-state .state-metric b { margin-top: 3px; font-size: 11.5px; }
+.amc-state .state-track { height: 7px; }
+.amc-state .state-pin { top: -3px; height: 13px; }
+
+@media (max-width: 1080px) {
+  .status-score-table .np-score-col-airport { width: 210px; }
+  .state-metrics { grid-template-columns: repeat(4, minmax(56px, auto)); gap: 9px; }
+  .state-metric b { font-size: 14px; }
+}
+@media (max-width: 860px) {
+  .state-score { grid-template-columns: minmax(120px, 1fr) auto; gap: 10px; }
+  .state-metric b { font-size: 12.5px; }
 }

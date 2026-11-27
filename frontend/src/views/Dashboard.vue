@@ -181,11 +181,6 @@ const qualifiedPct = computed(() => {
   return total ? Math.round(((data.value?.nodes_qualified || 0) / total) * 100) : 0
 })
 
-const rateMetrics = [
-  { key: 'available_rate' },
-  { key: 'publish_rate' },
-  { key: 'tag_rate' },
-]
 function scoreTone(row) {
   if (!row.enabled) return 'is-off'
   if (row.score === null || row.score === undefined) return 'is-empty'
@@ -232,6 +227,15 @@ function rateText(row, key) {
 function metricWidth(row, key) {
   if (!row.enabled || row[key] === null || row[key] === undefined) return 0
   return Math.max(0, Math.min(100, Number(row[key])))
+}
+function unavailableRate(row) {
+  if (!row.enabled || !row.pool_count || row.available_rate === null || row.available_rate === undefined) return null
+  return Math.max(0, Math.min(100, 100 - Number(row.available_rate)))
+}
+function unavailableText(row) {
+  const value = unavailableRate(row)
+  if (value === null) return '—'
+  return `${value % 1 === 0 ? value.toFixed(0) : value.toFixed(1)}%`
 }
 const rankedAirports = computed(() => {
   return [...(data.value?.airport_list || [])].sort((a, b) => {
@@ -488,7 +492,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.012 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.013 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -739,7 +743,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           <div>
             <div class="card-kicker"><i></i>AIRPORT LEDGER</div>
             <h2>机场资产与评分</h2>
-            <p>可用率、下发率、标签率与成熟度；评分按后端权重计算。</p>
+            <p>最后一次检测的可用、下发、标签与不可用；成熟度和评分在右侧。</p>
           </div>
           <div class="chips">
             <span class="card-chip">评分 = {{ scoreWeights.available }} / {{ scoreWeights.publish }} / {{ scoreWeights.tag }}</span>
@@ -748,13 +752,11 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
         </div>
 
         <div v-if="data.airport_list?.length" class="airport-table-wrap">
-          <table class="np-score-table console-score-table">
+          <table class="np-score-table console-score-table status-score-table">
             <colgroup>
               <col class="np-score-col-rank" />
+              <col class="np-score-col-airport" />
               <col />
-              <col class="np-score-col-rate" />
-              <col class="np-score-col-rate" />
-              <col class="np-score-col-rate" />
               <col class="np-score-col-status" />
               <col class="np-score-col-score" />
             </colgroup>
@@ -762,9 +764,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               <tr>
                 <th>#</th>
                 <th class="is-left">机场资产</th>
-                <th>可用率 <i>{{ scoreWeights.available }}%</i></th>
-                <th>下发率 <i>{{ scoreWeights.publish }}%</i></th>
-                <th>标签率 <i>{{ scoreWeights.tag }}%</i></th>
+                <th class="is-state">状态评分 <i>最后一次检测 · 绿可用 / 金下发 / 红不可用</i></th>
                 <th class="is-status">成熟度</th>
                 <th class="is-score">评分</th>
               </tr>
@@ -780,11 +780,24 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
                   </div>
                   <small>{{ row.enabled ? `${row.pool_count} 节点` : `${row.node_count} 缓存` }} · {{ scoreSampleText(row) }}</small>
                 </td>
-                <td v-for="metric in rateMetrics" :key="metric.key" class="np-score-cell">
-                  <div class="np-score-metric">
-                    <b>{{ rateText(row, metric.key) }}</b>
-                    <i v-if="row.enabled" class="np-meter"><s :style="{ width: metricWidth(row, metric.key) + '%' }" /></i>
+                <td class="np-score-cell is-state">
+                  <div v-if="row.enabled && row.pool_count" class="state-score">
+                    <div class="state-rail" :title="`可用 ${rateText(row, 'available_rate')} · 下发 ${rateText(row, 'publish_rate')} · 不可用 ${unavailableText(row)}`">
+                      <div class="state-track">
+                        <i class="state-fill is-available" :style="{ width: metricWidth(row, 'available_rate') + '%' }" />
+                        <i class="state-fill is-unavailable" :style="{ left: metricWidth(row, 'available_rate') + '%', width: (unavailableRate(row) || 0) + '%' }" />
+                        <i class="state-fill is-publish" :style="{ width: metricWidth(row, 'publish_rate') + '%' }" />
+                      </div>
+                      <i class="state-pin is-publish" :style="{ left: metricWidth(row, 'publish_rate') + '%' }" />
+                    </div>
+                    <div class="state-metrics">
+                      <span class="state-metric is-available"><i /><em>可用</em><b>{{ rateText(row, 'available_rate') }}</b></span>
+                      <span class="state-metric is-publish"><i /><em>下发</em><b>{{ rateText(row, 'publish_rate') }}</b></span>
+                      <span class="state-metric is-tag"><i /><em>标签</em><b>{{ rateText(row, 'tag_rate') }}</b></span>
+                      <span class="state-metric is-unavailable"><i /><em>不可用</em><b>{{ unavailableText(row) }}</b></span>
+                    </div>
                   </div>
+                  <div v-else class="state-empty">未启用或缓存池为空</div>
                 </td>
                 <td class="np-score-cell is-status" :title="statusHint(row)">
                   <div class="np-data-status" :class="statusTone(row)"><b>{{ row.data_status_text || '—' }}<em v-if="row.data_status_detail">{{ row.data_status_detail }}</em></b></div>
@@ -811,12 +824,22 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
               </div>
             </div>
             <div class="amc-sub">{{ row.enabled ? `${row.pool_count} 节点` : `${row.node_count} 缓存` }} · {{ scoreSampleText(row) }}</div>
-            <div class="amc-metrics">
-              <div v-for="metric in rateMetrics" :key="`m-${row.id}-${metric.key}`" class="amc-metric">
-                <label>{{ metric.key === 'available_rate' ? '可用' : metric.key === 'publish_rate' ? '下发' : '标签' }}</label>
-                <b>{{ rateText(row, metric.key) }}</b>
-                <i class="np-meter"><s :style="{ width: metricWidth(row, metric.key) + '%' }" /></i>
+            <div class="amc-state">
+              <div v-if="row.enabled && row.pool_count" class="state-rail" :title="`可用 ${rateText(row, 'available_rate')} · 下发 ${rateText(row, 'publish_rate')} · 不可用 ${unavailableText(row)}`">
+                <div class="state-track">
+                  <i class="state-fill is-available" :style="{ width: metricWidth(row, 'available_rate') + '%' }" />
+                  <i class="state-fill is-unavailable" :style="{ left: metricWidth(row, 'available_rate') + '%', width: (unavailableRate(row) || 0) + '%' }" />
+                  <i class="state-fill is-publish" :style="{ width: metricWidth(row, 'publish_rate') + '%' }" />
+                </div>
+                <i class="state-pin is-publish" :style="{ left: metricWidth(row, 'publish_rate') + '%' }" />
               </div>
+              <div v-if="row.enabled && row.pool_count" class="state-metrics is-compact">
+                <span class="state-metric is-available"><i /><em>可用</em><b>{{ rateText(row, 'available_rate') }}</b></span>
+                <span class="state-metric is-publish"><i /><em>下发</em><b>{{ rateText(row, 'publish_rate') }}</b></span>
+                <span class="state-metric is-tag"><i /><em>标签</em><b>{{ rateText(row, 'tag_rate') }}</b></span>
+                <span class="state-metric is-unavailable"><i /><em>不可用</em><b>{{ unavailableText(row) }}</b></span>
+              </div>
+              <div v-else class="state-empty">未启用或缓存池为空</div>
             </div>
           </div>
         </div>
