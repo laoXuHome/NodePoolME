@@ -5,7 +5,8 @@ const props = defineProps({
   regions: { type: Array, default: () => [] },
   score: { type: String, default: '—' },
   available: { type: Number, default: 0 },
-  total: { type: Number, default: 0 }
+  total: { type: Number, default: 0 },
+  compact: { type: Boolean, default: false }
 })
 
 const VIEW_W = 300
@@ -104,7 +105,7 @@ const liveLabel = computed(() => props.total ? `${props.available}/${props.total
 </script>
 
 <template>
-  <div class="rail-network" aria-label="可用节点地区实时网络">
+  <div class="rail-network" :class="{ 'is-compact': compact }" aria-label="可用节点地区实时网络">
     <div class="rail-network-head">
       <span>LIVE NODE MESH</span>
       <b><i></i>{{ liveLabel }}</b>
@@ -248,4 +249,29 @@ const liveLabel = computed(() => props.total ? `${props.available}/${props.total
 @media (max-width: 1280px) {
   .rail-network-map svg { height: 100px; }
 }
+.rail-network.is-compact {
+  width: 290px; height: 108px; padding: 8px 10px; border-radius: 16px;
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr);
+  grid-template-rows: 1fr 1fr;
+  column-gap: 10px; row-gap: 2px;
+  align-content: center;
+}
+.is-compact .rail-network-head {
+  grid-column: 2; grid-row: 1;
+  flex-direction: column; align-items: flex-start; justify-content: flex-start;
+  gap: 3px; font-size: 9.5px; letter-spacing: .08em;
+}
+.is-compact .rail-network-head b { font-size: 14px; gap: 5px; }
+.is-compact .rail-network-map {
+  grid-column: 1; grid-row: 1 / span 2;
+  margin: 0; align-self: center;
+}
+.is-compact .rail-network-map svg { height: 88px; }
+.is-compact .rail-network-foot {
+  grid-column: 2; grid-row: 2;
+  flex-direction: column; align-items: flex-start; justify-content: flex-start;
+  gap: 3px; margin-top: 0; font-size: 9.5px; color: rgba(230, 241, 234, .62);
+}
+.is-compact .rail-network-foot b { font-size: 10.5px; color: rgba(239, 196, 76, .90); }
 </style>

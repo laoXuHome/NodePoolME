@@ -1,4 +1,4 @@
-/* NodePoolME · v2.032 FROST SCORE
+/* NodePoolME · v2.033 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -91,7 +91,7 @@ body::before {
   display: block;
   max-width: none;
   min-height: 100vh;
-  padding-left: 320px;
+  padding-left: 262px;
   background: transparent;
 }
 .np-stage {
@@ -109,21 +109,23 @@ body::before {
   top: 30px;
   bottom: 30px;
   left: 34px;
-  width: 268px;
+  width: 208px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 20px 14px 16px;
-  border-radius: 34px;
+  gap: 10px;
+  padding: 18px 12px 14px;
+  border-radius: 30px;
   border: 1px solid transparent;
   color: #f4f8f2;
   background:
-    radial-gradient(300px 240px at 16% 0%, rgba(255, 255, 255, .06), transparent 64%),
-    linear-gradient(168deg, #2b4a43 0%, #24433c 46%, #1b342e 100%);
+    radial-gradient(240px 220px at 14% 0%, rgba(255, 255, 255, .09), transparent 62%),
+    linear-gradient(166deg, #31534a 0%, #24443c 46%, #172e28 100%);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, .055),
-    inset 0 1px 0 rgba(255, 255, 255, .10),
-    inset 0 -1px 0 rgba(0, 0, 0, .18);
+    inset 0 0 0 1px rgba(255, 255, 255, .06),
+    inset 0 1px 0 rgba(255, 255, 255, .12),
+    inset -1px 0 0 rgba(0, 0, 0, .22),
+    inset 0 -1px 0 rgba(0, 0, 0, .18),
+    -14px 18px 34px rgba(12, 34, 27, .14);
   overflow: visible;
 }
 .np-rail::after {
@@ -183,28 +185,30 @@ body::before {
   flex: 0 0 auto; min-height: 0;
   display: flex; flex-direction: column;
   padding: 2px 0 0;
-  border-top: 1px solid rgba(255, 255, 255, .07);
+  border-top: 0;
   background: transparent;
   border-radius: 0;
   box-shadow: none;
   overflow: visible;
 }
 .np-side-label {
-  padding: 14px 14px 9px;
-  font-size: 8.5px; font-weight: 650; letter-spacing: .18em;
-  color: rgba(223, 234, 227, .30);
+  padding: 4px 8px 10px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .15em;
+  color: rgba(232, 242, 235, .44);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .16);
 }
 .np-rail-nav { display: flex; flex-direction: column; gap: 4px; }
 .np-rail-link {
   position: relative;
   align-self: flex-start;
-  width: fit-content; min-height: 54px;
+  width: fit-content; min-height: 56px;
   display: flex; align-items: center; gap: 12px;
   padding: 0 15px;
-  border: 0; border-radius: 14px;
+  border: 0; border-radius: 15px;
   background: transparent;
-  color: rgba(223, 234, 227, .46);
-  font: inherit; font-size: 15px; font-weight: 520;
+  color: rgba(238, 247, 241, .72);
+  font: inherit; font-size: 16.5px; font-weight: 560;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, .20);
   text-align: left;
   cursor: pointer;
   transition: background .18s ease, color .18s ease, box-shadow .18s ease, border-color .18s ease;
@@ -212,8 +216,11 @@ body::before {
 .np-rail-link .el-icon {
   width: 30px; height: 30px; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 9px;
-  font-size: 19px; color: rgba(223, 234, 227, .38);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .045);
+  border: 1px solid rgba(255, 255, 255, .055);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 4px 10px rgba(0, 0, 0, .10);
+  font-size: 22px; color: rgba(235, 245, 239, .56);
   transition: background .18s ease, color .18s ease;
 }
 .np-rail-label { flex: 1; white-space: nowrap; letter-spacing: -.01em; }
@@ -229,35 +236,38 @@ body::before {
 .np-rail-link.active {
   z-index: 2;
   align-self: flex-start;
-  width: calc(100% + 16px);
-  margin-right: -16px;
+  width: calc(100% + 13px);
+  margin-right: -13px;
   background: #ebf3ef;
-  color: #29453c;
+  color: #234037;
   padding: 0 15px;
-  font-weight: 680;
+  font-weight: 700;
+  text-shadow: none;
   border: 0;
   border-radius: 999px 0 0 999px;
-  box-shadow: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .88),
+    inset 0 -1px 0 rgba(47, 77, 68, .08);
+  -webkit-mask-image:
+    radial-gradient(circle 18px at 100% 0, transparent 17.2px, #000 18px),
+    radial-gradient(circle 18px at 100% 100%, transparent 17.2px, #000 18px);
+  -webkit-mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-composite: source-in;
+  mask-image:
+    radial-gradient(circle 18px at 100% 0, transparent 17.2px, #000 18px),
+    radial-gradient(circle 18px at 100% 100%, transparent 17.2px, #000 18px);
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  mask-composite: intersect;
 }
 .np-rail-link.active:hover { background: #f0f7f3; color: #29453c; }
-/* 右端不做圆角，而是让深色侧栏在上下各让出一个弧形缺口，白色页签直接并入内容区 */
-.np-rail-link.active::before,
-.np-rail-link.active::after {
-  content: ""; position: absolute; right: 0; width: 26px; height: 25px;
-  background: linear-gradient(90deg, #eff8f3 0%, #e6f0eb 52%, #ebf4ef 100%);
-  pointer-events: none; z-index: 2;
-  -webkit-mask: radial-gradient(circle 25px at 0 0, transparent 24.5px, #000 25px);
-  mask: radial-gradient(circle 25px at 0 0, transparent 24.5px, #000 25px);
-}
-.np-rail-link.active::before { top: -25px; }
-.np-rail-link.active::after {
-  bottom: -25px;
-  -webkit-mask: radial-gradient(circle 25px at 0 100%, transparent 24.5px, #000 25px);
-  mask: radial-gradient(circle 25px at 0 100%, transparent 24.5px, #000 25px);
-}
+/* 右端不做圆角，用遮罩在上下各切出一个内凹缺口，透出深色侧栏 */
 .np-rail-link.active .el-icon {
   color: #c29a36;
   background: rgba(194, 154, 54, .12);
+  border-color: rgba(194, 154, 54, .16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55);
 }
 
 .np-rail-spacer { flex: 1; min-height: 4px; }
@@ -268,10 +278,10 @@ body::before {
   background: #213d35;
   border: 1px solid rgba(255, 255, 255, .06);
 }
-.np-rail-sys span { display: block; font-size: 7px; font-weight: 700; letter-spacing: .16em; color: rgba(244, 248, 242, .44); }
-.np-rail-sys b { display: flex; align-items: center; gap: 5px; margin-top: 5px; font-size: 10px; font-weight: 650; color: #eff5ef; }
+.np-rail-sys span { display: block; font-size: 9px; font-weight: 720; letter-spacing: .14em; color: rgba(244, 248, 242, .54); }
+.np-rail-sys b { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 13px; font-weight: 680; color: #f3f8f3; }
 .np-rail-sys b i { width: 5px; height: 5px; border-radius: 50%; background: #efc44c; box-shadow: 0 0 0 3px rgba(239, 196, 76, .15); }
-.np-rail-sys small { display: block; margin-top: 5px; font-size: 8px; line-height: 1.45; color: rgba(244, 248, 242, .50); }
+.np-rail-sys small { display: block; margin-top: 6px; font-size: 10px; line-height: 1.55; color: rgba(244, 248, 242, .68); }
 
 /* mobile rail — C 的深绿横条，不再使用底部 tabbar */
 .np-mrail {
@@ -308,6 +318,52 @@ body::before {
 .np-mrail-link:active { transform: scale(.96); }
 
 /* ---------------------------------------------------------------- command bar */
+.np-stage-headrow {
+  display: flex; align-items: center; gap: 16px;
+  margin: 18px 0 4px 0;
+}
+.np-console-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: fit-content;
+  margin-left: 18px;
+  min-height: 130px;
+  padding: 12px 16px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, .90), rgba(240, 248, 244, .74));
+  border: 1px solid rgba(255, 255, 255, .76);
+  box-shadow:
+    0 18px 38px rgba(24, 56, 46, .10),
+    inset 0 1px 0 rgba(255, 255, 255, .95),
+    inset 0 -1px 0 rgba(47, 77, 68, .06);
+  backdrop-filter: blur(12px);
+}
+.np-console-brand { flex: none; padding: 0; gap: 12px; }
+.np-console-brand .np-rail-mark {
+  width: 44px; height: 44px; border-radius: 13px;
+  background: linear-gradient(150deg, #31544b, #1b342e);
+  color: #fbf7ea; font-size: 21px;
+  box-shadow: 0 8px 18px rgba(18, 43, 35, .22), inset 0 1px 0 rgba(255, 255, 255, .16);
+}
+.np-console-brand .np-rail-brandtext b { color: #203b33; font-size: 21px; letter-spacing: -.03em; }
+.np-console-brand .np-rail-brandtext small { color: #6a7f76; font-size: 9.5px; margin-top: 4px; letter-spacing: .12em; }
+.np-console-page {
+  margin-left: 10px; padding-left: 14px;
+  border-left: 1px solid rgba(47, 77, 68, .16);
+  font-size: 13px; font-weight: 680; color: #5f746b; white-space: nowrap;
+}
+.np-console-mesh { flex: none; width: 290px; }
+.np-console-spacer { flex: 1; min-width: 8px; }
+.np-console-tools { flex: none; display: flex; align-items: center; gap: 10px; }
+@media (max-width: 1320px) { .np-console-tools .np-system-live { display: none; } }
+@media (max-width: 1230px) {
+  .np-console-mesh { display: none; }
+  .np-console-head { min-height: 84px; }
+}
+@media (max-width: 1320px) { .np-console-page { display: none; } }
+@media (max-width: 900px) { .np-console-tools .np-ver { display: none; } }
+
 .np-commandbar {
   position: relative;
   z-index: 30;
@@ -721,13 +777,11 @@ body::before {
 
 /* ---------------------------------------------------------------- responsive */
 @media (max-width: 1280px) {
-  .np-shell.np-console { padding-left: 292px; }
-  .np-rail { width: 244px; left: 34px; top: 28px; bottom: 28px; border-radius: 32px; }
-  .np-rail-brandtext b { font-size: 16.5px; }
-  .np-rail-link { min-height: 48px; font-size: 14.5px; }
-  .np-rail-link.active { width: calc(100% + 16px); margin-right: -16px; }
-  .np-rail-link.active::before, .np-rail-link.active::after { right: 0; width: 26px; }
-  .np-rail { gap: 10px; }
+  .np-shell.np-console { padding-left: 262px; }
+  .np-rail { width: 208px; left: 34px; top: 30px; bottom: 30px; border-radius: 30px; }
+  .np-rail-brandtext b { font-size: 18px; }
+  .np-rail-link { min-height: 52px; font-size: 15.5px; }
+  .np-rail { gap: 8px; }
   .score-body { grid-template-columns: 150px minmax(0, 1fr) 190px; }
   .score-gauge { width: 146px; height: 146px; }
   .score-gauge-hole b { font-size: 47px; }

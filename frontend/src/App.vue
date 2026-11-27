@@ -119,14 +119,6 @@ function onMenu(path) { router.push(path) }
 
   <div v-else-if="authed" class="np-shell np-console">
     <aside v-if="!isMobile" class="np-rail" aria-label="主导航">
-      <div class="np-rail-brand">
-        <div class="np-rail-mark">N</div>
-        <div class="np-rail-brandtext"><b>NODEPOOL</b><small>SCORE ROOM / 评分控制台</small></div>
-      </div>
-
-      <RailNetworkMap :regions="railNetwork.regions" :score="railScoreText"
-                      :available="railNetwork.available" :total="railNetwork.total" />
-
       <div class="np-rail-navglass">
         <div class="np-side-label">WORKSPACE / MENU</div>
         <nav class="np-rail-nav">
@@ -158,7 +150,26 @@ function onMenu(path) { router.push(path) }
     </header>
 
     <section class="np-stage">
-      <header class="np-commandbar">
+      <section v-if="!isMobile" class="np-stage-headrow">
+        <section class="np-console-head">
+          <div class="np-rail-brand np-console-brand">
+            <div class="np-rail-mark">N</div>
+            <div class="np-rail-brandtext"><b>NODEPOOL</b><small>SCORE ROOM / 评分控制台</small></div>
+            <span class="np-console-page">{{ routeMeta.title || '控制总览' }}</span>
+          </div>
+          <div class="np-console-mesh">
+            <RailNetworkMap compact :regions="railNetwork.regions" :score="railScoreText"
+                            :available="railNetwork.available" :total="railNetwork.total" />
+          </div>
+        </section>
+        <div class="np-console-spacer" />
+        <div class="np-console-tools">
+          <span class="np-system-live"><i></i> SYSTEM LIVE</span>
+          <HeaderTools compact />
+        </div>
+      </section>
+
+      <header v-if="isMobile" class="np-commandbar">
         <div class="np-command-crumb">
           <span>NODEPOOL /</span>
           <b>{{ routeMeta.title || '控制总览' }}</b>

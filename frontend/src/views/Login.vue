@@ -49,7 +49,7 @@ async function submit() {
         <div class="login-story-foot">
           <span><i></i> LOCAL FIRST</span>
           <span>检测只读取本地缓存</span>
-          <span>v2.032</span>
+          <span>v2.033</span>
         </div>
       </section>
 
