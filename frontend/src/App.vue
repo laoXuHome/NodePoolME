@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import HeaderTools from './components/HeaderTools.vue'
+import RailNetworkMap from './components/RailNetworkMap.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, checkAuth, logout, state } from './api'
 import { ElMessageBox } from 'element-plus'
@@ -34,10 +35,8 @@ const rail = reactive({
   airports: 0
 })
 const railScoreText = computed(() => rail.score === null ? '—' : Number(rail.score).toFixed(1))
-const railScorePct = computed(() => Math.max(0, Math.min(100, Number(rail.score) || 0)))
-const railRingStyle = computed(() => ({
-  background: `conic-gradient(#efc44c 0 ${railScorePct.value}%, rgba(255,255,255,.13) ${railScorePct.value}% 100%)`
-}))
+const railNetwork = ref({ regions: [], total: 0, available: 0 })
+let railTimer = null
 
 function applyRailSummary(dash) {
   if (!dash) return
@@ -62,8 +61,14 @@ async function loadRailSummary() {
   try { applyRailSummary(await api.get('/api/dashboard?days=7')) } catch { /* 保持上一帧 */ }
 }
 
+async function loadRailNetwork() {
+  if (!state.loggedIn) return
+  try { railNetwork.value = await api.get('/api/nodes/regions') } catch { /* 保持上一帧 */ }
+}
+
 function onDashboard(event) {
   if (event?.detail) applyRailSummary(event.detail)
+  loadRailNetwork()
 }
 
 watch(authed, (value) => { if (value) loadRailSummary() })
@@ -75,6 +80,7 @@ async function refresh() {
   if (!state.loggedIn) { router.replace('/login'); return }
   document.title = `${routeMeta.value.title || '控制台'} · NodePoolME`
   loadRailSummary()
+  loadRailNetwork()
 }
 
 async function doLogout() {
@@ -89,11 +95,13 @@ onMounted(async () => {
   mq.addEventListener('change', syncMobile)
   window.addEventListener('np:dashboard', onDashboard)
   await refresh()
+  railTimer = setInterval(() => { if (state.loggedIn) loadRailNetwork() }, 15000)
 })
 
 onUnmounted(() => {
   if (mq) mq.removeEventListener('change', syncMobile)
   window.removeEventListener('np:dashboard', onDashboard)
+  if (railTimer) clearInterval(railTimer)
 })
 
 router.afterEach((to) => {
@@ -116,14 +124,8 @@ function onMenu(path) { router.push(path) }
         <div class="np-rail-brandtext"><b>NODEPOOL</b><small>SCORE ROOM / 评分控制台</small></div>
       </div>
 
-      <div class="np-rail-score">
-        <div class="np-rail-ring" :style="railRingStyle"><b>{{ railScoreText }}</b><small>%</small></div>
-        <div class="np-rail-scoretext">
-          <span>OVERALL SCORE</span>
-          <b>{{ rail.qualified }} <small>/ {{ rail.total }} 合格</small></b>
-          <i>{{ rail.airports }} AIRPORTS · {{ rail.published }} DELIVERED</i>
-        </div>
-      </div>
+      <RailNetworkMap :regions="railNetwork.regions" :score="railScoreText"
+                      :available="railNetwork.available" :total="railNetwork.total" />
 
       <div class="np-rail-navglass">
         <div class="np-side-label">WORKSPACE / MENU</div>

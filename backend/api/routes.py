@@ -952,6 +952,34 @@ async def list_nodes(q: str = "", airport_id: int | None = None, protocol: str |
             "regions": sorted({n["region"] for n in nodes if n["region"]})}
 
 
+@api.get("/nodes/regions", dependencies=protected)
+async def node_regions():
+    rows = db.rows("""SELECT region, status, COUNT(*) AS count
+                      FROM nodes GROUP BY region, status""")
+    grouped: dict[str, dict] = {}
+    for row in rows:
+        region = (row["region"] or "UNKNOWN").strip().upper() or "UNKNOWN"
+        item = grouped.setdefault(region, {"region": region, "total": 0,
+                                            "available": 0, "unavailable": 0, "unknown": 0})
+        count = int(row["count"] or 0)
+        item["total"] += count
+        status = (row["status"] or "unknown").lower()
+        if status == "available":
+            item["available"] += count
+        elif status == "unavailable":
+            item["unavailable"] += count
+        else:
+            item["unknown"] += count
+    regions = sorted(grouped.values(),
+                     key=lambda item: (-item["available"], -item["total"], item["region"]))
+    return {
+        "regions": regions,
+        "total": sum(item["total"] for item in regions),
+        "available": sum(item["available"] for item in regions),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
 @api.get("/nodes/{node_id}", dependencies=protected)
 async def node_detail(node_id: int):
     node = db.row("""SELECT n.*, a.name AS airport_name FROM nodes n

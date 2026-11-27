@@ -88,3 +88,21 @@ def test_filters_and_reasons():
 if __name__ == "__main__":
     test_filters_and_reasons()
     print("PASS test_filters_and_reasons")
+
+
+def test_regions_endpoint_aggregates_status():
+    with TestClient(app) as client:
+        assert client.post("/api/auth/login", json={"password": "test123"}).status_code == 200
+        ids = _seed()
+        db.execute("UPDATE nodes SET region='hk' WHERE id IN (?,?)",
+                   (ids["fp-fast"], ids["fp-none"]))
+        db.execute("UPDATE nodes SET region='SG', status='unavailable' WHERE id=?",
+                   (ids["fp-slow"],))
+
+        payload = client.get("/api/nodes/regions").json()
+        assert payload["total"] == 3
+        assert payload["available"] == 2
+        assert payload["regions"] == [
+            {"region": "HK", "total": 2, "available": 2, "unavailable": 0, "unknown": 0},
+            {"region": "SG", "total": 1, "available": 0, "unavailable": 1, "unknown": 0},
+        ]
