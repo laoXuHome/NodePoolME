@@ -552,8 +552,8 @@ const spectrumPaths = computed(() => {
   const topPath = (values) => smoothTopPath(values)
   const area = (top) => `${top} L 1000 100 L 0 100 Z`
   return {
-    available: area(topPath(bars.map((bar) => Math.min(100, bar.unavailablePct + bar.availablePct)))),
-    unavailable: area(topPath(bars.map((bar) => bar.unavailablePct))),
+    available: area(topPath(bars.map((bar) => Math.min(100, bar.publishedPct + bar.availablePct)))),
+    published: area(topPath(bars.map((bar) => bar.publishedPct))),
   }
 })
 const spectrumHits = computed(() => {
@@ -590,7 +590,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.022 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.023 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -754,7 +754,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
                 <div v-if="!statusSegments.length" class="status-legend-row">
                   <i style="background:#c7d7cf" /><span>暂无节点</span><b>0</b><em>0%</em>
                 </div>
-                <div class="status-legend-foot">金 已下发 · 深绿 可用未下发 · 砖红 不可用 / 未检测</div>
+                <div class="status-legend-foot">砖红 不可用 / 未检测 · 深绿 可用未下发 · 金 已下发</div>
               </div>
             </div>
           </section>
@@ -802,9 +802,9 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
           <div class="batch-spectrum-head">
             <div><span>RECENT BATCHES</span><b>历史批次合格率</b><em>{{ batchSpectrumSummary }}</em></div>
             <div class="batch-spectrum-legend">
-              <span><i class="is-published" />已下发</span>
-              <span><i class="is-available" />可用</span>
               <span><i class="is-unavailable" />不可用</span>
+              <span><i class="is-available" />可用</span>
+              <span><i class="is-published" />已下发</span>
             </div>
           </div>
           <div v-if="batchSpectrum.length && spectrumPaths" class="batch-spectrum">
@@ -813,32 +813,37 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
               <svg class="batch-spectrum-svg" viewBox="0 0 1000 100" preserveAspectRatio="none" role="img" aria-label="历史批次合格率波浪图">
                 <defs>
                   <linearGradient id="np-wave-published" x1="0" y1="0" x2="0.12" y2="1">
-                    <stop offset="0" stop-color="#f1da95" />
-                    <stop offset=".55" stop-color="#e9c45d" />
-                    <stop offset="1" stop-color="#d5a31c" />
+                    <stop offset="0" stop-color="#f8edcd" />
+                    <stop offset=".5" stop-color="#f2dfae" />
+                    <stop offset="1" stop-color="#e8cd8b" />
                   </linearGradient>
                   <linearGradient id="np-wave-available" x1="0" y1="0" x2="0.12" y2="1">
-                    <stop offset="0" stop-color="#bdd8cc" />
-                    <stop offset=".55" stop-color="#8db5a5" />
-                    <stop offset="1" stop-color="#618b7c" />
+                    <stop offset="0" stop-color="#dcebe4" />
+                    <stop offset=".5" stop-color="#c0d8cd" />
+                    <stop offset="1" stop-color="#a5c4b5" />
                   </linearGradient>
                   <linearGradient id="np-wave-unavailable" x1="0" y1="0" x2="0.12" y2="1">
-                    <stop offset="0" stop-color="#eccfc4" />
-                    <stop offset=".55" stop-color="#dda593" />
-                    <stop offset="1" stop-color="#cc8570" />
+                    <stop offset="0" stop-color="#f6e8e3" />
+                    <stop offset=".5" stop-color="#edcfc4" />
+                    <stop offset="1" stop-color="#dfb6a5" />
                   </linearGradient>
                   <linearGradient id="np-wave-sheen" x1="0" y1="0" x2="0.18" y2="1">
-                    <stop offset="0" stop-color="#ffffff" stop-opacity=".18" />
-                    <stop offset=".3" stop-color="#ffffff" stop-opacity=".06" />
+                    <stop offset="0" stop-color="#ffffff" stop-opacity=".1" />
+                    <stop offset=".3" stop-color="#ffffff" stop-opacity=".03" />
                     <stop offset=".72" stop-color="#ffffff" stop-opacity="0" />
-                    <stop offset="1" stop-color="#ffffff" stop-opacity=".07" />
+                    <stop offset="1" stop-color="#ffffff" stop-opacity=".03" />
                   </linearGradient>
                 </defs>
-                <rect x="0" y="0" width="1000" height="100" fill="url(#np-wave-published)" />
+                <rect x="0" y="0" width="1000" height="100" fill="url(#np-wave-unavailable)" />
+                <g class="batch-spectrum-grid">
+                  <line x1="0" x2="1000" y1="25" y2="25" />
+                  <line x1="0" x2="1000" y1="50" y2="50" />
+                  <line x1="0" x2="1000" y1="75" y2="75" />
+                </g>
                 <path class="is-available" :d="spectrumPaths.available" fill="url(#np-wave-available)" />
-                <path class="is-unavailable" :d="spectrumPaths.unavailable" fill="url(#np-wave-unavailable)" />
+                <path class="is-published" :d="spectrumPaths.published" fill="url(#np-wave-published)" />
                 <path class="batch-spectrum-glint" :d="spectrumPaths.available" />
-                <path class="batch-spectrum-glint" :d="spectrumPaths.unavailable" />
+                <path class="batch-spectrum-glint" :d="spectrumPaths.published" />
                 <rect x="0" y="0" width="1000" height="100" fill="url(#np-wave-sheen)" pointer-events="none" />
                 <g class="batch-spectrum-hit">
                   <rect v-for="hit in spectrumHits" :key="hit.key" :x="hit.x" :width="hit.width" y="0" height="100" fill="transparent" pointer-events="all">
