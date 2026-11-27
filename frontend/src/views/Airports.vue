@@ -234,11 +234,11 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
     <div v-if="isMobile" class="np-mobile-list">
       <div v-for="row in items" :key="row.id" class="np-mobile-card">
         <div class="np-mobile-card-head">
+          <el-switch :model-value="row.enabled" size="small" @change="(v) => toggle(row, v)" />
           <div class="np-mobile-title">{{ row.name }}</div>
           <el-tag v-if="row.last_status === 'error'" type="danger" size="small" style="margin-top:2px">拉取失败</el-tag>
           <el-tag v-else-if="row.last_status === 'ok'" type="success" size="small" style="margin-top:2px">正常</el-tag>
           <el-tag v-else type="info" size="small" style="margin-top:2px">未拉取</el-tag>
-          <el-switch :model-value="row.enabled" size="small" @change="(v) => toggle(row, v)" />
         </div>
         <div class="np-mobile-meta">
           <span>
@@ -276,7 +276,22 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
 
     <div v-if="!isMobile" class="np-card">
       <el-table :data="items" size="default">
-        <el-table-column prop="name" label="机场名称" min-width="120" />
+        <el-table-column min-width="190">
+          <template #header>
+            <div class="np-airport-head"><span class="np-airport-head-switch">启用</span><span>机场名称</span></div>
+          </template>
+          <template #default="{ row }">
+            <div class="np-airport-name" :class="{ 'is-off': !row.enabled }">
+              <el-tooltip :content="row.enabled ? '点击停用：缓存保留，但不进入缓存池、不参与检测与下发' : '已停用：该机场的缓存节点不进入缓存池、不参与检测与下发；重新启用会直接恢复缓存，不会重新拉取'" placement="top">
+                <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
+              </el-tooltip>
+              <div class="np-airport-copy">
+                <b>{{ row.name }}</b>
+                <small v-if="!row.enabled">未启用 · 不入缓存池</small>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="节点" width="72">
           <template #default="{ row }">
             <el-tooltip :content="`总数 = 缓存池 ${row.pool_count} + 已过滤 ${row.filtered_count}`" placement="top">
@@ -324,16 +339,6 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
             </el-tooltip>
             <el-tag v-else-if="row.last_status === 'ok'" type="success" size="small">正常</el-tag>
             <el-tag v-else type="info" size="small">未拉取</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="启用" width="76">
-          <template #default="{ row }">
-            <div class="np-flex" style="align-items:center;gap:8px">
-              <el-switch :model-value="row.enabled" @change="(v) => toggle(row, v)" />
-              <el-tooltip v-if="!row.enabled" content="已停用：该机场的缓存节点不进入缓存池、不参与检测与下发；重新启用会直接恢复缓存，不会重新拉取">
-                <el-tag type="info" size="small">不入缓存池</el-tag>
-              </el-tooltip>
-            </div>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="286">
@@ -470,3 +475,14 @@ onUnmounted(() => { if (mq) mq.removeEventListener('change', syncMobile) })
     </el-drawer>
   </div>
 </template>
+
+<style scoped>
+.np-airport-head { display: flex; align-items: center; gap: 11px; }
+.np-airport-head-switch { width: 40px; flex: none; }
+.np-airport-name { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.np-airport-name :deep(.el-switch) { flex: none; }
+.np-airport-copy { min-width: 0; line-height: 1.35; }
+.np-airport-copy b { display: block; font-weight: 600; color: var(--np-primary, #2f4f45); }
+.np-airport-copy small { display: block; margin-top: 1px; font-size: 10px; color: var(--np-tertiary, #94a39b); }
+.np-airport-name.is-off .np-airport-copy b { color: #89988f; }
+</style>
