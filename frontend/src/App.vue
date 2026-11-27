@@ -130,10 +130,8 @@ function onMenu(path) { router.push(path) }
         <nav class="np-rail-nav">
           <button v-for="m in menus" :key="m.path" class="np-rail-link"
                   :class="{ active: route.path === m.path }" @click="onMenu(m.path)">
-            <span class="np-rail-code">{{ m.code }}</span>
             <el-icon><component :is="m.icon" /></el-icon>
             <span class="np-rail-label">{{ m.label }}</span>
-            <i class="np-rail-ind" />
           </button>
         </nav>
       </div>
