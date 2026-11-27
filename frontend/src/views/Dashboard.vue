@@ -284,18 +284,22 @@ function trendCount(point, row, key) {
 }
 const trendCharts = computed(() => [
   {
-    key: 'publish',
-    title: '下发节点趋势',
-    field: 'published_count',
-    rows: publishChartRows.value,
-    points: trendChartPoints(historyPoints.value, 'published_count', publishChartRows.value),
-  },
-  {
     key: 'available',
-    title: '可用节点趋势',
+    title: '可用节点走势',
+    label: '可用节点',
+    current: data.value?.nodes_available || 0,
     field: 'available_count',
     rows: nodeChartRows.value,
     points: trendChartPoints(availableTrendPoints.value, 'available_count', nodeChartRows.value),
+  },
+  {
+    key: 'publish',
+    title: '下发节点走势',
+    label: '下发节点',
+    current: publishedTotal.value,
+    field: 'published_count',
+    rows: publishChartRows.value,
+    points: trendChartPoints(historyPoints.value, 'published_count', publishChartRows.value),
   },
 ])
 const fetchState = computed(() => {
@@ -452,10 +456,6 @@ const ringOuterStyle = computed(() => ({
 const ringInnerStyle = computed(() => ({
   background: `conic-gradient(#d6a41d 0 ${Math.min(100, qualifiedPct.value)}%, #eee7d4 ${Math.min(100, qualifiedPct.value)}% 100%)`
 }))
-const trendMode = ref('available')
-const activeTrend = computed(() => trendCharts.value.find((chart) => chart.key === trendMode.value) || trendCharts.value[1])
-const activeTrendCurrent = computed(() => trendMode.value === 'publish' ? publishedTotal.value : (data.value?.nodes_available || 0))
-const activeTrendLabel = computed(() => trendMode.value === 'publish' ? '下发节点' : '可用节点')
 const batchBars = computed(() => {
   const points = allHistoryPoints.value.filter((point) => !point.live).slice(-6)
   return points.map((point) => {
@@ -488,7 +488,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.010 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.011 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -595,18 +595,14 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
         </div>
       </article>
 
-      <article class="frostcard trendbig span7">
+      <article v-for="chart in trendCharts" :key="chart.key" class="frostcard trendbig span6 trend-split">
         <div class="trend-head">
           <div class="trend-title">
             <div class="k"><i></i>POOL TREND · {{ trendRangeText }}</div>
-            <h2>{{ activeTrendLabel }}走势</h2>
-            <div class="num"><b>{{ activeTrendCurrent }}</b><small>{{ activeTrendLabel }} · {{ activeTrend.points.length }} 个采样点</small></div>
+            <h2>{{ chart.title }}</h2>
+            <div class="num"><b>{{ chart.current }}</b><small>{{ chart.label }} · {{ chart.points.length }} 个采样点</small></div>
           </div>
           <div class="trend-tools">
-            <div class="seg" role="group" aria-label="趋势指标">
-              <button :class="{ active: trendMode === 'available' }" @click="trendMode = 'available'">可用</button>
-              <button :class="{ active: trendMode === 'publish' }" @click="trendMode = 'publish'">下发</button>
-            </div>
             <div class="seg" role="group" aria-label="趋势区间">
               <button :class="{ active: trendRange === '1d' }" @click="trendRange = '1d'">1D</button>
               <button :class="{ active: trendRange === '7d' }" @click="trendRange = '7d'">7D</button>
@@ -615,13 +611,13 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
           </div>
         </div>
         <div class="trend-chart">
-          <TrendChart :points="activeTrend.points" :rows="activeTrend.rows" :field="activeTrend.field"
+          <TrendChart :points="chart.points" :rows="chart.rows" :field="chart.field"
                       :range="trendRange" :title="''" :palette="AIRPORT_COLORS" />
         </div>
-        <div class="trend-foot"><span>{{ trendRangeText }} · {{ trendSampleText }}</span><b>{{ activeTrendLabel }} {{ activeTrendCurrent }} / {{ data.nodes_total }}</b></div>
+        <div class="trend-foot"><span>{{ trendRangeText }} · {{ trendSampleText }}</span><b>{{ chart.label }} {{ chart.current }} / {{ data.nodes_total }}</b></div>
       </article>
 
-      <article class="frostcard ringcard span5">
+      <article class="frostcard ringcard span6">
         <div class="card-head">
           <div>
             <div class="card-kicker"><i></i>DETECTION COMPOSITION</div>
@@ -653,7 +649,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
         <div class="ring-foot"><span>外环 下发 {{ publishRatio }}%</span><b>{{ publishedTotal }} DELIVERED</b></div>
       </article>
 
-      <article class="frostcard detectcard span4">
+      <article class="frostcard detectcard span6">
         <div class="card-head">
           <div>
             <div class="card-kicker"><i></i>LIVE BATCH</div>
@@ -695,7 +691,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
         </div>
       </article>
 
-      <article class="frostcard batchcard span4">
+      <article class="frostcard batchcard span6">
         <div class="card-head">
           <div>
             <div class="card-kicker"><i></i>BATCH ANALYSIS</div>
@@ -720,7 +716,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
         <div class="batch-foot"><span>{{ trendRangeText }} · {{ trendSampleText }}</span><b>{{ data.batch?.status || 'idle' }}</b></div>
       </article>
 
-      <article class="frostcard modecard span4">
+      <article class="frostcard modecard span6">
         <div class="card-head">
           <div>
             <div class="card-kicker"><i></i>RUN POLICY</div>

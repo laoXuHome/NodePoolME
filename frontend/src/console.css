@@ -1,4 +1,4 @@
-/* NodePoolME · v2.010 FROST SCORE
+/* NodePoolME · v2.011 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -470,7 +470,7 @@ body::before {
 .break-foot b { color: #50655d; }
 
 /* ---------------------------------------------------------------- trend */
-.trendbig { grid-column: span 7; display: flex; flex-direction: column; min-height: 304px; }
+.trendbig { grid-column: span 6; display: flex; flex-direction: column; min-height: 304px; }
 .trend-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 17px 20px 2px; }
 .trend-title { min-width: 0; }
 .trend-title .k { display: flex; align-items: center; gap: 6px; font-size: 7.5px; font-weight: 700; letter-spacing: .15em; color: #98a8a1; }
@@ -488,7 +488,7 @@ body::before {
 .trend-foot b { color: #52675e; font-weight: 620; }
 
 /* ---------------------------------------------------------------- composition ring */
-.ringcard { grid-column: span 5; display: flex; flex-direction: column; min-height: 304px; }
+.ringcard { grid-column: span 6; display: flex; flex-direction: column; min-height: 304px; }
 .ring-body { display: grid; grid-template-columns: 154px minmax(0, 1fr); align-items: center; gap: 10px; flex: 1; padding: 10px 20px 4px; }
 .double-ring { position: relative; width: 146px; height: 146px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 4px auto; }
 .double-ring-inner { position: absolute; inset: 17px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
@@ -507,7 +507,7 @@ body::before {
 .ring-foot b { color: #52675e; font-weight: 650; }
 
 /* ---------------------------------------------------------------- detection */
-.detectcard { grid-column: span 4; display: flex; flex-direction: column; padding-bottom: 12px; }
+.detectcard { grid-column: span 6; display: flex; flex-direction: column; padding-bottom: 12px; }
 .detect-rings { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 10px 18px 8px; }
 .detect-ring { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .gauge-ring { position: relative; width: 96px; height: 96px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
@@ -526,7 +526,7 @@ body::before {
 .detect-stats b { display: block; margin-top: 3px; font-size: 13px; font-weight: 700; color: var(--np-ink); font-variant-numeric: tabular-nums; }
 
 /* ---------------------------------------------------------------- batch */
-.batchcard { grid-column: span 4; display: flex; flex-direction: column; padding-bottom: 12px; }
+.batchcard { grid-column: span 6; display: flex; flex-direction: column; padding-bottom: 12px; }
 .batch-top { display: flex; align-items: baseline; gap: 8px; padding: 10px 19px 4px; }
 .batch-top b { font-size: 28px; line-height: .9; font-weight: 750; letter-spacing: -.05em; color: var(--np-ink); font-variant-numeric: tabular-nums; }
 .batch-top span { font-size: 8.5px; color: #8d9e97; }
@@ -542,7 +542,7 @@ body::before {
 .batch-foot b { color: #52675e; font-weight: 650; }
 
 /* ---------------------------------------------------------------- iOS switches */
-.modecard { grid-column: span 4; display: flex; flex-direction: column; padding-bottom: 12px; }
+.modecard { grid-column: span 6; display: flex; flex-direction: column; padding-bottom: 12px; }
 .mode-list { display: flex; flex-direction: column; gap: 0; padding: 7px 18px 0; }
 .mode-row { display: flex; align-items: center; gap: 9px; padding: 10px 0; border-bottom: 1px solid #edf3ef; }
 .mode-row:last-child { border-bottom: 0; }
