@@ -1,4 +1,4 @@
-/* NodePoolME · v2.025 FROST SCORE
+/* NodePoolME · v2.026 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -1058,14 +1058,28 @@ body::before {
 .batch-spectrum { display: flex; gap: 6px; margin-top: 7px; padding: 0 2px; }
 .batch-spectrum-axis { width: 22px; height: 94px; flex: none; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; padding-bottom: 1px; font-size: 6px; color: #a1afa8; font-variant-numeric: tabular-nums; }
 .batch-spectrum-main { flex: 1; min-width: 0; }
-.batch-spectrum-svg { display: block; width: 100%; height: 90px; overflow: hidden; border-bottom: 1px solid #d5e2da; border-radius: 8px 8px 3px 3px; box-shadow: 0 8px 18px rgba(63, 102, 92, .08); }
+.batch-spectrum-svg {
+  display: block; width: 100%; height: 90px; overflow: hidden; border-radius: 8px 8px 3px 3px;
+  border-bottom: 1px solid rgba(63, 102, 92, .22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .5),
+    inset 1px 0 0 rgba(255, 255, 255, .18),
+    inset -1px 0 0 rgba(63, 102, 92, .08),
+    inset 0 -2px 3px rgba(63, 102, 92, .10),
+    0 8px 18px rgba(63, 102, 92, .08);
+}
 .batch-spectrum-svg path { shape-rendering: geometricPrecision; }
 .batch-spectrum-grid line { stroke: rgba(255, 255, 255, .17); stroke-width: .7; stroke-dasharray: 2.5 5; vector-effect: non-scaling-stroke; }
 .batch-spectrum-grid line:nth-child(2) { stroke: rgba(255, 255, 255, .26); }
 .batch-spectrum-svg .batch-spectrum-glint {
-  fill: none; stroke: rgba(255, 255, 255, .5); stroke-width: .9; pointer-events: none;
-  filter: drop-shadow(0 1px 1px rgba(255, 255, 255, .12));
+  fill: none; stroke: rgba(255, 255, 255, .68); stroke-width: 1; pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgba(255, 255, 255, .22));
 }
+.batch-spectrum-svg .batch-spectrum-glint.is-soft { stroke: rgba(255, 248, 220, .5); stroke-width: .8; }
+.batch-spectrum-svg .batch-spectrum-ridge-shadow {
+  fill: none; stroke: rgba(32, 55, 47, .22); stroke-width: 2.2; pointer-events: none;
+}
+.batch-spectrum-svg .batch-spectrum-ridge-shadow.is-inset { stroke: rgba(120, 82, 14, .18); }
 .batch-spectrum-hit rect { cursor: crosshair; }
 .batch-spectrum-hit rect:hover { fill: rgba(255, 255, 255, .12); }
 .batch-spectrum-x { display: flex; justify-content: space-between; gap: 8px; padding: 3px 1px 0; font-size: 6px; color: #a0aea7; font-variant-numeric: tabular-nums; }

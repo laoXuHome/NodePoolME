@@ -592,9 +592,13 @@ const spectrumPaths = computed(() => {
   if (!bars.length) return null
   const topPath = (values) => smoothTopPath(values)
   const area = (top) => `${top} L 1000 100 L 0 100 Z`
+  const availableTop = topPath(bars.map((bar) => Math.min(100, bar.publishedPct + bar.availablePct)))
+  const publishedTop = topPath(bars.map((bar) => bar.publishedPct))
   return {
-    available: area(topPath(bars.map((bar) => Math.min(100, bar.publishedPct + bar.availablePct)))),
-    published: area(topPath(bars.map((bar) => bar.publishedPct))),
+    available: area(availableTop),
+    published: area(publishedTop),
+    availableTop,
+    publishedTop,
   }
 })
 const spectrumHits = computed(() => {
@@ -631,7 +635,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.025 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.026 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -863,27 +867,31 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
             <div ref="spectrumEl" class="batch-spectrum-main">
               <svg class="batch-spectrum-svg" viewBox="0 0 1000 100" preserveAspectRatio="none" role="img" aria-label="历史批次合格率波浪图">
                 <defs>
-                  <linearGradient id="np-wave-published" x1="0" y1="0" x2="0.12" y2="1">
-                    <stop offset="0" stop-color="#f8edcd" />
-                    <stop offset=".5" stop-color="#f2dfae" />
-                    <stop offset="1" stop-color="#e8cd8b" />
+                  <linearGradient id="np-wave-published" x1="0.06" y1="0" x2="0.94" y2="1">
+                    <stop offset="0" stop-color="#f0cd61" />
+                    <stop offset=".32" stop-color="#dcab24" />
+                    <stop offset=".72" stop-color="#c9960f" />
+                    <stop offset="1" stop-color="#aa7a05" />
                   </linearGradient>
-                  <linearGradient id="np-wave-available" x1="0" y1="0" x2="0.12" y2="1">
-                    <stop offset="0" stop-color="#dcebe4" />
-                    <stop offset=".5" stop-color="#c0d8cd" />
-                    <stop offset="1" stop-color="#a5c4b5" />
+                  <linearGradient id="np-wave-available" x1="0.06" y1="0" x2="0.94" y2="1">
+                    <stop offset="0" stop-color="#b9dbcd" />
+                    <stop offset=".45" stop-color="#6f9789" />
+                    <stop offset="1" stop-color="#3f665c" />
                   </linearGradient>
-                  <linearGradient id="np-wave-unavailable" x1="0" y1="0" x2="0.12" y2="1">
-                    <stop offset="0" stop-color="#f6e8e3" />
-                    <stop offset=".5" stop-color="#edcfc4" />
-                    <stop offset="1" stop-color="#dfb6a5" />
+                  <linearGradient id="np-wave-unavailable" x1="0.06" y1="0" x2="0.94" y2="1">
+                    <stop offset="0" stop-color="#e6b6a3" />
+                    <stop offset=".22" stop-color="#d99881" />
+                    <stop offset="1" stop-color="#bd6c53" />
                   </linearGradient>
-                  <linearGradient id="np-wave-sheen" x1="0" y1="0" x2="0.18" y2="1">
-                    <stop offset="0" stop-color="#ffffff" stop-opacity=".1" />
-                    <stop offset=".3" stop-color="#ffffff" stop-opacity=".03" />
-                    <stop offset=".72" stop-color="#ffffff" stop-opacity="0" />
-                    <stop offset="1" stop-color="#ffffff" stop-opacity=".03" />
+                  <linearGradient id="np-wave-sheen" x1="0" y1="0" x2="0.2" y2="1">
+                    <stop offset="0" stop-color="#ffffff" stop-opacity=".16" />
+                    <stop offset=".22" stop-color="#ffffff" stop-opacity=".05" />
+                    <stop offset=".68" stop-color="#ffffff" stop-opacity="0" />
+                    <stop offset="1" stop-color="#ffffff" stop-opacity=".05" />
                   </linearGradient>
+                  <filter id="np-wave-soft" x="-4%" y="-20%" width="108%" height="140%">
+                    <feGaussianBlur stdDeviation="1.1" />
+                  </filter>
                 </defs>
                 <rect x="0" y="0" width="1000" height="100" fill="url(#np-wave-unavailable)" />
                 <g class="batch-spectrum-grid">
@@ -893,8 +901,10 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
                 </g>
                 <path class="is-available" :d="spectrumPaths.available" fill="url(#np-wave-available)" />
                 <path class="is-published" :d="spectrumPaths.published" fill="url(#np-wave-published)" />
-                <path class="batch-spectrum-glint" :d="spectrumPaths.available" />
-                <path class="batch-spectrum-glint" :d="spectrumPaths.published" />
+                <path class="batch-spectrum-ridge-shadow" :d="spectrumPaths.availableTop" transform="translate(0 1.6)" filter="url(#np-wave-soft)" />
+                <path class="batch-spectrum-ridge-shadow is-inset" :d="spectrumPaths.publishedTop" transform="translate(0 1.6)" filter="url(#np-wave-soft)" />
+                <path class="batch-spectrum-glint" :d="spectrumPaths.availableTop" />
+                <path class="batch-spectrum-glint is-soft" :d="spectrumPaths.publishedTop" />
                 <rect x="0" y="0" width="1000" height="100" fill="url(#np-wave-sheen)" pointer-events="none" />
                 <g class="batch-spectrum-hit">
                   <rect v-for="hit in spectrumHits" :key="hit.key" :x="hit.x" :width="hit.width" y="0" height="100" fill="transparent" pointer-events="all">
@@ -936,8 +946,8 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
       <article class="frostcard tablecard span12">
         <div class="table-head">
           <div>
-            <div class="card-kicker"><i></i>AIRPORT LEDGER</div>
-            <h2>机场资产与评分</h2>
+            <div class="card-kicker"><i></i>AIRPORT OVERVIEW</div>
+            <h2>机场概况 · 评分</h2>
             <p>最后一次检测的可用、下发、标签与不可用；成熟度和评分在右侧。</p>
           </div>
           <div class="chips">
