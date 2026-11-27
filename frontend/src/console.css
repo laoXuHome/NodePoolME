@@ -1,4 +1,4 @@
-/* NodePoolME · v2.011 FROST SCORE
+/* NodePoolME · v2.012 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -542,7 +542,7 @@ body::before {
 .batch-foot b { color: #52675e; font-weight: 650; }
 
 /* ---------------------------------------------------------------- iOS switches */
-.modecard { grid-column: span 6; display: flex; flex-direction: column; padding-bottom: 12px; }
+.modecard { grid-column: span 5; display: flex; flex-direction: column; padding-bottom: 12px; }
 .mode-list { display: flex; flex-direction: column; gap: 0; padding: 7px 18px 0; }
 .mode-row { display: flex; align-items: center; gap: 9px; padding: 10px 0; border-bottom: 1px solid #edf3ef; }
 .mode-row:last-child { border-bottom: 0; }
@@ -973,4 +973,75 @@ body::before {
   .scoreband-merged > div { padding: 0 8px; }
   .scoreband-merged > div:nth-child(3) { padding-left: 0; border-left: 0; }
   .score-merged-foot { margin: 10px 14px 0; padding-top: 8px; }
+}
+
+
+/* ------------------------------------------------ 节点池状态合并板（v2.012） */
+.statuscard { grid-column: span 7; display: flex; flex-direction: column; min-height: 400px; padding-bottom: 12px; }
+.status-body { display: grid; grid-template-columns: minmax(0, 1.04fr) minmax(0, .96fr); gap: 18px; padding: 4px 20px 0; }
+.status-pane { min-width: 0; padding: 9px 0 4px; }
+.status-pane + .status-pane { padding-left: 18px; border-left: 1px solid #edf3ef; }
+.status-pane-head { display: flex; align-items: baseline; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid #edf3ef; }
+.status-pane-head span { font-size: 6.8px; font-weight: 700; letter-spacing: .13em; color: #9aa9a2; }
+.status-pane-head b { font-size: 11px; font-weight: 650; color: #355048; }
+.status-pane-head em { margin-left: auto; font-style: normal; font-size: 7.5px; color: #8b9d95; font-variant-numeric: tabular-nums; }
+.status-comp { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 10px; padding-top: 10px; }
+.status-ring { width: 112px; height: 112px; margin: 0 auto; }
+.status-ring .double-ring-inner { inset: 14px; }
+.status-ring .double-ring-hole b { font-size: 26px; }
+.status-ring .double-ring-hole span { margin-top: 3px; font-size: 5.8px; }
+.status-ring .double-ring-hole small { margin-top: 2px; font-size: 6.5px; }
+.status-legend { min-width: 0; }
+.status-legend-row { display: flex; align-items: center; gap: 5px; padding: 4px 0; border-bottom: 1px solid #f1f5f2; font-size: 8px; color: #63776f; }
+.status-legend-row i { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+.status-legend-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-legend-row b { margin-left: auto; font-size: 10px; color: #27433a; font-variant-numeric: tabular-nums; }
+.status-legend-row em { width: 24px; text-align: right; font-style: normal; font-size: 7px; color: #9aa9a2; font-variant-numeric: tabular-nums; }
+.status-legend-foot { margin-top: 7px; font-size: 6.8px; line-height: 1.45; color: #9aa9a2; }
+.status-gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 9px; }
+.status-gauge { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.status-gauge-ring { width: 78px; height: 78px; }
+.status-gauge-ring::before { inset: 8px; }
+.status-gauge-ring b { font-size: 18px; }
+.status-gauge-ring b small { font-size: 6.5px; }
+.status-gauge span { font-size: 7.2px; font-weight: 620; color: #71857c; }
+.status-current { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: #f5f9f6; font-size: 7px; line-height: 1.45; color: #84968e; }
+.status-current b { display: block; font-size: 8.5px; font-weight: 620; color: #50655d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status-actions { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
+.status-actions .el-button { margin: 0 !important; height: 26px; min-height: 26px; padding: 0 9px; font-size: 8.5px; }
+.status-batch { margin: 10px 20px 0; padding-top: 10px; border-top: 1px solid #edf3ef; }
+.status-batch-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.status-batch-id { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.status-batch-id b { font-size: 18px; line-height: 1; font-weight: 740; letter-spacing: -.04em; color: #1d352e; }
+.status-batch-id span { font-size: 8px; color: #8d9e97; }
+.status-batch-side { display: flex; align-items: center; gap: 6px; }
+.status-batch-side em { font-style: normal; padding: 2px 7px; border-radius: 99px; background: #eef6f1; color: #52796a; font-size: 7px; font-weight: 650; }
+.status-batch-side span { font-size: 7px; color: #9aa9a2; }
+.status-bars { min-height: 104px; padding: 7px 2px 3px; }
+.status-bars .col-bar { max-width: 44px; }
+.status-bars .col b { font-size: 8px; }
+.status-bars .col span { font-size: 6.5px; }
+.status-bars-empty { min-height: 98px; }
+.status-foot { display: flex; justify-content: space-between; gap: 8px; margin: auto 20px 0; padding-top: 9px; border-top: 1px solid #edf3ef; font-size: 7.5px; color: #8d9e97; }
+.status-foot span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (min-width: 1081px) and (max-width: 1320px) {
+  .statuscard { grid-column: span 8; }
+  .modecard { grid-column: span 4; }
+}
+@media (min-width: 1081px) {
+  .dash-grid .modecard .mode-list { flex: 1; justify-content: space-evenly; }
+}
+@media (max-width: 1080px) {
+  .statuscard { min-height: 0; }
+}
+@media (max-width: 860px) {
+  .status-body { grid-template-columns: 1fr; gap: 2px; padding: 4px 14px 0; }
+  .status-pane + .status-pane { padding-left: 0; border-left: 0; border-top: 1px solid #edf3ef; }
+  .status-pane { padding-top: 8px; }
+  .status-comp { grid-template-columns: 104px minmax(0, 1fr); }
+  .status-ring { width: 104px; height: 104px; }
+  .status-batch { margin: 8px 14px 0; }
+  .status-bars { min-height: 96px; }
+  .status-foot { margin: 8px 14px 0; flex-wrap: wrap; }
 }

@@ -488,7 +488,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.011 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.012 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -617,106 +617,105 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
         <div class="trend-foot"><span>{{ trendRangeText }} · {{ trendSampleText }}</span><b>{{ chart.label }} {{ chart.current }} / {{ data.nodes_total }}</b></div>
       </article>
 
-      <article class="frostcard ringcard span6">
-        <div class="card-head">
+      <article class="frostcard statuscard span7">
+        <div class="card-head status-head">
           <div>
-            <div class="card-kicker"><i></i>DETECTION COMPOSITION</div>
-            <h2>检测构成</h2>
-            <p class="muted">外环下发占比，内环合格节点</p>
+            <div class="card-kicker"><i></i>POOL STATUS</div>
+            <h2>节点池状态</h2>
+            <p class="muted">检测构成、实时任务与最近批次合并为一张状态板。</p>
           </div>
           <span class="card-chip">{{ qualifiedPct }}% 合格</span>
         </div>
-        <div class="ring-body">
-          <div class="double-ring" :style="ringOuterStyle">
-            <div class="double-ring-inner" :style="ringInnerStyle">
-              <div class="double-ring-hole">
-                <b>{{ qualifiedPct }}</b>
-                <span>QUALIFIED</span>
-                <small>{{ data.nodes_qualified }} / {{ data.nodes_total }}</small>
+
+        <div class="status-body">
+          <section class="status-pane">
+            <div class="status-pane-head">
+              <span>COMPOSITION</span>
+              <b>检测构成</b>
+              <em>{{ data.nodes_qualified }} / {{ data.nodes_total }}</em>
+            </div>
+            <div class="status-comp">
+              <div class="double-ring status-ring" :style="ringOuterStyle">
+                <div class="double-ring-inner" :style="ringInnerStyle">
+                  <div class="double-ring-hole">
+                    <b>{{ qualifiedPct }}</b>
+                    <span>QUALIFIED</span>
+                    <small>{{ data.nodes_qualified }} / {{ data.nodes_total }}</small>
+                  </div>
+                </div>
+              </div>
+              <div class="status-legend">
+                <div v-for="segment in statusSegments" :key="segment.key" class="status-legend-row">
+                  <i :style="{ background: segment.color }" />
+                  <span>{{ segment.label }}</span>
+                  <b>{{ segment.count }}</b>
+                  <em>{{ segment.percent }}%</em>
+                </div>
+                <div v-if="!statusSegments.length" class="status-legend-row">
+                  <i style="background:#c7d7cf" /><span>暂无节点</span><b>0</b><em>0%</em>
+                </div>
+                <div class="status-legend-foot">外环下发 {{ publishRatio }}% · {{ publishedTotal }} delivered</div>
               </div>
             </div>
-          </div>
-          <div class="ring-legend">
-            <div v-for="segment in statusSegments" :key="segment.key" class="ring-row">
-              <i :style="{ background: segment.color }" />
-              <span>{{ segment.label }}</span>
-              <b>{{ segment.count }}</b>
-              <em>{{ segment.percent }}%</em>
+          </section>
+
+          <section class="status-pane">
+            <div class="status-pane-head">
+              <span>LIVE TASK</span>
+              <b>检测任务</b>
+              <em>{{ runStateText }}</em>
             </div>
-            <div v-if="!statusSegments.length" class="ring-row"><i style="background:#c7d7cf" /><span>暂无节点</span><b>0</b><em>0%</em></div>
-          </div>
+            <div class="status-gauges">
+              <div class="status-gauge">
+                <div class="gauge-ring status-gauge-ring" :style="{ background: `conic-gradient(#3f665c 0 ${latencyPct}%, #edf3ef ${latencyPct}% 100%)` }"><b>{{ latencyPct }}<small>%</small></b></div>
+                <span>延迟检测</span>
+              </div>
+              <div class="status-gauge">
+                <div class="gauge-ring status-gauge-ring" :style="{ background: `conic-gradient(#d6a41d 0 ${tagPct}%, #edf3ef ${tagPct}% 100%)` }"><b>{{ tagPct }}<small>%</small></b></div>
+                <span>标签检测</span>
+              </div>
+            </div>
+            <div class="status-current">
+              <template v-if="runtime.running && runtime.current">
+                <b :title="runtime.current.node">{{ runtime.current.node }}</b>
+                <span>{{ runtime.current.airport || '—' }} · G {{ runtime.current.g ?? '—' }}ms · W {{ runtime.current.w ?? '—' }}ms · {{ runtime.current.result }}</span>
+              </template>
+              <template v-else>
+                <b>调度空闲</b>
+                <span>已处理 {{ runtime.done || 0 }} / {{ runtime.total || 0 }} 项 · 批次 #{{ runtime.batch_id || data.batch?.id || '—' }}</span>
+              </template>
+            </div>
+            <div class="status-actions">
+              <el-button v-if="!runtime.running" size="small" type="primary" @click="runNow">立即检测</el-button>
+              <el-button v-if="runtime.running && !runtime.paused" size="small" :disabled="runtime.stop_requested" @click="pauseCycle">暂停</el-button>
+              <el-button v-if="runtime.running && runtime.paused" size="small" type="success" :disabled="runtime.stop_requested" @click="resumeCycle">继续</el-button>
+              <el-button v-if="runtime.running" size="small" type="danger" plain :disabled="runtime.stop_requested" @click="stopCycle">{{ runtime.stop_requested ? '正在停止' : '停止检测' }}</el-button>
+            </div>
+          </section>
         </div>
-        <div class="ring-foot"><span>外环 下发 {{ publishRatio }}%</span><b>{{ publishedTotal }} DELIVERED</b></div>
+
+        <div class="status-batch">
+          <div class="status-batch-head">
+            <div class="status-batch-id"><b>#{{ data.batch?.id || '—' }}</b><span>{{ data.batch?.processed_count || runtime.done || 0 }} / {{ data.batch?.target_count || data.nodes_total || 0 }} 处理</span></div>
+            <div class="status-batch-side"><em>{{ batchRemaining }} 剩余</em><span>{{ batchStatusLabel }}</span></div>
+          </div>
+          <div v-if="batchBars.length" class="chart-cols status-bars">
+            <div v-for="bar in batchBars" :key="bar.key" class="col">
+              <b>{{ bar.value }}</b>
+              <div class="col-bar" :class="{ 'is-mutet': bar.value === 0 }" :style="{ height: `${Math.max(7, Math.round(bar.value / batchBarMax * 100))}%` }" />
+              <span>{{ bar.label }}</span>
+            </div>
+          </div>
+          <div v-else class="batch-empty status-bars-empty">暂无检测快照</div>
+        </div>
+
+        <div class="status-foot">
+          <span>批次 #{{ data.batch?.id || '—' }} · 耗时 {{ batchDuration }} · 剩余 {{ batchRemaining }}</span>
+          <span>{{ trendRangeText }} · {{ trendSampleText }}</span>
+        </div>
       </article>
 
-      <article class="frostcard detectcard span6">
-        <div class="card-head">
-          <div>
-            <div class="card-kicker"><i></i>LIVE BATCH</div>
-            <h2>检测任务</h2>
-            <p class="muted">{{ runtime.engine || 'mihomo' }} · {{ runtime.batch_id ? `#${runtime.batch_id}` : '等待批次' }}</p>
-          </div>
-          <span class="card-chip">{{ runStateText }}</span>
-        </div>
-        <div class="detect-rings">
-          <div class="detect-ring">
-            <div class="gauge-ring" :style="{ background: `conic-gradient(#3f665c 0 ${latencyPct}%, #edf3ef ${latencyPct}% 100%)` }"><b>{{ latencyPct }}<small>%</small></b></div>
-            <span>延迟检测</span>
-          </div>
-          <div class="detect-ring">
-            <div class="gauge-ring" :style="{ background: `conic-gradient(#d6a41d 0 ${tagPct}%, #edf3ef ${tagPct}% 100%)` }"><b>{{ tagPct }}<small>%</small></b></div>
-            <span>标签检测</span>
-          </div>
-        </div>
-        <div class="detect-current">
-          <template v-if="runtime.running && runtime.current">
-            <b :title="runtime.current.node">{{ runtime.current.node }}</b>
-            <span>{{ runtime.current.airport || '—' }} · G {{ runtime.current.g ?? '—' }}ms · W {{ runtime.current.w ?? '—' }}ms · {{ runtime.current.result }}</span>
-          </template>
-          <template v-else>
-            <b>调度空闲</b>
-            <span>已处理 {{ runtime.done || 0 }} / {{ runtime.total || 0 }} 项 · 批次 #{{ runtime.batch_id || data.batch?.id || '—' }}</span>
-          </template>
-        </div>
-        <div class="detect-actions">
-          <el-button v-if="!runtime.running" size="small" type="primary" @click="runNow">立即检测</el-button>
-          <el-button v-if="runtime.running && !runtime.paused" size="small" :disabled="runtime.stop_requested" @click="pauseCycle">暂停</el-button>
-          <el-button v-if="runtime.running && runtime.paused" size="small" type="success" :disabled="runtime.stop_requested" @click="resumeCycle">继续</el-button>
-          <el-button v-if="runtime.running" size="small" type="danger" plain :disabled="runtime.stop_requested" @click="stopCycle">{{ runtime.stop_requested ? '正在停止' : '停止检测' }}</el-button>
-        </div>
-        <div class="detect-stats">
-          <div><span>批次</span><b>#{{ data.batch?.id || '—' }}</b></div>
-          <div><span>耗时</span><b>{{ batchDuration }}</b></div>
-          <div><span>剩余</span><b>{{ batchRemaining }}</b></div>
-        </div>
-      </article>
-
-      <article class="frostcard batchcard span6">
-        <div class="card-head">
-          <div>
-            <div class="card-kicker"><i></i>BATCH ANALYSIS</div>
-            <h2>批次分析</h2>
-            <p class="muted">近 6 次检测快照的可用节点</p>
-          </div>
-          <span class="card-chip">{{ batchStatusLabel }}</span>
-        </div>
-        <div class="batch-top">
-          <b>#{{ data.batch?.id || '—' }}</b>
-          <span>{{ data.batch?.processed_count || runtime.done || 0 }} / {{ data.batch?.target_count || data.nodes_total || 0 }} 处理</span>
-          <em>{{ batchRemaining }} 剩余</em>
-        </div>
-        <div v-if="batchBars.length" class="chart-cols">
-          <div v-for="bar in batchBars" :key="bar.key" class="col">
-            <b>{{ bar.value }}</b>
-            <div class="col-bar" :class="{ 'is-mutet': bar.value === 0 }" :style="{ height: `${Math.max(7, Math.round(bar.value / batchBarMax * 100))}%` }" />
-            <span>{{ bar.label }}</span>
-          </div>
-        </div>
-        <div v-else class="batch-empty">暂无检测快照</div>
-        <div class="batch-foot"><span>{{ trendRangeText }} · {{ trendSampleText }}</span><b>{{ data.batch?.status || 'idle' }}</b></div>
-      </article>
-
-      <article class="frostcard modecard span6">
+      <article class="frostcard modecard span5">
         <div class="card-head">
           <div>
             <div class="card-kicker"><i></i>RUN POLICY</div>
