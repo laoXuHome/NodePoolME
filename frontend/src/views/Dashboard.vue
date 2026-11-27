@@ -635,7 +635,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.026 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.027 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -850,6 +850,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
         </div>
 
         <div class="status-batch">
+          <div class="status-batch-title"><i></i>历史<span></span></div>
           <div class="status-batch-head">
             <div class="status-batch-id"><b>#{{ data.batch?.id || '—' }}</b><span>{{ data.batch?.processed_count || runtime.done || 0 }} / {{ data.batch?.target_count || data.nodes_total || 0 }} 处理</span><em>最近一次</em></div>
             <div class="status-batch-side"><em>{{ batchRemaining }} 剩余</em><span>{{ batchStatusLabel }}</span></div>

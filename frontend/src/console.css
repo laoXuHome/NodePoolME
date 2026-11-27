@@ -1,4 +1,4 @@
-/* NodePoolME · v2.026 FROST SCORE
+/* NodePoolME · v2.027 FROST SCORE
    C 布局：深绿浮动外壳，导航直接落在重底色上，仅激活项用金色强调。
    E 评分：整体评分环、机场评分轨道、评分拆解与趋势/构成/批次。
    全部面板使用不透明实底，不做透明玻璃。 */
@@ -1036,6 +1036,9 @@ body::before {
 .status-actions { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
 .status-actions .el-button { margin: 0 !important; height: 26px; min-height: 26px; padding: 0 9px; font-size: 8.5px; }
 .status-batch { margin: 10px 20px 0; padding-top: 10px; border-top: 1px solid #edf3ef; }
+.status-batch-title { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 8.5px; font-weight: 700; letter-spacing: .1em; color: #566d63; }
+.status-batch-title i { width: 4.5px; height: 4.5px; border-radius: 50%; background: #d6a41d; flex: none; }
+.status-batch-title span { flex: 1; height: 1px; background: linear-gradient(90deg, #e5efe9 0%, rgba(229, 239, 233, 0) 100%); }
 .status-batch-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .status-batch-id { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
 .status-batch-id b { font-size: 18px; line-height: 1; font-weight: 740; letter-spacing: -.04em; color: #1d352e; }
