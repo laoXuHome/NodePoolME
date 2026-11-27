@@ -126,7 +126,7 @@ function onMenu(path) { router.push(path) }
       </div>
 
       <div class="np-rail-navglass">
-        <div class="np-side-label">FROSTED MENU</div>
+        <div class="np-side-label">WORKSPACE / MENU</div>
         <nav class="np-rail-nav">
           <button v-for="m in menus" :key="m.path" class="np-rail-link"
                   :class="{ active: route.path === m.path }" @click="onMenu(m.path)">

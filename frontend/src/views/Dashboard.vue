@@ -364,7 +364,7 @@ function shortTs(ts) {
   return String(ts).replace(/^\d{4}-/, '').replace('T', ' ').slice(0, 11)
 }
 
-/* ------------------------------------------------ v2.004 C×E 评分主卡 */
+/* ------------------------------------------------ v2.005 C×E 评分主卡 */
 const enabledAirports = computed(() => (data.value?.airport_list || []).filter((row) => row.enabled))
 const scoredAirports = computed(() => enabledAirports.value.filter((row) => Number.isFinite(Number(row.score))))
 const overallScoreValue = computed(() => {
@@ -488,7 +488,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value) }
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.004 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.005 · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
