@@ -245,3 +245,152 @@ def test_summary_and_dashboard_expose_real_storage_only():
     assert dash["version_no"] == summary["current"]["version_no"]
     assert dash["preferred_business"]["global"] == 1
     assert dash["total"] == 1
+
+
+def _identity_snapshot():
+    n1 = seed_node("身份")
+    seed_states()
+    mark(n1, ["standard"])
+    make_run()
+    first = final_service.snapshot("manual")
+    return n1, first
+
+
+def _mutate_identity(node_id: int, mutation: str):
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with db.transaction() as conn:
+        if mutation == "node_name":
+            conn.execute("UPDATE np_nodes SET current_name=? WHERE id=?", ("身份新名", node_id))
+        elif mutation == "server":
+            conn.execute("UPDATE np_nodes SET server=? WHERE id=?", ("10.9.8.7", node_id))
+        elif mutation == "port":
+            conn.execute("UPDATE np_nodes SET port=? WHERE id=?", (8443, node_id))
+        elif mutation == "airport_name":
+            aid = conn.execute("SELECT airport_id FROM np_nodes WHERE id=?", (node_id,)).fetchone()[0]
+            conn.execute("UPDATE airports SET name=? WHERE id=?", ("身份新机场", aid))
+        elif mutation == "airport_id":
+            aid = conn.execute(
+                """INSERT INTO airports(name,url,enabled,interval_minutes,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?)""",
+                ("身份第二机场", "https://identity-second.example/sub", 1, 60, stamp, stamp),
+            ).lastrowid
+            conn.execute("UPDATE np_nodes SET airport_id=? WHERE id=?", (int(aid), node_id))
+        else:
+            raise AssertionError(mutation)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_fields"),
+    [
+        ("node_name", {"node_name"}),
+        ("server", {"server"}),
+        ("port", {"port"}),
+        ("airport_name", {"airport_name"}),
+        ("airport_id", {"airport_id", "airport_name"}),
+    ],
+)
+def test_saved_node_identity_change_creates_version_without_add_remove(mutation, expected_fields):
+    node_id, first = _identity_snapshot()
+    old_id = first["version"]["id"]
+    old_version = final_service.version(old_id)
+    old_node = next(c for c in old_version["categories"] if c["code"] == "standard")["nodes"][0]
+    assert old_node["node_id"] == node_id
+    assert old_node["node_name"] == "身份"
+    assert old_node["server"] == "127.0.0.1"
+    assert old_node["port"] == 443
+    assert old_node["airport_name"] == "身份机场"
+
+    _mutate_identity(node_id, mutation)
+
+    # Same P5 run: an identity change must still create a version.
+    changed = final_service.auto_snapshot()
+    assert changed["created"] is True
+    assert changed["version"]["previous_version_id"] == old_id
+    assert history_count() == 2
+
+    diff = final_service.diff(changed["version"]["id"])
+    standard = next(c for c in diff["categories"] if c["code"] == "standard")
+    assert [n["node_id"] for n in standard["added"]] == []
+    assert [n["node_id"] for n in standard["removed"]] == []
+    assert [n["node_id"] for n in standard["retained"]] == [node_id]
+    retained = standard["retained"][0]
+    assert {item["field"] for item in retained["changed_fields"]} == expected_fields
+    assert retained["before"]["node_id"] == retained["after"]["node_id"] == node_id
+
+    new_node = next(c for c in final_service.current()["categories"] if c["code"] == "standard")["nodes"][0]
+    assert new_node["node_id"] == node_id
+    if mutation == "node_name":
+        assert new_node["node_name"] == "身份新名"
+    elif mutation == "server":
+        assert new_node["server"] == "10.9.8.7"
+    elif mutation == "port":
+        assert new_node["port"] == 8443
+    elif mutation == "airport_name":
+        assert new_node["airport_name"] == "身份新机场"
+    else:
+        assert new_node["airport_id"] != old_node["airport_id"]
+        assert new_node["airport_name"] == "身份第二机场"
+
+    # The old snapshot keeps the original identity; it is not rewritten in place.
+    still_old = final_service.version(old_id)
+    original = next(c for c in still_old["categories"] if c["code"] == "standard")["nodes"][0]
+    assert original == old_node
+
+    # No further identity change: repeated snapshots stay unchanged.
+    for _ in range(3):
+        again = final_service.snapshot("manual")
+        assert again["created"] is False
+        assert again["reason"] == "unchanged"
+    assert history_count() == 2
+
+
+def test_legacy_membership_signature_does_not_force_duplicate_version():
+    """Upgrading v2.044 membership signatures must not create a duplicate."""
+    import hashlib
+
+    n1 = seed_node("旧签")
+    seed_states()
+    mark(n1, ["standard"])
+    make_run()
+    first = final_service.snapshot("manual")
+    version_id = first["version"]["id"]
+
+    legacy = {code: [] for code in CATEGORIES}
+    with db.transaction() as conn:
+        row = conn.execute(
+            "SELECT category,node_id FROM np6_entries WHERE version_id=?",
+            (version_id,),
+        ).fetchall()
+        for item in row:
+            legacy[item["category"]].append(int(item["node_id"]))
+        for code in legacy:
+            legacy[code].sort()
+        import json
+        legacy_hash = hashlib.sha256(
+            json.dumps(legacy, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        detail = json.loads(conn.execute(
+            "SELECT detail_json FROM np6_versions WHERE id=?", (version_id,)
+        ).fetchone()[0])
+        detail.pop("signature_version", None)
+        conn.execute(
+            "UPDATE np6_versions SET signature=?, detail_json=? WHERE id=?",
+            (legacy_hash, json.dumps(detail, ensure_ascii=False, separators=(",", ":")), version_id),
+        )
+
+    unchanged = final_service.snapshot("manual")
+    assert unchanged["created"] is False
+    assert unchanged["reason"] == "unchanged"
+    assert history_count() == 1
+
+    # A real identity change after the legacy signature still creates a version.
+    with db.transaction() as conn:
+        conn.execute("UPDATE np_nodes SET current_name=? WHERE id=?", ("旧签新名", n1))
+    upgraded = final_service.snapshot("manual")
+    assert upgraded["created"] is True
+    assert history_count() == 2
+    retained = next(
+        c for c in final_service.diff(upgraded["version"]["id"])["categories"]
+        if c["code"] == "standard"
+    )["retained"][0]
+    assert [item["field"] for item in retained["changed_fields"]] == ["node_name"]

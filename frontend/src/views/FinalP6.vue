@@ -293,7 +293,7 @@ onMounted(loadAll)
       <div class="p6-section-head">
         <div>
           <h3>版本差异 · {{ versionLabel(displayVersion) }} ↔ {{ previousNo }}</h3>
-          <p>按类别独立计算新增、移除和保留，节点跨类别变化不会被合并或互相覆盖。</p>
+          <p>按类别独立计算新增、移除和保留；节点 ID 不变但名称、机场、地址或端口变化仍记为保留，并标注变更字段。</p>
         </div>
         <div class="p6-diff-totals">
           <span class="is-added">+{{ totalChanges.added }} 新增</span>
@@ -321,7 +321,12 @@ onMounted(loadAll)
           <div class="p6-diff-row">
             <i class="is-retained">保留</i>
             <div>
-              <span v-for="n in c.retained" :key="`k-${n.node_id}`">= {{ n.node_name }} <small>{{ n.airport_name }}</small></span>
+              <template v-for="n in c.retained" :key="`k-${n.node_id}`">
+                <span>= {{ n.node_name }} <small>{{ n.airport_name }}</small></span>
+                <em v-if="n.changed_fields?.length" class="p6-change-note">
+                  信息变更：{{ n.changed_fields.map(f => f.label).join('、') }}
+                </em>
+              </template>
               <em v-if="!c.retained.length">无</em>
             </div>
           </div>
@@ -479,6 +484,7 @@ onMounted(loadAll)
 .p6-diff-row span { display: block; font-size: 9px; color: #385046; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .p6-diff-row small { color: #9aa79e; }
 .p6-diff-row em { font-style: normal; font-size: 9px; color: #a3aea7; }
+.p6-diff-row em.p6-change-note { color: #8a6a2f; font-size: 8px; padding-left: 1px; white-space: normal; }
 .p6-count-chips { display: flex; gap: 3px; flex-wrap: wrap; }
 .p6-count-chips span { font-size: 8px; padding: 1px 3px; border-radius: 3px; background: rgba(47,143,98,.08); color: #526a5e; }
 .p6-delta { display: inline-block; font-size: 10px; margin-right: 4px; color: #2f6f5b; }

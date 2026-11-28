@@ -19,6 +19,15 @@ CATEGORY_LABELS = p5_store.CATEGORY_LABELS
 CATEGORY_TITLES = p5_store.CATEGORY_TITLES
 CATEGORY_CODES = p5_store.CATEGORY_CODES
 
+SIGNATURE_VERSION = 2
+IDENTITY_FIELDS = (
+    ("node_name", "节点名称"),
+    ("airport_id", "机场 ID"),
+    ("airport_name", "机场名称"),
+    ("server", "服务器地址"),
+    ("port", "端口"),
+)
+
 _DDL = (
     """CREATE TABLE IF NOT EXISTS np6_versions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -169,15 +178,82 @@ def collect_entries(conn: sqlite3.Connection) -> list[dict]:
     return result
 
 
+def _identity_scalar(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    return text if text else None
+
+
+def identity_of(item: dict) -> list:
+    """Saved identity fields that must invalidate a snapshot when they change."""
+    return [
+        int(item["node_id"]),
+        _identity_scalar(item.get("node_name")),
+        _identity_scalar(item.get("airport_id")),
+        _identity_scalar(item.get("airport_name")),
+        _identity_scalar(item.get("server")),
+        _identity_scalar(item.get("port")),
+    ]
+
+
+def identity_map(entries: list[dict]) -> dict[tuple[str, int], list]:
+    return {
+        (str(item["category"]), int(item["node_id"])): identity_of(item)
+        for item in entries
+    }
+
+
+def identity_changes(before: dict | None, after: dict | None) -> list[dict]:
+    """Return human-readable field changes for the same node/category."""
+    if not before or not after:
+        return []
+    result = []
+    for field, label in IDENTITY_FIELDS:
+        old = _identity_scalar(before.get(field))
+        new = _identity_scalar(after.get(field))
+        if old != new:
+            result.append({
+                "field": field,
+                "label": label,
+                "before": before.get(field),
+                "after": after.get(field),
+            })
+    return result
+
+
 def signature_of(entries: list[dict]) -> str:
-    """Only membership defines a result version; score noise must not bump it."""
+    """Membership plus saved identity; score noise must not bump a version."""
     payload = {code: [] for code in CATEGORIES}
     for item in entries:
-        payload.setdefault(item["category"], []).append(int(item["node_id"]))
+        payload.setdefault(item["category"], []).append(identity_of(item))
     for code in payload:
-        payload[code].sort()
-    raw = _json(payload).encode("utf-8")
+        payload[code].sort(key=lambda value: value[0])
+    raw = _json({"signature_version": SIGNATURE_VERSION, "categories": payload}).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def needs_snapshot(conn: sqlite3.Connection, entries: list[dict], current: dict | None) -> bool:
+    """Whether the P5 preferred projection differs from the current version.
+
+    v2.044 versions used a membership-only signature.  On upgrade they must not
+    create a duplicate version merely because the signature algorithm changed:
+    for those versions compare the saved identity of the current entries instead.
+    """
+    if current is None:
+        return True
+    signature = signature_of(entries)
+    if current.get("signature") == signature:
+        return False
+    detail = _loads(current.get("detail_json"), {}) or {}
+    if int(detail.get("signature_version") or 1) >= SIGNATURE_VERSION:
+        return True
+    old_entries = entries_of(conn, int(current["id"]))
+    return identity_map(entries) != identity_map(old_entries)
 
 
 def category_counts(entries: list[dict]) -> dict[str, int]:
@@ -264,7 +340,11 @@ def changes_of(conn: sqlite3.Connection, version_id: int, category: str | None =
     result = []
     for row in rows:
         item = dict(row)
-        item["detail"] = _loads(item.pop("detail_json"), {}) or {}
+        detail = _loads(item.pop("detail_json"), {}) or {}
+        item["detail"] = detail
+        item["before"] = detail.get("before")
+        item["after"] = detail.get("after")
+        item["changed_fields"] = detail.get("changed_fields") or []
         result.append(item)
     return result
 
@@ -380,7 +460,7 @@ def create_version(conn: sqlite3.Connection, entries: list[dict], previous: dict
          int(source_run["id"]), source_run.get("finished_at") or source_run.get("started_at"),
          signature,
          _json({"six_categories": category_counts, "changes": total_changes,
-                "empty": not entries})),
+                "empty": not entries, "signature_version": SIGNATURE_VERSION})),
     )
     version_id = int(cur.lastrowid)
 
@@ -410,7 +490,8 @@ def create_version(conn: sqlite3.Connection, entries: list[dict], previous: dict
                      node.get("node_name"), node.get("airport_name"),
                      before.get("score") if before else None,
                      after.get("score") if after else None,
-                     _json({"before": before or None, "after": after or None})),
+                     _json({"before": before or None, "after": after or None,
+                            "changed_fields": identity_changes(before, after)})),
                 )
 
     record_event(conn, "snapshot_created", version_id=version_id, reason=trigger,
@@ -441,7 +522,7 @@ def summary(conn: sqlite3.Connection) -> dict:
     can_snapshot = False
     if run and run.get("status") == "success":
         entries = collect_entries(conn)
-        pending = current is None or signature_of(entries) != (current or {}).get("signature")
+        pending = needs_snapshot(conn, entries, current_row)
         can_snapshot = pending
     categories = []
     for code in CATEGORIES:

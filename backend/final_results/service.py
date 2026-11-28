@@ -93,7 +93,7 @@ def _snapshot_locked(trigger: str) -> dict:
             signature = store.signature_of(entries)
             counts = store.category_counts(entries)
             previous_row = store.latest_version(conn)
-            if previous_row and previous_row.get("signature") == signature:
+            if previous_row and not store.needs_snapshot(conn, entries, previous_row):
                 store.record_event(conn, "snapshot_unchanged", version_id=previous_row.get("id"),
                                    reason=trigger,
                                    detail={"run_id": run.get("id"), "total": len(entries)})
@@ -150,13 +150,9 @@ def auto_snapshot() -> dict:
                 return {"created": False, "reason": "run_not_success",
                         "run_status": run.get("status")}
             entries = store.collect_entries(conn)
-            signature = store.signature_of(entries)
             current_row = store.latest_version(conn)
-            if current_row and current_row.get("signature") == signature:
+            if current_row and not store.needs_snapshot(conn, entries, current_row):
                 return {"created": False, "reason": "unchanged",
-                        "version_no": current_row.get("version_no")}
-            if current_row and str(current_row.get("source_run_id")) == str(run.get("id")):
-                return {"created": False, "reason": "same_run",
                         "version_no": current_row.get("version_no")}
         return _snapshot_locked("auto")
     finally:
