@@ -10,6 +10,7 @@ const businessSummary = ref(null)
 const competition = computed(() => data.value?.competition || null)
 const finalResult = computed(() => data.value?.final_result || null)
 const finalDelivery = computed(() => data.value?.final_delivery || null)
+const unifiedSubscription = computed(() => data.value?.unified_subscription || null)
 // 趋势图配色：深金、深绿、灰绿、铜棕、橄榄，和整页的磨砂评分室同一色域
 const AIRPORT_COLORS = ['#a8751c', '#2f6555', '#5d7f70', '#9a5a37', '#7c8b60',
   '#b58a3a', '#45685d', '#8a6a2f', '#3f6d68', '#b06a32', '#6f8078', '#c0a15a']
@@ -46,6 +47,7 @@ function goBusiness() { window.location.hash = '#/business' }
 function goCompetition() { window.location.hash = '#/competition' }
 function goFinal() { window.location.hash = '#/final' }
 function goFinalFilter() { window.location.hash = '#/final-filter' }
+function goUnified() { window.location.hash = '#/unified-subscription' }
 
 async function load() {
   loading.value = true
@@ -740,6 +742,32 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
         <div><span>启用关键词</span><b>{{ finalDelivery.enabled_rules || 0 }} / {{ finalDelivery.total_rules || 0 }}</b><small>{{ finalDelivery.matched_rules || 0 }} 条有命中</small></div>
         <div class="is-version"><span>来源版本</span><b>{{ finalDelivery.version_no || '尚未生成' }}</b><small>复用 P6.1，不新建</small></div>
         <div class="is-note"><span>重算时间</span><b>{{ finalDelivery.computed_at ? formatTs(finalDelivery.computed_at).slice(5, 16) : '—' }}</b><small>仅过滤预览</small></div>
+      </div>
+    </section>
+
+    <section v-if="unifiedSubscription" class="dash-final dash-unified">
+      <div class="dash-final-head">
+        <div>
+          <h2>统一订阅生成 · P6.2.2</h2>
+          <p>六类最终优选合并去重、经 P6.2.1 过滤后生成一份统一节点集合；四种格式关联同一批次，只做后台预览与管理员下载。</p>
+        </div>
+        <button class="dash-final-link" @click="goUnified">查看统一订阅 →</button>
+      </div>
+      <div class="dash-final-grid dash-unified-grid">
+        <div class="is-total"><span>统一订阅节点</span><b>{{ unifiedSubscription.nodes || 0 }}</b><small>最终输出</small></div>
+        <div class="is-filtered"><span>关键词过滤</span><b>{{ unifiedSubscription.filtered || 0 }}</b><small>不进入客户端</small></div>
+        <div><span>GPT 标签</span><b>{{ unifiedSubscription.labels?.gpt || 0 }}</b><small>ChatGPT</small></div>
+        <div><span>YT 标签</span><b>{{ unifiedSubscription.labels?.yt || 0 }}</b><small>YouTube</small></div>
+        <div><span>TG 标签</span><b>{{ unifiedSubscription.labels?.tg || 0 }}</b><small>Telegram</small></div>
+        <div><span>GH 标签</span><b>{{ unifiedSubscription.labels?.gh || 0 }}</b><small>GitHub</small></div>
+        <div class="is-time"><span>最近生成</span><b>{{ unifiedSubscription.last_generated ? formatTs(unifiedSubscription.last_generated).slice(5, 16) : '尚未生成' }}</b><small>{{ unifiedSubscription.p6_version_no || '—' }} / R{{ unifiedSubscription.revision || 0 }}</small></div>
+        <div :class="{ 'is-pending': unifiedSubscription.stale }"><span>批次状态</span><b class="is-state">{{ unifiedSubscription.stale ? '已过期' : unifiedSubscription.status === 'success' ? '已生成' : unifiedSubscription.status === 'empty' ? '空订阅' : unifiedSubscription.status === 'not_generated' ? '未生成' : unifiedSubscription.status }}</b><small>{{ unifiedSubscription.stale ? '需重新生成' : '版本一致' }}</small></div>
+      </div>
+      <div class="dash-unified-formats">
+        <span v-for="key in ['clash', 'singbox', 'base64', 'loon']" :key="key" :class="`st-${unifiedSubscription.formats?.[key] || 'not_generated'}`">
+          {{ key === 'clash' ? 'Clash / Mihomo' : key === 'singbox' ? 'sing-box' : key === 'base64' ? 'Base64' : 'Loon' }}
+          · {{ unifiedSubscription.formats?.[key] === 'success' ? '成功' : unifiedSubscription.formats?.[key] === 'failed' ? '失败' : unifiedSubscription.formats?.[key] === 'empty' ? '空订阅' : '未生成' }}
+        </span>
       </div>
     </section>
 

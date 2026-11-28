@@ -39,6 +39,8 @@ from backend.final_results import service as final_service
 from backend.final_results.store import FinalError
 from backend.final_filter import service as final_filter_service
 from backend.final_filter.store import FinalFilterError
+from backend.unified_subscription import service as unified_subscription_service
+from backend.unified_subscription.service import UnifiedError
 from backend.scoring import eligibility, sampler
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
@@ -568,6 +570,7 @@ async def dashboard(days: int = 7):
         "competition": competition_service.dashboard_summary(),
         "final_result": final_service.dashboard_summary(),
         "final_delivery": final_filter_service.dashboard_summary(),
+        "unified_subscription": unified_subscription_service.dashboard(),
         "publish_schedule": {
             "enabled": db.get("sub_publish_enabled", "0") == "1",
             "mode": db.get("sub_publish_mode", "time"),
@@ -2167,6 +2170,54 @@ def final_filter_restore_defaults():
 @api.post("/final-filter/recompute", dependencies=protected)
 def final_filter_recompute():
     return final_filter_service.recompute()
+
+
+# ---------------------------------------------------------------------------- P6.2.2 unified subscription
+@api.get("/unified-subscription/summary", dependencies=protected)
+def unified_subscription_summary():
+    try:
+        return unified_subscription_service.summary()
+    except UnifiedError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+
+
+@api.get("/unified-subscription/history", dependencies=protected)
+def unified_subscription_history(limit: int = 20):
+    try:
+        return unified_subscription_service.history(limit=limit)
+    except UnifiedError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+
+
+@api.get("/unified-subscription/formats/{fmt}", dependencies=protected)
+def unified_subscription_format(fmt: str, batch_id: int | None = None):
+    try:
+        return unified_subscription_service.format_content(fmt, batch_id=batch_id)
+    except UnifiedError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+
+
+@api.post("/unified-subscription/generate", dependencies=protected)
+def unified_subscription_generate():
+    try:
+        return unified_subscription_service.generate("manual")
+    except UnifiedError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+
+
+@api.get("/unified-subscription/download/{fmt}", dependencies=protected)
+def unified_subscription_download(fmt: str):
+    try:
+        item = unified_subscription_service.download(fmt)
+    except UnifiedError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+    headers = {
+        "Content-Disposition": f'attachment; filename="{item["filename"]}"',
+        "X-NodePoolME-Batch": item["batch_no"],
+        "X-NodePoolME-Nodes": str(item["node_count"]),
+        "Cache-Control": "no-store",
+    }
+    return Response(content=item["content"], media_type=item["media_type"], headers=headers)
 
 
 # ---------------------------------------------------------------------------- P5 competition

@@ -29,9 +29,10 @@ const menus = [
   { path: '/competition', label: '智能竞争', short: '竞争', code: '08', icon: 'Trophy' },
   { path: '/final', label: '最终优选', short: '优选', code: '09', icon: 'CollectionTag' },
   { path: '/final-filter', label: '最终过滤', short: '过滤', code: '10', icon: 'Filter' },
-  { path: '/groups', label: '检测标签', short: '标签', code: '11', icon: 'Aim' },
-  { path: '/subscription', label: '订阅分发', short: '订阅', code: '12', icon: 'Link' },
-  { path: '/settings', label: '系统设置', short: '设置', code: '13', icon: 'Setting' }
+  { path: '/unified-subscription', label: '统一订阅', short: '统一', code: '11', icon: 'Promotion' },
+  { path: '/groups', label: '检测标签', short: '标签', code: '12', icon: 'Aim' },
+  { path: '/subscription', label: '订阅分发', short: '订阅', code: '13', icon: 'Link' },
+  { path: '/settings', label: '系统设置', short: '设置', code: '14', icon: 'Setting' }
 ]
 
 const rail = reactive({
