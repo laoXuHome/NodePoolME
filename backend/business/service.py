@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import time
 from datetime import datetime, timedelta
 from typing import Awaitable, Callable
 
@@ -13,13 +12,13 @@ from backend.health import prober
 from backend.health import service as health_service
 from backend.testers import engine as engine_mod
 
-target_probe: Callable[..., Awaitable[dict]] = prober.probe_target
+# All business probes run through the tested node's own SOCKS listener.
+# There is intentionally no control-plane target availability probe here:
+# a server-side failure must never be interpreted as the target being down.
 node_probe: Callable[..., Awaitable[dict]] = prober.probe_target
 prepare_ports: Callable[[list[dict]], Awaitable[dict[int, int]]] = health_service.prepare_ports
 
-_selftest_cache: dict[tuple[int, int], tuple[float, dict]] = {}
 _batch_task: asyncio.Task | None = None
-SELFTEST_TTL = 300.0
 TARGET_DEADLINE = 20.0
 
 
@@ -73,7 +72,7 @@ def _unknown_result(business: str, target: dict, reason: str) -> dict:
         "target_url": target["url"], "status": "unknown", "reason": reason,
         "http_status": None, "http_ms": None, "tls_ms": None, "tcp_ms": None,
         "stages": stages, "duration_ms": 0, "started_at": stamp(), "finished_at": stamp(),
-        "target_selftest": "unknown",
+        "target_selftest": "node_proxy",
     }
 
 
@@ -100,7 +99,7 @@ def _classify(result: dict) -> tuple[str, str | None]:
     return "unknown", result.get("reason") or "incomplete_https"
 
 
-def _shape(result: dict, business: str, target: dict, selftest: str) -> dict:
+def _shape(result: dict, business: str, target: dict, probe_via: str) -> dict:
     https = _stage(result, "https")
     tls = _stage(result, "tls")
     tcp = _stage(result, "tcp")
@@ -112,69 +111,10 @@ def _shape(result: dict, business: str, target: dict, selftest: str) -> dict:
         "http_ms": https.get("latency_ms"), "tls_ms": tls.get("latency_ms"),
         "tcp_ms": tcp.get("latency_ms"), "stages": result.get("stages") or [],
         "duration_ms": result.get("duration_ms") or 0,
-        "target_selftest": selftest,
+        "target_selftest": probe_via,
         "started_at": result.get("started_at") or stamp(),
         "finished_at": result.get("finished_at") or stamp(),
     }
-
-
-def _target_available(result: dict) -> bool:
-    return bool(result.get("available"))
-
-
-def _record_target_probe(target: dict, result: dict) -> None:
-    stages = result.get("stages") or []
-    https = next((s for s in stages if s.get("stage") == "https"), {})
-    available = _target_available(result)
-    status = "success" if available else (result.get("status") if result.get("status") in store.CLASSIFICATIONS else "unknown")
-    with db.transaction() as conn:
-        store.record_target_check(
-            int(target["id"]), status, available=available,
-            http_status=(https.get("detail") or {}).get("status"),
-            http_ms=https.get("latency_ms"),
-            duration_ms=result.get("duration_ms"),
-            detail={"reason": result.get("reason"), "available": available,
-                    "stages": stages},
-            conn=conn,
-        )
-
-
-async def _target_selftests(targets: list[dict], *, force: bool = False) -> dict[int, dict]:
-    results: dict[int, dict] = {}
-    async def one(target: dict) -> tuple[int, dict]:
-        tid = int(target["id"])
-        key = (tid, int(target["config_version"]))
-        cached = _selftest_cache.get(key)
-        if not force and cached and time.monotonic() - cached[0] < SELFTEST_TTL:
-            return tid, cached[1]
-        try:
-            result = await target_probe(target, deadline_seconds=TARGET_DEADLINE)
-        except Exception as exc:
-            result = _unknown_result(target["business"], target,
-                                     f"target_probe_exception:{type(exc).__name__}")
-        _selftest_cache[key] = (time.monotonic(), result)
-        try:
-            _record_target_probe(target, result)
-        except Exception:
-            pass
-        return tid, result
-
-    for tid, result in await asyncio.gather(*(one(t) for t in targets)):
-        results[int(tid)] = result
-    return results
-
-
-async def test_target(business: str, *, force: bool = True) -> dict:
-    target = store.target(business)
-    try:
-        result = await target_probe(target, deadline_seconds=TARGET_DEADLINE)
-    except Exception as exc:
-        result = _unknown_result(business, target, f"target_probe_exception:{type(exc).__name__}")
-    _record_target_probe(target, result)
-    _selftest_cache[(int(target["id"]), int(target["config_version"]))] = (
-        time.monotonic(), result
-    )
-    return {"target": target, "result": result, "available": _target_available(result)}
 
 
 def _next_after_success(target_row: dict, conn) -> int:
@@ -303,13 +243,6 @@ async def _run_batch(reserved: list[dict]) -> None:
             unique.setdefault(int(row["node_id"]), row)
         nodes = [_node_dict(row) for row in unique.values()]
         try:
-            selftests = await _target_selftests(list(target_map.values()))
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            _log(f"业务目标自测失败：{type(exc).__name__}: {exc}")
-            selftests = {}
-        try:
             async with engine_mod.operation_lock:
                 ports = await prepare_ports(nodes)
         except asyncio.CancelledError:
@@ -326,10 +259,6 @@ async def _run_batch(reserved: list[dict]) -> None:
             if not target_row["enabled"]:
                 results[qid] = _unknown_result(row["business"], target_row, "target_disabled")
                 continue
-            if not selftests.get(int(target_row["id"]), {}).get("available"):
-                results[qid] = _unknown_result(row["business"], target_row,
-                                               "probe_target_unavailable")
-                continue
             port = ports.get(int(row["node_id"]))
             if not port:
                 results[qid] = _unknown_result(row["business"], target_row, "engine_unavailable")
@@ -338,7 +267,7 @@ async def _run_batch(reserved: list[dict]) -> None:
                 raw = await node_probe(target_row, proxy_port=int(port),
                                        deadline_seconds=TARGET_DEADLINE)
                 results[qid] = _shape(raw, row["business"], target_row,
-                                      "available")
+                                      "node_proxy")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -431,8 +360,7 @@ def startup_reset() -> dict:
 
 
 def reset_runtime_for_tests() -> None:
-    global _batch_task, _selftest_cache
-    _selftest_cache = {}
+    global _batch_task
     if _batch_task is not None and not _batch_task.done():
         _batch_task.cancel()
     _batch_task = None

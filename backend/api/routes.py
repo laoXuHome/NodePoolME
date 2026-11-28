@@ -1712,14 +1712,6 @@ def business_target_update(business: str, payload: dict):
         _raise_business(exc)
 
 
-@api.post("/business/targets/{business}/test", dependencies=protected)
-async def business_target_test(business: str):
-    try:
-        return await business_service.test_target(business)
-    except business_store.BusinessError as exc:
-        _raise_business(exc)
-
-
 @api.post("/business/targets/defaults", dependencies=protected)
 def business_target_defaults():
     try:

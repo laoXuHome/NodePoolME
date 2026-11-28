@@ -17,10 +17,6 @@ const detailLoading = ref(false)
 const targetDialog = ref(false)
 const targetForm = ref({})
 const targetBusy = ref(false)
-const testBusy = ref(false)
-const testBusiness = ref('')
-const testResult = ref(null)
-const testDialog = ref(false)
 const settings = ref(null)
 const settingsDialog = ref(false)
 const settingsForm = ref({ interval_minutes: 360, valid_hours: 24, concurrency: 10 })
@@ -56,8 +52,8 @@ const EVENT_TEXT = {
 }
 const REASON_TEXT = {
   business_http_mismatch: 'HTTP 状态不在期望范围', target_disabled: '业务目标已停用',
-  probe_target_unavailable: '检测目标自身不可用', engine_unavailable: '代理内核未就绪',
-  target_probe_unavailable: '目标自测不可用', probe_result_missing: '缺少检测结果',
+engine_unavailable: '代理内核未就绪',
+  probe_result_missing: '缺少检测结果',
   batch_aborted: '检测批次中断，已释放队列', config_changed: '检测目标配置已变更',
   timeout: '请求超时，责任方不明', dns_timeout: 'DNS 超时，责任方不明',
   tcp_timeout: 'TCP 超时，责任方不明', tls_timeout: 'TLS 超时，责任方不明',
@@ -184,15 +180,6 @@ async function toggleTarget(t, value) {
     await reload()
   } catch (e) { ElMessage.error(e.message); await loadTargets() }
 }
-async function testTarget(t) {
-  testBusy.value = true
-  testBusiness.value = t.business
-  try {
-    testResult.value = await api.post(`/api/business/targets/${t.business}/test`, {})
-    testDialog.value = true
-    await loadTargets()
-  } catch (e) { ElMessage.error(e.message) } finally { testBusy.value = false }
-}
 async function restoreDefaults() {
   try {
     await ElMessageBox.confirm(
@@ -249,7 +236,7 @@ onMounted(reload)
     <div class="p3-mini-stats">
       <div><span>五类合计有资格</span><b>{{ summary?.qualified_nodes || 0 }}</b><small>至少一门业务有效</small></div>
       <div><span>待确认</span><b>{{ summary?.pending_nodes || 0 }}</b><small>有效成功或失败不足阈值</small></div>
-      <div><span>Unknown</span><b>{{ summary?.unknown_nodes || 0 }}</b><small>目标故障或责任不明，不计失败</small></div>
+      <div><span>Unknown</span><b>{{ summary?.unknown_nodes || 0 }}</b><small>检测异常或责任不明，不计失败</small></div>
       <div><span>检测队列</span><b>{{ queueTotal }}</b><small>排队 {{ summary?.queue?.pending || 0 }} · 执行 {{ summary?.queue?.running || 0 }}</small></div>
     </div>
 
@@ -274,16 +261,11 @@ onMounted(reload)
           <div class="p3-target-meta">
             <span>期望 {{ expectedText(t.expected_status) }}</span>
             <span>{{ t.interval_minutes ? t.interval_minutes + ' 分钟' : '跟随全局' }}</span>
-            <span>最近 {{ shortTs(t.last_check_at) }}</span>
           </div>
           <div class="p3-target-foot">
-            <span v-if="t.last_check_status" :class="`p3-class is-${t.last_check_status}`">
-              {{ classOf(t.last_check_status).text }}
-            </span>
-            <span v-if="t.last_check_error" class="p3-err">{{ reasonText(t.last_check_error) }}</span>
+            <span class="p3-target-hint">仅按节点代理出口真实 HTTPS 结果判定，不做服务器直连检查</span>
             <div class="p3-target-actions">
               <el-switch :model-value="t.enabled" size="small" @change="v => toggleTarget(t, v)" />
-              <el-button link size="small" :loading="testBusy && testBusiness === t.business" @click="testTarget(t)">测试</el-button>
               <el-button link size="small" @click="openTarget(t)">编辑</el-button>
             </div>
           </div>
@@ -396,27 +378,6 @@ onMounted(reload)
       <template #footer>
         <el-button @click="targetDialog = false">取消</el-button>
         <el-button type="primary" :loading="targetBusy" @click="saveTarget">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="testDialog" title="业务目标手动测试" width="640px">
-      <template v-if="testResult">
-        <el-alert :type="testResult.available ? 'success' : 'warning'" :closable="false"
-                  :title="testResult.available
-                    ? '目标从控制端可达，节点侧仍需走自己的代理出口'
-                    : '目标自身暂不可用，本轮节点结果统一记为 Unknown'" />
-        <div class="p3-test-meta">
-          <span>{{ BUSINESS_LABELS[testBusiness] }} · {{ testResult.target?.name }}</span>
-          <span>{{ testResult.target?.url }}</span>
-        </div>
-        <div class="p3-test-grid">
-          <div><span>DNS</span><b>{{ testResult.result?.stages?.find(s => s.stage === 'dns')?.latency_ms ?? '—' }} ms</b></div>
-          <div><span>TCP</span><b>{{ testResult.result?.stages?.find(s => s.stage === 'tcp')?.latency_ms ?? '—' }} ms</b></div>
-          <div><span>TLS</span><b>{{ testResult.result?.stages?.find(s => s.stage === 'tls')?.latency_ms ?? '—' }} ms</b></div>
-          <div><span>HTTPS</span><b>{{ testResult.result?.stages?.find(s => s.stage === 'https')?.detail?.status ?? '—' }}</b></div>
-        </div>
-        <p class="np-muted">分类 {{ classOf(testResult.result?.status).text }} · {{ reasonText(testResult.result?.reason) }}
-          · 耗时 {{ testResult.result?.duration_ms || 0 }}ms</p>
       </template>
     </el-dialog>
 
@@ -568,7 +529,7 @@ onMounted(reload)
 .p3-target-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
 .p3-target-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 .p3-target-actions :deep(.el-button) { padding: 0 2px; }
-.p3-err { font-size: 10px; color: #a84646; }
+.p3-target-hint { font-size: 9px; color: #93a198; line-height: 1.4; }
 .p3-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .p3-count { margin-left: auto; font-size: 12px; }
 .p3-table-card { padding: 4px 8px 6px; }
@@ -597,11 +558,6 @@ onMounted(reload)
 .p3-mcard-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
 .p3-dialog-note { font-size: 12px; line-height: 1.6; margin: 4px 0 0; }
 .p3-unit { margin-left: 8px; }
-.p3-test-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; margin: 10px 0; color: #60746a; overflow-wrap: anywhere; }
-.p3-test-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 8px 0 10px; }
-.p3-test-grid > div { background: #f4f8f5; border-radius: 8px; padding: 8px 9px; }
-.p3-test-grid span { display: block; font-size: 10px; color: #7a8c82; }
-.p3-test-grid b { font-size: 12px; color: #29433a; }
 .p3-detail-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
 .p3-detail-head h3 { margin: 0; font-size: 17px; color: #203730; }
 .p3-detail-head p { margin: 3px 0 0; font-size: 12px; }
@@ -653,6 +609,5 @@ onMounted(reload)
   .p3-stages { grid-template-columns: 1fr 1fr; }
   .p3-history { grid-template-columns: 1fr 1fr; }
   .p3-event { grid-template-columns: 1fr 1fr; }
-  .p3-test-grid { grid-template-columns: 1fr 1fr; }
 }
 </style>

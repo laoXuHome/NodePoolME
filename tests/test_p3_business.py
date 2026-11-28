@@ -175,20 +175,20 @@ def test_queue_is_unique_per_node_and_business_but_allows_five_businesses():
     assert len({r["business"] for r in rows}) == 5
 
 
-def test_target_outage_makes_all_businesses_unknown_without_node_failure(monkeypatch):
-    node_id = _prepare_node("目标故障节点")
+def test_no_server_direct_target_check_and_dns_unknown_keeps_failures(monkeypatch):
+    node_id = _prepare_node("目标直连节点")
+    assert not hasattr(service, "target_probe")
+    assert not hasattr(service, "test_target")
     service.enqueue_manual([node_id])
-
-    async def fake_target(target, deadline_seconds=20):
-        return _result(target, status="unknown")
+    calls = []
 
     async def fake_prepare(nodes):
         return {int(n["id"]): 31001 for n in nodes}
 
     async def fake_node(target, proxy_port, deadline_seconds=20):
-        raise AssertionError("target outage must not probe the node")
+        calls.append(proxy_port)
+        return _result(target, status="unknown")
 
-    monkeypatch.setattr(service, "target_probe", fake_target)
     monkeypatch.setattr(service, "prepare_ports", fake_prepare)
     monkeypatch.setattr(service, "node_probe", fake_node)
 
@@ -201,6 +201,35 @@ def test_target_outage_makes_all_businesses_unknown_without_node_failure(monkeyp
         state = store.get_state(node_id, code)
         assert state["state"] == "unknown"
         assert state["consecutive_failures"] == 0
+        latest = store.latest_check(node_id, code)
+        stages = {s["stage"]: s for s in latest["stages"]}
+        assert stages["dns"]["status"] == "unknown"
+        assert stages["tcp"]["status"] == "unexecuted"
+        assert stages["tls"]["status"] == "unexecuted"
+        assert stages["https"]["status"] == "unexecuted"
+    assert calls and all(port == 31001 for port in calls)
+
+
+def test_node_tcp_failure_is_counted_as_business_failure(monkeypatch):
+    node_id = _prepare_node("TCP业务失败节点")
+    service.enqueue_manual([node_id], business="gpt")
+
+    async def fake_prepare(nodes):
+        return {int(n["id"]): 31003 for n in nodes}
+
+    async def fake_node(target, proxy_port, deadline_seconds=20):
+        return _result(target, status="failure", http_status=403)
+
+    monkeypatch.setattr(service, "prepare_ports", fake_prepare)
+    monkeypatch.setattr(service, "node_probe", fake_node)
+
+    async def run():
+        assert (await service.tick())["started"] is True
+        await service.wait_batch()
+    asyncio.run(run())
+    state = store.get_state(node_id, "gpt")
+    assert state["state"] == "pending"
+    assert state["consecutive_failures"] == 1
 
 
 def test_batch_runs_through_injected_probe_and_preserves_p1_and_p2(monkeypatch):
@@ -209,9 +238,6 @@ def test_batch_runs_through_injected_probe_and_preserves_p1_and_p2(monkeypatch):
     before_p2 = db.row("SELECT base_health,management_layer,competition_state FROM np_nodes WHERE id=?",
                        (node_id,))
     service.enqueue_manual([node_id], business="youtube")
-
-    async def fake_target(target, deadline_seconds=20):
-        return _result(target)
 
     async def fake_prepare(nodes):
         return {int(n["id"]): 31002 for n in nodes}
@@ -222,7 +248,6 @@ def test_batch_runs_through_injected_probe_and_preserves_p1_and_p2(monkeypatch):
         seen["port"] = proxy_port
         return _result(target)
 
-    monkeypatch.setattr(service, "target_probe", fake_target)
     monkeypatch.setattr(service, "prepare_ports", fake_prepare)
     monkeypatch.setattr(service, "node_probe", fake_node)
 
@@ -278,6 +303,7 @@ def test_business_api_summary_nodes_settings():
             assert r.status_code == 200 and r.json()["queued"] == 1
             bad = client.post(f"/api/business/nodes/{node_id}/check", json={"business": "nope"})
             assert bad.status_code == 400
+            assert client.post("/api/business/targets/gpt/test").status_code in (404, 405)
             r = client.patch("/api/business/targets/gpt", json={"expected_status": "200-399"})
             assert r.status_code == 200
             restored = client.post("/api/business/targets/defaults").json()["items"]
