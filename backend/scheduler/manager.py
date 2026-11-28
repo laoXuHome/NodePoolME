@@ -13,6 +13,7 @@ from backend.database import gate as maint_gate
 from backend.health import service as health_service
 from backend.business import service as business_service
 from backend.quality import service as quality_service
+from backend.competition import service as competition_service
 from backend.services import fetcher
 from backend.services.runtime_gate import gate
 from backend.subscriptions import builder
@@ -928,6 +929,13 @@ async def job_quality_p4() -> None:
     await quality_service.tick()
 
 
+async def job_competition_p5() -> None:
+    """P5 tick: respect the configured competition cycle, never double-run."""
+    if maintenance_hold():
+        return
+    await competition_service.tick()
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         return
@@ -962,6 +970,10 @@ def start_scheduler() -> None:
         scheduler.add_job(job_quality_p4, "interval", minutes=10, id="p4_quality",
                           max_instances=1, coalesce=True,
                           next_run_time=datetime.now() + timedelta(seconds=30))
+    if os.getenv("NODEPOOL_P5_SCHEDULER", "1") == "1" and "pytest" not in sys.modules:
+        scheduler.add_job(job_competition_p5, "interval", minutes=5, id="p5_competition",
+                          max_instances=1, coalesce=True,
+                          next_run_time=datetime.now() + timedelta(seconds=50))
     scheduler.start()
     db.append_log("INFO", "调度", "调度器已启动")
 

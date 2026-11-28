@@ -7,6 +7,7 @@ import OperationsMap from '../components/OperationsMap.vue'
 
 const data = ref(null)
 const businessSummary = ref(null)
+const competition = computed(() => data.value?.competition || null)
 // 趋势图配色：深金、深绿、灰绿、铜棕、橄榄，和整页的磨砂评分室同一色域
 const AIRPORT_COLORS = ['#a8751c', '#2f6555', '#5d7f70', '#9a5a37', '#7c8b60',
   '#b58a3a', '#45685d', '#8a6a2f', '#3f6d68', '#b06a32', '#6f8078', '#c0a15a']
@@ -40,6 +41,7 @@ async function loadBusiness() {
   catch { businessSummary.value = null }
 }
 function goBusiness() { window.location.hash = '#/business' }
+function goCompetition() { window.location.hash = '#/competition' }
 
 async function load() {
   loading.value = true
@@ -676,6 +678,27 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
         <div><span>Unknown 节点</span><b>{{ businessSummary.unknown_nodes }}</b><small>目标或责任不明</small></div>
         <div><span>检测队列</span><b>{{ businessSummary.queue.total }}</b><small>排队 {{ businessSummary.queue.pending }}</small></div>
         <div><span>P2 健康参考</span><b>{{ businessSummary.p2_health?.healthy || 0 }}</b><small>只读，不由 P3 修改</small></div>
+      </div>
+    </section>
+
+    <section v-if="competition" class="dash-competition">
+      <div class="dash-competition-head">
+        <div>
+          <h2>智能节点竞争 · P5</h2>
+          <p>标准综合与五类业务各自独立；成熟优选按连续证据保留，淘汰只退出该类别，P1 原始节点仍保留。</p>
+        </div>
+        <button class="dash-business-link" @click="goCompetition">查看竞争台 →</button>
+      </div>
+      <div class="dash-competition-grid">
+        <div class="dash-cp-standard"><span>标准综合优选</span><b>{{ competition.preferred_standard || 0 }}</b><small>成熟保留名单</small></div>
+        <div v-for="(n, code) in competition.preferred_business" :key="code" class="dash-cp-biz">
+          <span>{{ ({ gpt: 'GPT', youtube: 'YouTube', telegram: 'Telegram', github: 'GitHub', global: '国外综合' })[code] || code }} 优选</span>
+          <b>{{ n || 0 }}</b><small>业务专项</small>
+        </div>
+        <div><span>候选合计</span><b>{{ competition.candidate_total || 0 }}</b><small>六类累计</small></div>
+        <div><span>观察合计</span><b>{{ competition.observation_total || 0 }}</b><small>含恢复确认</small></div>
+        <div><span>淘汰合计</span><b>{{ competition.eliminated_total || 0 }}</b><small>不删 P1</small></div>
+        <div class="is-wide"><span>最近竞争</span><b>{{ competition.last_competition_at ? formatTs(competition.last_competition_at).slice(5, 16) : '尚未执行' }}</b><small>自动或手动</small></div>
       </div>
     </section>
 

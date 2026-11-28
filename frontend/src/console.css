@@ -1301,3 +1301,32 @@ body::before {
   .dash-bbiz b { font-size: 21px; }
   .dash-business-side { grid-template-columns: 1fr 1fr; }
 }
+
+/* P5 dashboard competition summary */
+.dash-competition { margin: 0 2px 16px; padding: 15px 17px; border-radius: 16px;
+  background: linear-gradient(135deg, rgba(255,255,255,.72), rgba(239,246,241,.58));
+  border: 1px solid rgba(31,61,51,.08); box-shadow: 0 10px 28px rgba(31,61,51,.05); }
+.dash-competition-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 11px; }
+.dash-competition-head h2 { margin: 0; font-size: 15px; color: #203730; letter-spacing: -.02em; }
+.dash-competition-head p { margin: 3px 0 0; font-size: 11px; color: #7c8d84; }
+.dash-competition-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; }
+.dash-competition-grid > div { display: flex; align-items: baseline; gap: 6px; padding: 7px 9px; border-radius: 8px; background: rgba(240,246,242,.72); }
+.dash-competition-grid span { font-size: 9px; color: #7c8d84; white-space: nowrap; }
+.dash-competition-grid b { font-size: 16px; color: #29433a; font-variant-numeric: tabular-nums; }
+.dash-competition-grid small { font-size: 8px; color: #9aa79e; margin-left: auto; white-space: nowrap; }
+.dash-competition-grid .dash-cp-standard { background: rgba(226,242,231,.7); }
+.dash-competition-grid .dash-cp-standard b { color: #2f8f62; }
+.dash-competition-grid .is-wide { grid-column: span 2; }
+.dash-competition-grid .is-wide b { font-size: 13px; }
+@media (max-width: 1180px) { .dash-competition-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 700px) {
+  .dash-competition { padding: 12px 12px; }
+  .dash-competition-head { flex-direction: column; }
+  .dash-competition-grid { grid-template-columns: 1fr 1fr; }
+  .dash-competition-grid .is-wide { grid-column: span 2; }
+}
+
+@media (max-width: 700px) {
+  .p5-drawer { width: 100vw !important; }
+  .p5-drawer .el-drawer__header { padding-top: 34px !important; }
+}

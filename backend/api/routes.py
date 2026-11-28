@@ -31,6 +31,9 @@ from backend.quality import calculator as quality_calculator
 from backend.health import store as health_store
 from backend.business import service as business_service
 from backend.business import store as business_store
+from backend.competition import service as competition_service
+from backend.competition import store as competition_store
+from backend.competition.store import CompetitionError
 from backend.scoring import eligibility, sampler
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
@@ -557,6 +560,7 @@ async def dashboard(days: int = 7):
         "fetch": fetch_block,
         "group_summary": group_block,
         "publish": publish_block,
+        "competition": competition_service.dashboard_summary(),
         "publish_schedule": {
             "enabled": db.get("sub_publish_enabled", "0") == "1",
             "mode": db.get("sub_publish_mode", "time"),
@@ -2058,3 +2062,75 @@ async def healthz(request: Request):
         "migration_code": maintenance.get("code"),
         "migration_phase": maintenance.get("phase"),
     }
+
+
+# ---------------------------------------------------------------------------- P5 competition
+@api.get("/competition/summary", dependencies=protected)
+def competition_summary():
+    return competition_service.summary()
+
+
+@api.get("/competition/nodes", dependencies=protected)
+def competition_nodes(category: str = "standard", state: str | None = None,
+                      q: str | None = None, page: int = 1, per_page: int = 20):
+    try:
+        return competition_service.node_rows(category=category, state=state, q=q,
+                                             page=page, per_page=per_page)
+    except CompetitionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@api.get("/competition/nodes/{node_id}", dependencies=protected)
+def competition_node_detail(node_id: int):
+    try:
+        return competition_service.node_detail(node_id)
+    except CompetitionError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@api.get("/competition/history", dependencies=protected)
+def competition_history(node_id: int | None = None, category: str | None = None,
+                        limit: int = 60):
+    try:
+        return competition_service.history(node_id, category=category, limit=limit)
+    except CompetitionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@api.get("/competition/settings", dependencies=protected)
+def competition_settings():
+    return competition_service.settings()
+
+
+@api.patch("/competition/settings", dependencies=protected)
+def competition_update_settings(payload: dict):
+    try:
+        return competition_service.update_settings(payload)
+    except CompetitionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@api.post("/competition/settings/defaults", dependencies=protected)
+def competition_restore_defaults():
+    return competition_service.restore_defaults()
+
+
+@api.post("/competition/run", dependencies=protected)
+def competition_run(payload: dict | None = None):
+    body = payload or {}
+    categories = body.get("categories")
+    if categories is not None:
+        if not isinstance(categories, list):
+            raise HTTPException(400, "categories 必须是数组")
+        categories = [str(item) for item in categories]
+        invalid = [item for item in categories if item not in competition_store.CATEGORIES]
+        if invalid:
+            raise HTTPException(400, f"未知竞争类别：{', '.join(invalid)}")
+    result = competition_service.run(trigger=str(body.get("trigger") or "manual"),
+                                     categories=categories, refresh_p4=bool(body.get("refresh_p4", True)))
+    return result
+
+
+@api.get("/competition/runs", dependencies=protected)
+def competition_runs(limit: int = 20):
+    return {"items": competition_service.runs(limit=limit)}
