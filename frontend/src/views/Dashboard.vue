@@ -8,6 +8,7 @@ import OperationsMap from '../components/OperationsMap.vue'
 const data = ref(null)
 const businessSummary = ref(null)
 const competition = computed(() => data.value?.competition || null)
+const finalResult = computed(() => data.value?.final_result || null)
 // 趋势图配色：深金、深绿、灰绿、铜棕、橄榄，和整页的磨砂评分室同一色域
 const AIRPORT_COLORS = ['#a8751c', '#2f6555', '#5d7f70', '#9a5a37', '#7c8b60',
   '#b58a3a', '#45685d', '#8a6a2f', '#3f6d68', '#b06a32', '#6f8078', '#c0a15a']
@@ -42,6 +43,7 @@ async function loadBusiness() {
 }
 function goBusiness() { window.location.hash = '#/business' }
 function goCompetition() { window.location.hash = '#/competition' }
+function goFinal() { window.location.hash = '#/final' }
 
 async function load() {
   loading.value = true
@@ -699,6 +701,25 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
         <div><span>观察合计</span><b>{{ competition.observation_total || 0 }}</b><small>含恢复确认</small></div>
         <div><span>淘汰合计</span><b>{{ competition.eliminated_total || 0 }}</b><small>不删 P1</small></div>
         <div class="is-wide"><span>最近竞争</span><b>{{ competition.last_competition_at ? formatTs(competition.last_competition_at).slice(5, 16) : '尚未执行' }}</b><small>自动或手动</small></div>
+      </div>
+    </section>
+
+
+    <section v-if="finalResult" class="dash-final">
+      <div class="dash-final-head">
+        <div>
+          <h2>最终优选结果 · P6.1</h2>
+          <p>六类 P5 优选汇总为不可篡改快照；当前 {{ finalResult.history_count || 0 }} 个历史版本，读取不会生成新版本。</p>
+        </div>
+        <button class="dash-final-link" @click="goFinal">查看最终优选 →</button>
+      </div>
+      <div class="dash-final-grid">
+        <div class="is-total"><span>最终优选总量</span><b>{{ finalResult.total || 0 }}</b><small>六类累计节点/类别</small></div>
+        <div class="is-version"><span>当前有效版本</span><b>{{ finalResult.version_no || '尚未生成' }}</b><small>{{ finalResult.is_empty ? '有效空版本' : '已固化' }}</small></div>
+        <div class="is-time"><span>最近生成</span><b>{{ finalResult.generated_at ? formatTs(finalResult.generated_at).slice(5, 16) : '—' }}</b><small>来源 P5 成功轮次</small></div>
+        <div><span>标准综合优选</span><b>{{ finalResult.preferred_standard || 0 }}</b><small>STANDARD</small></div>
+        <div><span>五类业务优选</span><b>{{ Object.values(finalResult.preferred_business || {}).reduce((a, b) => a + Number(b || 0), 0) }}</b><small>GPT · YouTube · TG · GitHub · 国外</small></div>
+        <div :class="{ 'is-pending': finalResult.pending }"><span>名单状态</span><b>{{ finalResult.pending ? '待同步' : '已同步' }}</b><small>{{ finalResult.pending ? 'P5 有新变化' : '与 P5 当前优选一致' }}</small></div>
       </div>
     </section>
 

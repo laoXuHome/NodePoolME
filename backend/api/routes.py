@@ -34,6 +34,8 @@ from backend.business import store as business_store
 from backend.competition import service as competition_service
 from backend.competition import store as competition_store
 from backend.competition.store import CompetitionError
+from backend.final_results import service as final_service
+from backend.final_results.store import FinalError
 from backend.scoring import eligibility, sampler
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
@@ -561,6 +563,7 @@ async def dashboard(days: int = 7):
         "group_summary": group_block,
         "publish": publish_block,
         "competition": competition_service.dashboard_summary(),
+        "final_result": final_service.dashboard_summary(),
         "publish_schedule": {
             "enabled": db.get("sub_publish_enabled", "0") == "1",
             "mode": db.get("sub_publish_mode", "time"),
@@ -2062,6 +2065,49 @@ async def healthz(request: Request):
         "migration_code": maintenance.get("code"),
         "migration_phase": maintenance.get("phase"),
     }
+
+
+# ---------------------------------------------------------------------------- P6.1 final results
+@api.get("/final/summary", dependencies=protected)
+def final_summary():
+    return final_service.summary()
+
+
+@api.get("/final/current", dependencies=protected)
+def final_current(category: str | None = None):
+    try:
+        return final_service.current(category=category)
+    except FinalError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+
+
+@api.get("/final/versions", dependencies=protected)
+def final_versions(limit: int = 30):
+    return final_service.versions(limit=limit)
+
+
+@api.get("/final/versions/{version_id}", dependencies=protected)
+def final_version_detail(version_id: int, category: str | None = None):
+    try:
+        return final_service.version(version_id, category=category)
+    except FinalError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+
+
+@api.get("/final/diff", dependencies=protected)
+def final_diff(version_id: int | None = None):
+    try:
+        return final_service.diff(version_id=version_id)
+    except FinalError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+
+
+@api.post("/final/snapshot", dependencies=protected)
+def final_snapshot():
+    try:
+        return final_service.snapshot("manual")
+    except FinalError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
 
 
 # ---------------------------------------------------------------------------- P5 competition

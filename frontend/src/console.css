@@ -879,7 +879,8 @@ body::before {
   .np-mrail { margin-left: 8px; margin-right: 8px; padding-left: 9px; gap: 6px; }
   .np-mrail-title { display: none; }
   .np-mrail-nav { gap: 0; }
-  .np-mrail-link { width: 32px; }
+  .np-mrail-link { width: 26px; flex: 0 0 26px; }
+  .np-mrail-link .el-icon { font-size: 16px; }
   .np-commandbar { padding-left: 3px; padding-right: 3px; }
   .dash-headline h1 { font-size: 30px; }
   .score-body { grid-template-columns: 128px minmax(0, 1fr); }
@@ -1329,4 +1330,30 @@ body::before {
 @media (max-width: 700px) {
   .p5-drawer { width: 100vw !important; }
   .p5-drawer .el-drawer__header { padding-top: 34px !important; }
+}
+
+/* P6.1 final preferred snapshot summary */
+.dash-final { margin: 0 2px 16px; padding: 15px 17px; border-radius: 16px;
+  background: linear-gradient(135deg, rgba(255,255,255,.74), rgba(234,246,239,.64));
+  border: 1px solid rgba(31,61,51,.08); box-shadow: 0 10px 28px rgba(31,61,51,.05); }
+.dash-final-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 11px; }
+.dash-final-head h2 { margin: 0; font-size: 15px; color: #203730; letter-spacing: -.02em; }
+.dash-final-head p { margin: 3px 0 0; font-size: 11px; color: #7c8d84; }
+.dash-final-link { border: 0; background: none; color: #2f6f5b; font-size: 11px; cursor: pointer; white-space: nowrap; padding: 3px 0; }
+.dash-final-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; }
+.dash-final-grid > div { display: flex; align-items: baseline; gap: 6px; padding: 7px 9px; border-radius: 8px; background: rgba(240,246,242,.72); }
+.dash-final-grid span { font-size: 9px; color: #7c8d84; white-space: nowrap; }
+.dash-final-grid b { font-size: 16px; color: #29433a; font-variant-numeric: tabular-nums; }
+.dash-final-grid small { font-size: 8px; color: #9aa79e; margin-left: auto; white-space: nowrap; }
+.dash-final-grid .is-total { background: rgba(226,242,231,.7); }
+.dash-final-grid .is-total b { color: #2f8f62; }
+.dash-final-grid .is-version b { font-size: 12px; }
+.dash-final-grid .is-time b { font-size: 12px; }
+.dash-final-grid .is-pending { background: rgba(250,242,224,.8); }
+.dash-final-grid .is-pending b { color: #9a6b1d; }
+@media (max-width: 1180px) { .dash-final-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 700px) {
+  .dash-final { padding: 12px 12px; }
+  .dash-final-head { flex-direction: column; }
+  .dash-final-grid { grid-template-columns: 1fr 1fr; }
 }

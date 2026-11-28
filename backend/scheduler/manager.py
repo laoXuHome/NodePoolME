@@ -14,6 +14,7 @@ from backend.health import service as health_service
 from backend.business import service as business_service
 from backend.quality import service as quality_service
 from backend.competition import service as competition_service
+from backend.final_results import service as final_service
 from backend.services import fetcher
 from backend.services.runtime_gate import gate
 from backend.subscriptions import builder
@@ -936,6 +937,17 @@ async def job_competition_p5() -> None:
     await competition_service.tick()
 
 
+async def job_final_p6() -> None:
+    """P6.1 snapshot tick: only after a successful P5 run and membership change."""
+    if maintenance_hold():
+        return
+    try:
+        await asyncio.to_thread(final_service.auto_snapshot)
+    except Exception as exc:
+        # A snapshot failure must never stop P5 or P1-P4 scheduling.
+        db.append_log("WARN", "调度", f"P6.1 自动快照失败：{exc}")
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         return
@@ -974,6 +986,10 @@ def start_scheduler() -> None:
         scheduler.add_job(job_competition_p5, "interval", minutes=5, id="p5_competition",
                           max_instances=1, coalesce=True,
                           next_run_time=datetime.now() + timedelta(seconds=50))
+    if os.getenv("NODEPOOL_P6_SCHEDULER", "1") == "1" and "pytest" not in sys.modules:
+        scheduler.add_job(job_final_p6, "interval", minutes=5, id="p6_final",
+                          max_instances=1, coalesce=True,
+                          next_run_time=datetime.now() + timedelta(seconds=70))
     scheduler.start()
     db.append_log("INFO", "调度", "调度器已启动")
 
