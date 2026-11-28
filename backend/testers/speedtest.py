@@ -48,19 +48,73 @@ class SourceCheck:
 class _ByteBudget:
     """One shared byte allowance for all workers of a single source.
 
-    The allowance is consumed as bytes are actually received.  Ranges are also
-    clipped to their share, so a worker cannot finish by sending more than the
-    caller's total budget.
+    Every actual HTTP body byte is recorded.  ``remaining`` only covers bytes
+    within the allowance; bytes beyond it are recorded in ``overage`` instead
+    of being silently dropped or restoring budget.  ``exhausted`` tells every
+    worker to stop issuing further reads as soon as the allowance reaches zero.
     """
 
     def __init__(self, limit: int):
         self.limit = max(0, int(limit))
         self.remaining = self.limit
+        self.received = 0       # actual body bytes across all workers
+        self.allowed = 0        # bytes covered by the allowance
+        self.overage = 0        # actual bytes beyond the allowance
+        self.exhausted = asyncio.Event()
+        if self.limit == 0:
+            self.exhausted.set()
 
     def take(self, received: int) -> int:
-        granted = min(max(0, int(received)), self.remaining)
+        """Record actual bytes and return how many fit in the allowance.
+
+        The actual bytes are always counted in ``received`` and ``overage``.
+        A last buffered chunk may exceed ``remaining``; that excess is never
+        treated as unspent budget and never reallocated to another worker.
+        """
+        actual = max(0, int(received))
+        self.received += actual
+        granted = min(actual, self.remaining)
         self.remaining -= granted
+        self.allowed += granted
+        self.overage += actual - granted
+        if self.remaining <= 0:
+            self.exhausted.set()
         return granted
+
+
+async def _next_chunk(iterator, budget: "_ByteBudget | None", timeout: float):
+    """Return (chunk, stopped).  With a budget, race the next body chunk against
+    the shared exhausted event so another worker's overrun can stop this reader.
+    """
+    if budget is None:
+        return await asyncio.wait_for(anext(iterator), timeout=timeout), False
+    next_task = asyncio.create_task(anext(iterator))
+    stop_task = asyncio.create_task(budget.exhausted.wait())
+    done, _ = await asyncio.wait(
+        {next_task, stop_task}, timeout=timeout,
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if not done:
+        next_task.cancel()
+        stop_task.cancel()
+        await asyncio.gather(next_task, stop_task, return_exceptions=True)
+        raise asyncio.TimeoutError
+    if stop_task in done and next_task not in done:
+        next_task.cancel()
+        await asyncio.gather(next_task, return_exceptions=True)
+        stop_task.result()
+        if next_task.cancelled():
+            return None, True
+        try:
+            # A chunk that won the race at the transport layer is still real
+            # traffic; return it so the caller records it as overage instead
+            # of dropping bytes merely because the stop event also fired.
+            return next_task.result(), True
+        except StopAsyncIteration:
+            return None, True
+    stop_task.cancel()
+    await asyncio.gather(stop_task, return_exceptions=True)
+    return next_task.result(), False
 
 
 @dataclass
@@ -87,6 +141,9 @@ class SourceResult:
     source: dict
     ok: bool
     bytes: int = 0
+    bytes_allowed: int = 0
+    bytes_over: int = 0
+    charged_bytes: int | None = None  # budget units consumed; may exceed actual on timeout
     seconds: float = 0.0
     single_mbps: float | None = None
     multi_mbps: float | None = None
@@ -446,11 +503,15 @@ async def _worker(client: httpx.AsyncClient, url: str, window: tuple[int, int],
             elapsed = time.perf_counter() - began
             if elapsed >= total_deadline:
                 break
-            if budget is not None and budget.remaining <= 0:
+            if budget is not None and budget.exhausted.is_set():
                 traffic_limited = True
                 break
             try:
-                chunk = await asyncio.wait_for(anext(iterator), timeout=conn_timeout)
+                chunk, stopped = await _next_chunk(iterator, budget, conn_timeout)
+                if stopped:
+                    traffic_limited = True
+                    if chunk is None:
+                        break
             except StopAsyncIteration:
                 range_limited = budget is None
                 break
@@ -465,16 +526,17 @@ async def _worker(client: httpx.AsyncClient, url: str, window: tuple[int, int],
                                     connect_ms=connect_ms, tls_ms=tls_ms, ttfb_ms=ttfb,
                                     error_type="node_interrupted", message="下载中途断流")
             if not chunk:
+                if traffic_limited:
+                    break
                 continue
+            actual = len(chunk)
+            total_bytes += actual
             if budget is not None:
-                # Ranges are clipped below, but count every received byte even
-                # for the last chunk; never silently discard pre-warmup data.
-                granted = budget.take(len(chunk))
-                if granted < len(chunk):
+                # Count the actual chunk even when it crosses the allowance.
+                # The excess is recorded by the budget as overage, not restored.
+                granted = budget.take(actual)
+                if granted < actual or budget.exhausted.is_set():
                     traffic_limited = True
-                total_bytes += len(chunk)
-            else:
-                total_bytes += len(chunk)
             last_data = time.perf_counter()
             if measure_start is None:
                 if last_data - began < warmup:
@@ -539,8 +601,8 @@ async def _test_source(source: dict, proxy_port: int, node: dict,
                 clipped.append((start, min(end, start + length - 1)))
         windows = clipped
     if not windows:
-        return SourceResult(source, False, bytes=0, error_type="source_error",
-                            message="测速流量预算为 0")
+        return SourceResult(source, False, bytes=0, bytes_allowed=0, bytes_over=0,
+                            error_type="source_error", message="测速流量预算为 0")
     proxy = f"socks5://127.0.0.1:{proxy_port}"
     client = _client(proxy, conn_timeout)
     try:
@@ -549,11 +611,18 @@ async def _test_source(source: dict, proxy_port: int, node: dict,
         results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True),
                                          timeout=total_timeout)
     except asyncio.TimeoutError:
-        # Tasks were cancelled without a final byte count; conservatively
-        # charge the whole source allowance instead of restoring it.
-        return SourceResult(source, False, bytes=budget.limit if budget else 0,
+        # Tasks were cancelled before final samples; the shared budget still
+        # holds actual received bytes. Charge the whole source allowance so a
+        # retry cannot restore budget that may have been consumed.
+        actual = budget.received if budget else 0
+        allowed = min(actual, budget.limit) if budget else actual
+        charged = budget.limit if budget else actual
+        return SourceResult(source, False, bytes=actual, bytes_allowed=allowed,
+                            bytes_over=actual - allowed, charged_bytes=charged,
                             error_type="node_connect",
-                            message=f"整轮测速超过 {total_timeout:g} 秒")
+                            message=f"整轮测速超过 {total_timeout:g} 秒；实际 {actual} 字节，"
+                                    f"预算允许 {allowed} 字节，超出 {actual - allowed} 字节；"
+                                    f"剩余预算按 {charged} 字节保守扣减")
     finally:
         await client.aclose()
     workers = []
@@ -569,15 +638,31 @@ async def _test_source(source: dict, proxy_port: int, node: dict,
             else:
                 errors.append(item)
     traffic_bytes = sum(getattr(w, "traffic_bytes", w.bytes) or w.bytes for w in all_samples)
+    actual_bytes = max(traffic_bytes, budget.received) if budget is not None else traffic_bytes
+    allowed_bytes = min(actual_bytes, budget.limit) if budget is not None else actual_bytes
+    over_bytes = actual_bytes - allowed_bytes
+    budget_note = ""
+    if over_bytes:
+        budget_note = (f"实际 {actual_bytes} 字节，预算允许 {allowed_bytes} 字节，"
+                       f"超出 {over_bytes} 字节")
     if not workers:
         first = errors[0] if errors else None
         if isinstance(first, WorkerSample):
-            return SourceResult(source, False, bytes=traffic_bytes,
+            message = first.message or ""
+            if budget_note:
+                message += ("；" if message else "") + budget_note
+            return SourceResult(source, False, bytes=actual_bytes,
+                                bytes_allowed=allowed_bytes, bytes_over=over_bytes,
+                                charged_bytes=allowed_bytes,
                                 status_code=first.status_code,
                                 range_ok=first.range_ok, error_type=first.error_type,
-                                message=first.message)
-        return SourceResult(source, False, bytes=traffic_bytes, error_type="source_error",
-                            message=f"四个连接全部失败：{first or '未知错误'}")
+                                message=message)
+        return SourceResult(source, False, bytes=actual_bytes,
+                            bytes_allowed=allowed_bytes, bytes_over=over_bytes,
+                            charged_bytes=allowed_bytes,
+                            error_type="source_error",
+                            message=f"四个连接全部失败：{first or '未知错误'}"
+                            + (f"；{budget_note}" if budget_note else ""))
     seconds = max(w.seconds for w in workers)
     total_bytes = sum(w.bytes for w in workers)
     multi = round(total_bytes * 8 / max(seconds, 1e-6) / 1e6, 2)
@@ -590,8 +675,11 @@ async def _test_source(source: dict, proxy_port: int, node: dict,
     note = "区间提前耗尽，按实际字节与时间计算" if range_limited else None
     if traffic_limited:
         note = "达到单节点流量上限，按已下载的有效数据计算"
+        if budget_note:
+            note += f"（{budget_note}）"
     return SourceResult(
-        source, True, bytes=traffic_bytes, seconds=round(seconds, 3),
+        source, True, bytes=actual_bytes, bytes_allowed=allowed_bytes,
+        bytes_over=over_bytes, charged_bytes=allowed_bytes, seconds=round(seconds, 3),
         single_mbps=single, multi_mbps=multi, single_mb_per_s=single_mb,
         multi_mb_per_s=multi_mb, status_code=workers[0].status_code, range_ok=True,
         connect_ms=workers[0].connect_ms, tls_ms=workers[0].tls_ms,
@@ -709,7 +797,9 @@ async def run_node(node_id: int, source_ids: list[int] | None = None,
                 budget = min(settings["traffic_limit_bytes"], remaining)
                 result = await _test_source(source, port, node, settings, max_bytes=budget)
                 consumed_bytes += result.bytes
-                remaining = max(0, remaining - min(result.bytes, remaining))
+                charged = (result.charged_bytes if result.charged_bytes is not None
+                           else min(result.bytes, budget))
+                remaining = max(0, remaining - min(charged, remaining))
                 _save_sample(run_id, node_id, result)
                 if result.ok:
                     break
@@ -735,6 +825,8 @@ async def run_node(node_id: int, source_ids: list[int] | None = None,
                 break
         sources_ok = len(valid)
         samples_bytes = consumed_bytes
+        allowed_bytes = min(consumed_bytes, settings["traffic_limit_bytes"])
+        over_bytes = max(0, consumed_bytes - allowed_bytes)
         finish = now()
         if sources_ok:
             multi_mb = _median([r.multi_mb_per_s for r in valid if r.multi_mb_per_s is not None])
@@ -752,6 +844,9 @@ async def run_node(node_id: int, source_ids: list[int] | None = None,
                 note += "（低可信度）"
             if remaining <= 256 * 1024:
                 note += "；达到单节点流量上限"
+            if over_bytes:
+                note += (f"；实际 {samples_bytes} 字节，预算允许 {allowed_bytes} 字节，"
+                         f"超出 {over_bytes} 字节")
             db.execute(
                 "UPDATE speed_runs SET finished_at=?, status=?, confidence=?, multi_mbps=?, "
                 "single_mbps=?, mb_per_s=?, single_mb_per_s=?, bytes_total=?, "
@@ -771,6 +866,8 @@ async def run_node(node_id: int, source_ids: list[int] | None = None,
             status, err = "failed", "节点与测速源均有失败"
         else:
             status, err = "source_unavailable", "所有测速源均失败"
+        if over_bytes:
+            err += f"；实际 {samples_bytes} 字节，预算允许 {allowed_bytes} 字节，超出 {over_bytes} 字节"
         db.execute("UPDATE speed_runs SET finished_at=?, status=?, confidence=?, "
                    "sources_total=?, sources_ok=?, bytes_total=?, traffic_limit_bytes=?, "
                    "error_type=?, message=? WHERE id=?",
@@ -806,6 +903,7 @@ def get_run(run_id: int) -> dict:
     run = db.row("SELECT * FROM speed_runs WHERE id=?", (run_id,))
     if not run:
         return {}
+    _fill_legacy_units(run)
     run["samples"] = db.rows(
         "SELECT * FROM speed_samples WHERE run_id=? ORDER BY id", (run_id,)
     )
@@ -844,6 +942,11 @@ def latest_valid_by_node(ttl_days: int | None = None) -> dict[int, dict]:
 
 
 def _fill_legacy_units(run: dict) -> dict:
+    total = int(run.get("bytes_total") or 0)
+    limit = int(run.get("traffic_limit_bytes") or 0)
+    allowed = min(total, limit)
+    run["bytes_allowed"] = allowed
+    run["bytes_over"] = max(0, total - allowed)
     if run.get("mb_per_s") is None and run.get("multi_mbps") is not None:
         run["mb_per_s"] = round(float(run["multi_mbps"]) / 8, 3)
     if run.get("single_mb_per_s") is None and run.get("single_mbps") is not None:
