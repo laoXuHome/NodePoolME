@@ -12,6 +12,7 @@ from backend.database import db
 from backend.database import gate as maint_gate
 from backend.health import service as health_service
 from backend.business import service as business_service
+from backend.quality import service as quality_service
 from backend.services import fetcher
 from backend.services.runtime_gate import gate
 from backend.subscriptions import builder
@@ -920,6 +921,13 @@ async def job_business_p3() -> None:
     await business_service.tick()
 
 
+async def job_quality_p4() -> None:
+    """P4 tick: refresh seven-day quality and independent speed evaluation."""
+    if maintenance_hold():
+        return
+    await quality_service.tick()
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         return
@@ -950,6 +958,10 @@ def start_scheduler() -> None:
         scheduler.add_job(job_business_p3, "interval", seconds=10, id="p3_business",
                           max_instances=1, coalesce=True,
                           next_run_time=datetime.now() + timedelta(seconds=20))
+    if os.getenv("NODEPOOL_P4_SCHEDULER", "1") == "1" and "pytest" not in sys.modules:
+        scheduler.add_job(job_quality_p4, "interval", minutes=10, id="p4_quality",
+                          max_instances=1, coalesce=True,
+                          next_run_time=datetime.now() + timedelta(seconds=30))
     scheduler.start()
     db.append_log("INFO", "调度", "调度器已启动")
 

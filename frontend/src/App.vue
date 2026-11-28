@@ -25,9 +25,10 @@ const menus = [
   { path: '/nodepool', label: '三层节点池', short: '三层', code: '04', icon: 'Files' },
   { path: '/health', label: '基础健康', short: '健康', code: '05', icon: 'FirstAidKit' },
   { path: '/business', label: '业务专项', short: '业务', code: '06', icon: 'Briefcase' },
-  { path: '/groups', label: '检测标签', short: '标签', code: '07', icon: 'Aim' },
-  { path: '/subscription', label: '订阅分发', short: '订阅', code: '08', icon: 'Link' },
-  { path: '/settings', label: '系统设置', short: '设置', code: '09', icon: 'Setting' }
+  { path: '/quality', label: '质量评价', short: '质量', code: '07', icon: 'DataAnalysis' },
+  { path: '/groups', label: '检测标签', short: '标签', code: '08', icon: 'Aim' },
+  { path: '/subscription', label: '订阅分发', short: '订阅', code: '09', icon: 'Link' },
+  { path: '/settings', label: '系统设置', short: '设置', code: '10', icon: 'Setting' }
 ]
 
 const rail = reactive({

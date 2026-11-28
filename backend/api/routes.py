@@ -25,6 +25,9 @@ from backend.services.speed_queue import queue as speed_queue, schedule_state
 from backend.services.runtime_gate import gate
 from backend.nodepool import store as nodepool_store
 from backend.health import service as health_service
+from backend.quality import service as quality_service
+from backend.quality import store as quality_store
+from backend.quality import calculator as quality_calculator
 from backend.health import store as health_store
 from backend.business import service as business_service
 from backend.business import store as business_store
@@ -1896,6 +1899,150 @@ async def sub_all_token_fmt_slash(token: str, fmt: str, request: Request,
                                   format: str | None = None):
     return _serve_sub(token, format or fmt, request.headers.get("user-agent", ""),
                       request.url.query)
+
+
+# ---------------------------------------------------------------- P4 quality
+@api.get("/quality/summary", dependencies=protected)
+def quality_summary():
+    try:
+        return quality_service.summary()
+    except Exception as exc:
+        raise HTTPException(500, f"质量评价摘要失败：{exc}") from exc
+
+
+@api.post("/quality/evaluate", dependencies=protected)
+def quality_evaluate(payload: dict | None = None):
+    try:
+        return quality_service.evaluate_all(force=bool((payload or {}).get("force", True)))
+    except Exception as exc:
+        raise HTTPException(500, f"质量评价刷新失败：{exc}") from exc
+
+
+@api.get("/quality/nodes", dependencies=protected)
+def quality_nodes(page: int = 1, per_page: int = 20, q: str | None = None,
+                  quality_state: str | None = None, speed_grade: str | None = None):
+    try:
+        return quality_service.node_rows(page=page, per_page=per_page, q=q,
+                                         quality_state=quality_state,
+                                         speed_grade=speed_grade)
+    except Exception as exc:
+        raise HTTPException(500, f"节点质量列表失败：{exc}") from exc
+
+
+@api.get("/quality/nodes/{node_id}", dependencies=protected)
+def quality_node_detail(node_id: int):
+    try:
+        return quality_service.node_detail(node_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"节点评价详情失败：{exc}") from exc
+
+
+@api.get("/quality/settings", dependencies=protected)
+def quality_settings():
+    return _quality_settings_payload()
+
+
+def _quality_settings_payload() -> dict:
+    quality_service.ensure_defaults()
+    current = quality_store.get_settings()
+    fields = [
+        {"key": "window_days", "label": "七天评价周期", "value": 7, "default": 7,
+         "range": "固定 7 天（连续滚动）", "unit": "天", "editable": False,
+         "description": "以当前时刻向前滚动七天，不使用自然周。"},
+        {"key": "min_daily_snapshots", "label": "每日最低有效快照", "value": current["min_daily_snapshots"],
+         "default": 12, "min": 6, "max": 24, "unit": "次",
+         "description": "当日确定性 Success/Failure 快照达到该数才算达标日。"},
+        {"key": "min_quality_days", "label": "最低有效评价天数", "value": current["min_quality_days"],
+         "default": 5, "min": 3, "max": 7, "unit": "天",
+         "description": "七天内达标日不足该数时，数据评为不成熟。"},
+        {"key": "min_maturity", "label": "最低数据成熟度", "value": current["min_maturity"],
+         "default": 70, "min": 50, "max": 90, "unit": "%",
+         "description": "成熟度低于该值时节点只进入观察，不获得正式优选资格。"},
+        {"key": "quality_pass", "label": "质量合格分数", "value": current["quality_pass"],
+         "default": 75, "min": 60, "max": 90, "unit": "分",
+         "description": "成熟节点达到该分数才算质量合格。"},
+        {"key": "speed_excellent", "label": "优速度阈值", "value": current["speed_excellent"],
+         "default": 5.0, "min": 0.5, "max": 50, "unit": "MB/s",
+         "description": "≥ 该值评为 🟢 优。"},
+        {"key": "speed_good", "label": "良速度阈值", "value": current["speed_good"],
+         "default": 2.0, "min": 0.25, "max": 20, "unit": "MB/s",
+         "description": "≥ 该值且低于优阈值评为 🔵 良。"},
+        {"key": "speed_minimum", "label": "最低实用速度线", "value": current["speed_minimum"],
+         "default": 0.5, "min": 0.25, "max": 1.0, "unit": "MB/s",
+         "description": "低于该值评为 🔴 危；也是差等级下界。"},
+        {"key": "speed_ttl_days", "label": "测速结果有效期", "value": current["speed_ttl_days"],
+         "default": 7, "min": 1, "max": 14, "unit": "天",
+         "description": "只采用有效期内的有效测速结果。"},
+        {"key": "speed_limit_mb", "label": "单次测速流量上限", "value": current["speed_limit_mb"],
+         "default": 50, "min": 10, "max": 100, "unit": "MB",
+         "description": "单节点单次测速所有请求与重试合计不得超过该值。"},
+        {"key": "speed_window_start", "label": "测速窗口开始", "value": current["speed_window_start"],
+         "default": "17:00", "unit": "本地时间",
+         "description": "默认晚高峰窗口；白天不自动测速。"},
+        {"key": "speed_window_end", "label": "测速窗口结束", "value": current["speed_window_end"],
+         "default": "24:00", "unit": "本地时间",
+         "description": "24:00 表示当日结束（次日 00:00）。"},
+        {"key": "speed_schedule_enabled", "label": "定时测速", "value": current["speed_schedule_enabled"],
+         "default": True, "unit": "开关",
+         "description": "开启后在窗口内按固定间隔执行，不使用动态随机频率。"},
+        {"key": "speed_every_days", "label": "测速间隔", "value": current["speed_every_days"],
+         "default": 1, "min": 1, "max": 7, "unit": "天",
+         "description": "1 表示每日一次。"},
+        {"key": "speed_concurrency", "label": "测速并发", "value": current["speed_concurrency"],
+         "default": 4, "min": 1, "max": 16, "unit": "节点",
+         "description": "手动、重新与定时测速共用该并发上限。"},
+    ]
+    return {"current": current, "fields": fields,
+            "weights": {
+                "peak": {"label": "17:00–01:00", "value": current["weights"].get("peak"),
+                         "default": 50, "min": 0, "max": 100},
+                "night": {"label": "01:00–08:00", "value": current["weights"].get("night"),
+                          "default": 15, "min": 0, "max": 100},
+                "day": {"label": "08:00–17:00", "value": current["weights"].get("day"),
+                        "default": 35, "min": 0, "max": 100},
+            },
+            "grade_rules": {
+                "excellent": "≥ 优阈值", "good": "≥ 良阈值且 < 优阈值",
+                "poor": "≥ 最低线且 < 良阈值", "danger": "< 最低线",
+                "empty": "无有效测速结果（不判低速）", "excluded": "机场已排除（灰色无数据）",
+            },
+            "timezone": current["timezone"],
+            "quality_weights": quality_calculator.QUALITY_WEIGHTS,
+            "maturity_weights": {"snapshots": 50, "days": 25, "coverage": 25}}
+
+
+@api.patch("/quality/settings", dependencies=protected)
+def quality_update_settings(payload: dict):
+    try:
+        quality_store.update_settings(payload)
+        return _quality_settings_payload()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@api.post("/quality/speed/test", dependencies=protected)
+def quality_speed_test(payload: dict | None = None):
+    body = payload or {}
+    mode = str(body.get("mode") or "manual")
+    ids = [int(x) for x in (body.get("node_ids") or [])]
+    if mode in ("new", "all") and not ids:
+        ids = speedtest.eligible_node_ids(new_only=(mode == "new"))
+    try:
+        result = quality_service.enqueue_speed(ids, mode=mode)
+        return {**result, "mode": mode, "node_ids": ids}
+    except Exception as exc:
+        raise HTTPException(400, f"测速任务创建失败：{exc}") from exc
+
+
+@api.patch("/quality/airports/{airport_id}", dependencies=protected)
+def quality_airport_exclude(airport_id: int, payload: dict | None = None):
+    excluded = bool((payload or {}).get("excluded", True))
+    try:
+        return quality_service.set_airport_excluded(airport_id, excluded)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @sub_router.get("/healthz")

@@ -102,11 +102,11 @@ def test_traffic_limit_default_and_schedule_window():
     assert settings["sample"] == 10
     assert settings["conn_timeout"] == 8
     current, start, end = speed_queue.window_bounds(
-        datetime(2026, 11, 25, 18, 0, tzinfo=ZoneInfo("Asia/Shanghai")))
-    assert start.hour == 18 and end.hour == 23 and end.minute == 30
+        datetime(2026, 11, 25, 17, 0, tzinfo=ZoneInfo("Asia/Shanghai")))
+    assert start.hour == 17 and end.day == 26 and end.hour == 0 and end.minute == 0
     current, start, end = speed_queue.window_bounds(
         datetime(2026, 11, 25, 23, 40, tzinfo=ZoneInfo("Asia/Shanghai")))
-    assert not (start <= current < end)
+    assert start <= current < end
 
 
 def test_overnight_window_after_midnight_belongs_to_previous_day():
@@ -239,7 +239,7 @@ def test_run_node_records_bytes_and_connect_time(monkeypatch):
     assert run["grade"] == "excellent"
 
 
-def test_failed_source_does_not_consume_budget(monkeypatch):
+def test_failed_source_consumes_shared_budget(monkeypatch):
     import asyncio
     from backend.testers import engine as engine_mod
 
@@ -278,10 +278,10 @@ def test_failed_source_does_not_consume_budget(monkeypatch):
     monkeypatch.setattr(speedtest, "_confirm_source_failure", fake_confirm)
     run = asyncio.run(speedtest.run_node(node_id, trigger="manual", prepared=True))
     assert run["status"] == "partial"
-    # A fails both attempts; its 10 MB is not charged. B still gets the full 50 MB.
+    # A's two failed attempts each spend 5 MB; B receives only the 40 MB left.
     assert calls[0] == (11, 50 * 1024 * 1024)
-    assert calls[1] == (11, 50 * 1024 * 1024)
-    assert calls[2] == (12, 50 * 1024 * 1024)
+    assert calls[1] == (11, 45 * 1024 * 1024)
+    assert calls[2] == (12, 40 * 1024 * 1024)
     assert run["bytes_total"] == 15 * 1024 * 1024
 
 

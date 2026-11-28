@@ -8,7 +8,7 @@ import asyncio
 import random
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, time as dtime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from backend import config
@@ -38,31 +38,39 @@ def _tz() -> ZoneInfo:
         return ZoneInfo("Asia/Shanghai")
 
 
-def _clock(value: str | None, fallback: str) -> dtime:
+def _minutes(value: str | None, fallback: str) -> int:
+    """Parse HH:MM into minutes.  24:00 is a valid end-of-day boundary."""
     try:
-        hh, mm = str(value or fallback).split(":")[:2]
-        return dtime(int(hh), int(mm))
+        hh, mm = (str(value or fallback).split(":") + ["0"])[:2]
+        hh, mm = int(hh), int(mm)
+        if hh == 24 and mm == 0:
+            return 1440
+        if not (0 <= hh <= 23 and 0 <= mm <= 59):
+            raise ValueError
+        return hh * 60 + mm
     except Exception:
-        hh, mm = fallback.split(":")
-        return dtime(int(hh), int(mm))
+        hh, mm = fallback.split(":")[:2]
+        hh, mm = int(hh), int(mm)
+        return 1440 if hh == 24 and mm == 0 else hh * 60 + mm
 
 
 def window_bounds(now: datetime | None = None) -> tuple[datetime, datetime, datetime]:
     tz = _tz()
     current = (now or datetime.now(tz)).astimezone(tz)
-    start_time = _clock(db.get("speed_window_start"), "18:00")
-    end_time = _clock(db.get("speed_window_end"), "23:30")
-    if end_time > start_time:
-        start = datetime.combine(current.date(), start_time, tz)
-        end = datetime.combine(current.date(), end_time, tz)
-    elif current.time() < end_time:
+    start_min = _minutes(db.get("speed_window_start"), "17:00")
+    end_min = _minutes(db.get("speed_window_end"), "24:00")
+    midnight = datetime.combine(current.date(), datetime.min.time(), tz)
+    if end_min > start_min:
+        start = midnight + timedelta(minutes=start_min)
+        end = midnight + timedelta(minutes=end_min)
+    elif current.hour * 60 + current.minute < end_min:
         # After midnight, still inside yesterday's overnight window.
-        start = datetime.combine((current - timedelta(days=1)).date(), start_time, tz)
-        end = datetime.combine(current.date(), end_time, tz)
+        start = midnight - timedelta(days=1) + timedelta(minutes=start_min)
+        end = midnight + timedelta(minutes=end_min)
     else:
         # Before midnight, the window ends on the next calendar day.
-        start = datetime.combine(current.date(), start_time, tz)
-        end = datetime.combine((current + timedelta(days=1)).date(), end_time, tz)
+        start = midnight + timedelta(minutes=start_min)
+        end = midnight + timedelta(days=1) + timedelta(minutes=end_min)
     return current, start, end
 
 
@@ -80,8 +88,8 @@ def schedule_state() -> dict:
     return {
         "enabled": db.get("speed_schedule_enabled", "1") == "1",
         "timezone": db.get("speed_timezone", "Asia/Shanghai"),
-        "window_start": db.get("speed_window_start", "18:00"),
-        "window_end": db.get("speed_window_end", "23:30"),
+        "window_start": db.get("speed_window_start", "17:00"),
+        "window_end": db.get("speed_window_end", "24:00"),
         "every_days": every,
         "last_date": last,
         "next_due_date": next_due,

@@ -24,6 +24,9 @@ _P3_TABLES = (
     "np3_events", "np3_queue", "np3_stages", "np3_checks", "np3_state",
     "np3_target_checks", "np3_targets",
 )
+_P4_TABLES = (
+    "np4_current", "np4_evaluations", "np4_speed_meta", "np4_events",
+)
 _ORIGINAL_ENGINE = None
 
 
@@ -43,7 +46,7 @@ def clean_database():
     db.init_db()
     # P1 tables are created lazily. Drop them so every test still starts from
     # the frozen baseline structure (migration/backup tests depend on that).
-    for table in _P1_TABLES + _P2_TABLES + _P3_TABLES:
+    for table in _P1_TABLES + _P2_TABLES + _P3_TABLES + _P4_TABLES:
         db.execute(f'DROP TABLE IF EXISTS "{table}"')
     for table in _TABLES:
         db.execute(f"DELETE FROM {table}")

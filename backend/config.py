@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NodePoolME"
-VERSION = "2.038"
+VERSION = "2.039"
 
 DATA_DIR = Path(os.getenv("NODEPOOL_DATA_DIR", "./data")).resolve()
 CONFIG_DIR = Path(os.getenv("NODEPOOL_CONFIG_DIR", str(DATA_DIR / "config"))).resolve()
@@ -137,14 +137,14 @@ DEFAULT_SETTINGS = {
     # 定时测速：北京时间晚高峰窗口内随机分散，每天或每隔 N 天一次
     "speed_schedule_enabled": "1",
     "speed_timezone": "Asia/Shanghai",
-    "speed_window_start": "18:00",
-    "speed_window_end": "23:30",
+    "speed_window_start": "17:00",
+    "speed_window_end": "24:00",
     "speed_schedule_every_days": "1",
     "speed_schedule_last_date": "",
     # 单节点单轮总下载流量上限（所有测速源累计）
     "speed_traffic_limit_mb": "50",
     # 最新有效结果保留时长；过期只显示待测速，不判故障、不补测
-    "speed_result_ttl_days": "3",
+    "speed_result_ttl_days": "7",
     # 四档速度阈值，单位 MB/s（512 KB/s = 0.5 MB/s）
     "speed_grade_excellent": "3",
     "speed_grade_good": "1.5",

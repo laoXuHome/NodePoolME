@@ -573,7 +573,7 @@ def _settings() -> dict:
         "primary": max(1, min(db.get_int("speed_primary_sources", 3), 5)),
         "traffic_limit_mb": limit_mb,
         "traffic_limit_bytes": limit_mb * 1024 * 1024,
-        "ttl_days": max(1, min(db.get_int("speed_result_ttl_days", 3), 30)),
+        "ttl_days": max(1, min(db.get_int("speed_result_ttl_days", 7), 30)),
     }
 
 
@@ -658,27 +658,23 @@ async def run_node(node_id: int, source_ids: list[int] | None = None,
                 break
             if remaining <= 256 * 1024:
                 break
-            # The cap is the amount needed to finish one speed-test URL. Bytes from
-            # an attempt that never completed do not consume it, so the next retry
-            # or the next source can still use the full cap.
-            budget = min(settings["traffic_limit_bytes"], remaining)
             attempts += 1
             attempt = 0
             result = None
             while attempt <= settings["retry"] and remaining > 256 * 1024:
                 attempt += 1
+                # One run-wide budget. Every attempt, including a failed or timed
+                # out one, spends its actual bytes and can never restore the cap.
+                budget = min(settings["traffic_limit_bytes"], remaining)
                 result = await _test_source(source, port, node, settings, max_bytes=budget)
                 consumed_bytes += result.bytes
+                remaining = max(0, remaining - min(result.bytes, remaining))
                 _save_sample(run_id, node_id, result)
                 if result.ok:
-                    remaining -= min(result.bytes, remaining)
                     break
                 # A node that cannot open the proxy tunnel will not recover on retry.
                 if result.error_type == "node_connect":
                     break
-                # A failed attempt is not charged to the node cap; retry gets the
-                # same full allowance instead of the leftover bytes.
-                budget = min(settings["traffic_limit_bytes"], remaining)
             if result is None:
                 break
             if result.ok:
