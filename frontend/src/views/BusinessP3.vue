@@ -557,7 +557,7 @@ onMounted(reload)
 .p3-section-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
 .p3-section-head h3 { margin: 0; font-size: 15px; color: #203730; }
 .p3-section-head p { margin: 3px 0 0; font-size: 12px; }
-.p3-target-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.p3-target-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .p3-target { padding: 10px 12px; border: 1px solid rgba(31,61,51,.08); border-radius: 10px; background: #fbfdfc; min-width: 0; }
 .p3-target.off { opacity: .62; background: #f7f7f6; }
 .p3-target-head { display: flex; align-items: center; gap: 7px; }
