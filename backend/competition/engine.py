@@ -334,7 +334,7 @@ def _find_replacement(conn, category: str, candidate: dict, *, gap: int) -> dict
 
 
 def _promote_with_replacement(conn, candidate: dict, target: dict | None, *, now: str,
-                              gap: int) -> int:
+                              gap: int, reason: str | None = None) -> int:
     changes = 0
     if target is not None:
         target_before = target.get("score")
@@ -364,7 +364,8 @@ def _promote_with_replacement(conn, candidate: dict, target: dict | None, *, now
         changes += 1
     changes += _transition(
         conn, candidate, "preferred", now=now,
-        reason="candidate_promoted" if target is None else "candidate_replaced_mature",
+        reason=(reason or ("candidate_promoted" if target is None
+                           else "candidate_replaced_mature")),
         before_score=candidate.get("_before_score"),
         replaced_node_id=int(target["node_id"]) if target is not None else None,
         replace_reason=("mature_yields_after_gap_and_two_confirmations"
@@ -522,11 +523,20 @@ def _process(conn, node: dict, st: dict, category: str, cfg: dict, ev: dict,
             if st["advantage_count"] >= 2:
                 changes += _promote_with_replacement(conn, st, weakest, now=now_text,
                                                      gap=int(cfg["replace_gap"]))
-                store.save_state(conn, st)
+            elif st["advantage_count"] > 0:
+                # The replacement gap has been reached once.  Do not replace
+                # yet; wait for the second distinct confirmation.  This only
+                # delays a replacement, never a normal promotion without one.
+                st["last_reason"] = "replacement_confirming"
             else:
-                st["last_reason"] = ("mature_priority" if st["advantage_count"] <= 0
-                                     else "replacement_confirming")
-                store.save_state(conn, st)
+                # A qualified candidate that does not lead the weakest mature
+                # preferred by the replacement gap must still be promoted.  It
+                # joins the preferred list without displacing anyone: there is
+                # no fixed quota, and mature nodes are kept.
+                changes += _promote_with_replacement(
+                    conn, st, None, now=now_text, gap=int(cfg["replace_gap"]),
+                    reason="candidate_promoted_without_replacement")
+            store.save_state(conn, st)
             return changes
         changes += _promote_with_replacement(conn, st, None, now=now_text,
                                              gap=int(cfg["replace_gap"]))

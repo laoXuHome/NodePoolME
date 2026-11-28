@@ -149,7 +149,7 @@ def test_candidate_needs_two_valid_confirmations_for_preference():
     assert cat_state(nid)["state"] == "preferred"
 
 
-def test_mature_node_is_not_replaced_without_gap_and_two_confirmations():
+def test_candidate_without_gap_is_promoted_and_mature_preferred_is_kept():
     now = datetime.now()
     mature = seed_node(name="成熟节点", first_seen=now - timedelta(days=20))
     newcomer = seed_node(name="新节点", first_seen=now - timedelta(days=8))
@@ -162,9 +162,15 @@ def test_mature_node_is_not_replaced_without_gap_and_two_confirmations():
     run_at(now + timedelta(minutes=2))
     seed_quality(newcomer, score=84, at=now + timedelta(minutes=3))
     run_at(now + timedelta(minutes=3))
-    assert cat_state(newcomer)["state"] == "candidate"
+    assert cat_state(newcomer)["state"] == "preferred"
     assert cat_state(mature)["state"] == "preferred"
     assert cat_state(newcomer)["advantage_count"] == 0
+    newcomer_history = store.history(newcomer, limit=10)
+    assert any(h["reason"] == "candidate_promoted_without_replacement"
+               for h in newcomer_history)
+    assert not any(h["replaced_node_id"] for h in newcomer_history)
+    assert not any(h["reason"] == "replaced_by_new_node"
+                   for h in store.history(mature, limit=10))
 
 
 def test_new_node_replaces_mature_only_after_gap_and_two_confirmations():
@@ -180,12 +186,35 @@ def test_new_node_replaces_mature_only_after_gap_and_two_confirmations():
     run_at(now + timedelta(minutes=2))
     assert cat_state(newcomer)["state"] == "candidate"
     assert cat_state(newcomer)["advantage_count"] == 1
+    assert cat_state(mature)["state"] == "preferred"
+    assert not any(h["replaced_node_id"] for h in store.history(newcomer, limit=10))
+    assert not any(h["reason"] == "replaced_by_new_node"
+                   for h in store.history(mature, limit=10))
     seed_quality(newcomer, score=90, at=now + timedelta(minutes=3))
     run_at(now + timedelta(minutes=3))
     assert cat_state(newcomer)["state"] == "preferred"
     assert cat_state(mature)["state"] == "observation"
     history = store.history(mature, limit=10)
     assert any(h["reason"] == "replaced_by_new_node" for h in history)
+
+
+def test_gap_without_second_confirmation_keeps_candidate_and_never_replaces():
+    now = datetime.now()
+    mature = seed_node(name="待让位", first_seen=now - timedelta(days=20))
+    newcomer = seed_node(name="一次领先", first_seen=now - timedelta(days=8))
+    seed_quality(mature, score=80, at=now)
+    run_at(now)
+    seed_quality(mature, score=80, at=now + timedelta(minutes=1))
+    run_at(now + timedelta(minutes=1))
+    assert cat_state(mature)["state"] == "preferred"
+    seed_quality(newcomer, score=90, at=now + timedelta(minutes=2))
+    run_at(now + timedelta(minutes=2))
+    assert cat_state(newcomer)["state"] == "candidate"
+    assert cat_state(newcomer)["advantage_count"] == 1
+    assert cat_state(mature)["state"] == "preferred"
+    assert not any(h["replaced_node_id"] for h in store.history(newcomer, limit=10))
+    assert not any(h["reason"] == "replaced_by_new_node"
+                   for h in store.history(mature, limit=10))
 
 
 def test_mature_single_low_score_does_not_demote():
@@ -323,7 +352,7 @@ def test_settings_validate_range_and_restore_defaults():
     assert restored["current"]["replace_gap"] == 8
 
 
-def test_same_score_does_not_replace_mature_preferred():
+def test_same_score_promotes_without_replacing_mature_preferred():
     now = datetime.now()
     mature = seed_node(name="同分成熟", first_seen=now - timedelta(days=20))
     newcomer = seed_node(name="同分新节点", first_seen=now - timedelta(days=8))
@@ -335,9 +364,10 @@ def test_same_score_does_not_replace_mature_preferred():
     for i in (2, 3, 4):
         seed_quality(newcomer, score=90, at=now + timedelta(minutes=i))
         run_at(now + timedelta(minutes=i))
-    assert cat_state(newcomer)["state"] == "candidate"
+    assert cat_state(newcomer)["state"] == "preferred"
     assert cat_state(mature)["state"] == "preferred"
     assert cat_state(newcomer)["advantage_count"] == 0
+    assert not any(h["replaced_node_id"] for h in store.history(newcomer, limit=10))
 
 
 def test_speed_danger_blocks_and_no_speed_data_is_flagged_allowed():
