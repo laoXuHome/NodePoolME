@@ -15,7 +15,11 @@ from backend.testers import engine as engine_mod
 # All business probes run through the tested node's own SOCKS listener.
 # There is intentionally no control-plane target availability probe here:
 # a server-side failure must never be interpreted as the target being down.
-node_probe: Callable[..., Awaitable[dict]] = prober.probe_target
+async def node_probe(target: dict, *, proxy_port: int, deadline_seconds: float = 20):
+    return await prober.probe_target(target, proxy_port=proxy_port,
+                                     deadline_seconds=deadline_seconds,
+                                     proxy_dns=True)
+
 prepare_ports: Callable[[list[dict]], Awaitable[dict[int, int]]] = health_service.prepare_ports
 
 _batch_task: asyncio.Task | None = None

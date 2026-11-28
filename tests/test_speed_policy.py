@@ -23,7 +23,8 @@ def _node(name: str, airport: str = "测速机场") -> tuple[int, int]:
     return airport_id, node_id
 
 
-def _valid_run(node_id: int, mb_per_s: float, finished_at: str = "2026-11-25 10:00:00") -> int:
+def _valid_run(node_id: int, mb_per_s: float, finished_at: str | None = None) -> int:
+    finished_at = finished_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return db.execute(
         "INSERT INTO speed_runs (node_id, started_at, finished_at, status, confidence, "
         "mb_per_s, multi_mbps, sources_total, sources_ok) VALUES (?,?,?,?,?,?,?,?,?)",

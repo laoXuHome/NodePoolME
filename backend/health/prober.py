@@ -39,6 +39,22 @@ TARGET_DEADLINE = 20.0
 EXPECTED_HTTPS = range(200, 400)
 
 
+class ProxyUnavailable(OSError):
+    """The node's local SOCKS listener is not available."""
+
+
+class ProxyError(OSError):
+    """SOCKS protocol/handshake failure, responsibility not attributable to the target."""
+
+
+class SocksTargetError(OSError):
+    """SOCKS proxy reached the target but the target connection was refused/failed."""
+
+    def __init__(self, reply: int):
+        self.reply = int(reply)
+        super().__init__(f"socks_connect_failed:{self.reply}")
+
+
 def now_stamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -134,20 +150,33 @@ def _socks_request(host: str, port: int) -> bytes:
         return b"\x05\x01\x00\x03" + len(name).to_bytes(1, "big") + name + int(port).to_bytes(2, "big")
 
 
-async def _socks_connect(proxy_port: int, host: str, port: int, timeout: float):
+async def _socks_open(proxy_port: int, host: str, port: int, timeout: float):
+    """Open a SOCKS5 CONNECT and return ``(reader, writer, latency_ms, reply)``.
+
+    The domain is always sent as ATYP=0x03 (or as an IPv4 literal only when the
+    caller already supplied an IP).  The proxy therefore performs the DNS
+    lookup; this module never resolves the target on the controller for a node
+    probe.
+    """
     started = time.perf_counter()
-    reader, writer = await asyncio.wait_for(
-        asyncio.open_connection("127.0.0.1", int(proxy_port)), timeout
-    )
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection("127.0.0.1", int(proxy_port)), timeout
+        )
+    except asyncio.TimeoutError as exc:
+        raise ProxyUnavailable("proxy_connect_timeout") from exc
+    except OSError as exc:
+        raise ProxyUnavailable(f"proxy_unavailable:{type(exc).__name__}: {exc}") from exc
     try:
         writer.write(b"\x05\x01\x00")
         greet = await asyncio.wait_for(reader.readexactly(2), timeout)
         if greet != b"\x05\x00":
-            raise OSError(f"socks_method_rejected:{greet!r}")
+            raise ProxyError(f"socks_method_rejected:{greet!r}")
         writer.write(_socks_request(host, port))
         head = await asyncio.wait_for(reader.readexactly(4), timeout)
-        if head[0] != 5 or head[1] != 0:
-            raise OSError(f"socks_connect_failed:{head[1]}")
+        if head[0] != 5:
+            raise ProxyError(f"socks_bad_version:{head[0]}")
+        reply = int(head[1])
         atyp = head[3]
         if atyp == 1:
             await asyncio.wait_for(reader.readexactly(4 + 2), timeout)
@@ -157,16 +186,96 @@ async def _socks_connect(proxy_port: int, host: str, port: int, timeout: float):
             length = await asyncio.wait_for(reader.readexactly(1), timeout)
             await asyncio.wait_for(reader.readexactly(int(length[0]) + 2), timeout)
         else:
-            raise OSError(f"socks_bad_atyp:{atyp}")
-        return reader, writer, _elapsed_ms(started)
-    except Exception:
+            raise ProxyError(f"socks_bad_atyp:{atyp}")
+        return reader, writer, _elapsed_ms(started), reply
+    except asyncio.TimeoutError as exc:
+        with contextlib.suppress(Exception):
+            writer.close()
+        raise ProxyError("socks_timeout") from exc
+    except ProxyError:
         with contextlib.suppress(Exception):
             writer.close()
         raise
+    except OSError as exc:
+        with contextlib.suppress(Exception):
+            writer.close()
+        raise ProxyError(f"socks_io_error:{type(exc).__name__}: {exc}") from exc
+
+
+async def _socks_connect(proxy_port: int, host: str, port: int, timeout: float):
+    reader, writer, latency, reply = await _socks_open(proxy_port, host, port, timeout)
+    if reply != 0:
+        with contextlib.suppress(Exception):
+            writer.close()
+        raise SocksTargetError(reply)
+    return reader, writer, latency
+
+
+async def _proxy_dns(proxy_port: int, host: str, port: int, timeout: float) -> tuple[dict, str | None]:
+    """Confirm domain resolution through the node's SOCKS listener.
+
+    SOCKS5 has no resolve-only command, so a separate domain CONNECT is used as
+    the resolution witness.  Only a successful CONNECT proves that the node-side
+    proxy resolved the hostname and reached the target.  A refusal (0x05) is not
+    a resolution proof because a proxy may reject the request by policy before
+    resolving; host unreachable and all other replies remain Unknown.  The
+    controller's ``getaddrinfo`` is never consulted.
+    """
+    started = time.perf_counter()
+    writer = None
+    try:
+        reader, writer, latency, reply = await _socks_open(proxy_port, host, port, timeout)
+        with contextlib.suppress(Exception):
+            writer.close()
+        if reply == 0:
+            return (_stage("dns", executed=True, status="success", ok=True,
+                           latency_ms=latency, slow=latency > DNS_ABNORMAL_MS,
+                           detail={"resolver": "node_proxy", "via": "socks5_domain",
+                                   "reply": reply, "dns_result": "resolved",
+                                   "normal_ms": DNS_NORMAL_MS,
+                                   "abnormal_ms": DNS_ABNORMAL_MS}), None)
+        if reply == 5:
+            return (_stage("dns", executed=True, status="unknown",
+                           latency_ms=_elapsed_ms(started),
+                           detail={"resolver": "node_proxy", "via": "socks5_domain",
+                                   "reason": "proxy_dns_target_refused", "reply": reply}),
+                    "proxy_dns_target_refused")
+        if reply == 4:
+            return (_stage("dns", executed=True, status="unknown",
+                           latency_ms=_elapsed_ms(started),
+                           detail={"resolver": "node_proxy", "via": "socks5_domain",
+                                   "reason": "proxy_dns_host_unreachable", "reply": reply}),
+                    "proxy_dns_host_unreachable")
+        return (_stage("dns", executed=True, status="unknown",
+                       latency_ms=_elapsed_ms(started),
+                       detail={"resolver": "node_proxy", "via": "socks5_domain",
+                               "reason": "proxy_dns_error", "reply": reply}),
+                "proxy_dns_error")
+    except ProxyUnavailable as exc:
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+        return (_stage("dns", executed=True, status="unknown", latency_ms=_elapsed_ms(started),
+                       detail={"resolver": "node_proxy", "reason": "proxy_unavailable",
+                               "error": str(exc)}), "proxy_unavailable")
+    except ProxyError as exc:
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+        return (_stage("dns", executed=True, status="unknown", latency_ms=_elapsed_ms(started),
+                       detail={"resolver": "node_proxy", "reason": "proxy_error",
+                               "error": str(exc)}), "proxy_error")
+    except asyncio.TimeoutError:
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+        return (_stage("dns", executed=True, status="unknown", latency_ms=_elapsed_ms(started),
+                       detail={"resolver": "node_proxy", "reason": "dns_timeout"}), "dns_timeout")
 
 
 async def _tcp_samples(*, host: str, port: int, timeout: float, deadline: float,
-                       proxy_port: int | None) -> tuple[list[dict], dict]:
+                       proxy_port: int | None, strict_proxy: bool = False
+                       ) -> tuple[list[dict], dict]:
     samples: list[dict] = []
     for idx in range(TCP_ATTEMPTS):
         remaining = deadline - time.monotonic()
@@ -188,11 +297,23 @@ async def _tcp_samples(*, host: str, port: int, timeout: float, deadline: float,
                             "error": None, "sampled_at": now_stamp()})
         except asyncio.TimeoutError:
             samples.append({"index": idx, "ok": False, "latency_ms": None,
-                            "error": "timeout", "sampled_at": now_stamp(),
+                            "error": "timeout", "error_kind": "ambiguous",
+                            "sampled_at": now_stamp(),
+                            "elapsed_ms": _elapsed_ms(started)})
+        except (ProxyUnavailable, ProxyError) as exc:
+            samples.append({"index": idx, "ok": False, "latency_ms": None,
+                            "error": f"{type(exc).__name__}: {exc}", "error_kind": "proxy",
+                            "sampled_at": now_stamp(),
+                            "elapsed_ms": _elapsed_ms(started)})
+        except SocksTargetError as exc:
+            samples.append({"index": idx, "ok": False, "latency_ms": None,
+                            "error": f"{type(exc).__name__}: {exc}", "error_kind": "target",
+                            "sampled_at": now_stamp(),
                             "elapsed_ms": _elapsed_ms(started)})
         except (ConnectionRefusedError, OSError) as exc:
             samples.append({"index": idx, "ok": False, "latency_ms": None,
-                            "error": f"{type(exc).__name__}: {exc}", "sampled_at": now_stamp(),
+                            "error": f"{type(exc).__name__}: {exc}", "error_kind": "target",
+                            "sampled_at": now_stamp(),
                             "elapsed_ms": _elapsed_ms(started)})
         finally:
             if writer is not None:
@@ -212,9 +333,19 @@ async def _tcp_samples(*, host: str, port: int, timeout: float, deadline: float,
               "method": "nearest_rank", "rank": math.ceil(0.8 * len(valid)) if valid else None}
     if not valid:
         errors = [s["error"] or "" for s in samples]
-        status = "unknown" if all("deadline" in e for e in errors) else "failure"
+        kinds = {s.get("error_kind") for s in samples}
+        if all("deadline" in e for e in errors):
+            status, reason = "unknown", "tcp_all_failed"
+        elif strict_proxy and kinds <= {"proxy", "ambiguous"}:
+            status = "unknown"
+            reason = "proxy_unavailable" if all(
+                s.get("error_kind") == "proxy" and "ProxyUnavailable" in (s.get("error") or "")
+                for s in samples
+            ) else "proxy_error"
+        else:
+            status, reason = "failure", "tcp_all_failed"
         return samples, _stage("tcp", executed=True, status=status,
-                               detail={**detail, "reason": "tcp_all_failed"})
+                               detail={**detail, "reason": reason})
     return samples, _stage("tcp", executed=True, status="success", ok=True, latency_ms=p80,
                            slow=p80 > TCP_OBSERVE_MS, detail=detail)
 
@@ -248,8 +379,10 @@ def _cert_detail(writer: asyncio.StreamWriter) -> dict:
 
 
 async def _tls_https(*, target: dict, timeout: float, deadline: float,
-                     proxy_port: int | None) -> tuple[dict, dict]:
+                     proxy_port: int | None, strict_proxy: bool = False
+                     ) -> tuple[dict, dict]:
     writer = None
+    tls_stage = None
     try:
         remaining = deadline - time.monotonic()
         tls_timeout = min(TLS_TIMEOUT, remaining)
@@ -306,7 +439,25 @@ async def _tls_https(*, target: dict, timeout: float, deadline: float,
                     "headers": {k: headers.get(k) for k in ("content-type", "content-length",
                                                             "location") if k in headers}},
         )
+    except (ProxyUnavailable, ProxyError) as exc:
+        if strict_proxy:
+            reason = "proxy_unavailable" if isinstance(exc, ProxyUnavailable) else "proxy_error"
+            return (_stage("tls", executed=True, status="unknown",
+                           detail={"reason": reason,
+                                   "error": f"{type(exc).__name__}: {exc}"}),
+                   _unexecuted("https", "节点代理出口不可用"))
+        return (_stage("tls", executed=True, status="failure",
+                       detail={"reason": "tls_proxy_error",
+                               "error": f"{type(exc).__name__}: {exc}"}),
+                _unexecuted("https"))
+    except SocksTargetError as exc:
+        return (_stage("tls", executed=True, status="failure",
+                       detail={"reason": "tls_connect_failed", "reply": exc.reply}),
+                _unexecuted("https"))
     except asyncio.TimeoutError:
+        if tls_stage is not None:
+            return (tls_stage, _stage("https", executed=True, status="unknown",
+                                      detail={"reason": "https_timeout"}))
         return (_stage("tls", executed=True, status="failure",
                        detail={"reason": "tls_timeout"}), _unexecuted("https"))
     except ssl.SSLError as exc:
@@ -314,6 +465,11 @@ async def _tls_https(*, target: dict, timeout: float, deadline: float,
                        detail={"reason": "tls_error", "error": f"{type(exc).__name__}: {exc}"}),
                 _unexecuted("https"))
     except Exception as exc:
+        if strict_proxy:
+            return (_stage("tls", executed=True, status="unknown",
+                           detail={"reason": "detector_error",
+                                   "error": f"{type(exc).__name__}: {exc}"}),
+                   _unexecuted("https", "检测器内部异常，责任方不明"))
         return (_stage("tls", executed=True, status="failure",
                        detail={"reason": "tls_unknown", "error": f"{type(exc).__name__}: {exc}"}),
                 _unexecuted("https"))
@@ -378,29 +534,55 @@ def _combine(target: dict, dns_stage: dict, tcp_stage: dict,
 
 async def probe_target(target: dict, *, proxy_port: int | None = None,
                        deadline_seconds: float = TARGET_DEADLINE,
-                       allow_http: bool = False) -> dict:
-    """Run one target probe, direct or through the node's SOCKS listener."""
+                       allow_http: bool = False, proxy_dns: bool = False) -> dict:
+    """Run one target probe, direct or through the node's SOCKS listener.
+
+    ``proxy_dns=True`` is the P3 mode: DNS is confirmed by the node's SOCKS
+    listener and the original hostname (never a controller-resolved IP) is sent
+    through the same listener for TCP/TLS/HTTPS.  The default keeps P2's
+    controller-DNS behavior unchanged.
+    """
     started = time.monotonic()
     deadline = started + deadline_seconds
     host = target.get("host") or ""
     port = int(target.get("port") or (443 if target.get("secure") else 80))
-    dns_stage, addresses, dns_error = await _dns(host, port, min(DNS_TIMEOUT, deadline - started))
+    if proxy_dns:
+        if proxy_port is None:
+            dns_stage = _stage("dns", executed=True, status="unknown", latency_ms=0,
+                               detail={"resolver": "node_proxy",
+                                       "reason": "proxy_dns_requires_node_port"})
+            return _combine(target, dns_stage, _unexecuted("tcp"), _unexecuted("tls"),
+                            _unexecuted("https"), [], started, None, proxy=False)
+        dns_stage, _dns_error = await _proxy_dns(
+            int(proxy_port), host, port, min(DNS_TIMEOUT, deadline - started)
+        )
+        addresses = []
+    else:
+        dns_stage, addresses, _dns_error = await _dns(
+            host, port, min(DNS_TIMEOUT, deadline - started)
+        )
     if not dns_stage["ok"]:
         return _combine(target, dns_stage, _unexecuted("tcp"), _unexecuted("tls"),
                         _unexecuted("https"), [], started, None,
                         proxy=proxy_port is not None)
-    # Use a resolved IPv4 address to keep the TCP stage independent from DNS.
-    ipv4 = next((a for a in addresses if ":" not in a), addresses[0])
+    # P3 always sends the hostname to the node proxy so the proxy performs DNS.
+    # P2 retains its existing resolved-IPv4 TCP behavior.
+    if proxy_dns:
+        tcp_host = host
+    else:
+        ipv4 = next((a for a in addresses if ":" not in a), addresses[0])
+        tcp_host = ipv4 if ":" not in ipv4 else host
     samples, tcp_stage = await _tcp_samples(
-        host=ipv4 if ":" not in ipv4 else host, port=port, timeout=TCP_TIMEOUT,
-        deadline=deadline, proxy_port=proxy_port,
+        host=tcp_host, port=port, timeout=TCP_TIMEOUT,
+        deadline=deadline, proxy_port=proxy_port, strict_proxy=proxy_dns,
     )
     if not tcp_stage.get("ok"):
         return _combine(target, dns_stage, tcp_stage, _unexecuted("tls"),
                         _unexecuted("https"), samples, started, None,
                         proxy=proxy_port is not None)
     tls_stage, https_stage = await _tls_https(
-        target=target, timeout=TLS_TIMEOUT, deadline=deadline, proxy_port=proxy_port
+        target=target, timeout=TLS_TIMEOUT, deadline=deadline, proxy_port=proxy_port,
+        strict_proxy=proxy_dns,
     )
     return _combine(target, dns_stage, tcp_stage, tls_stage, https_stage, samples,
                     started, (tcp_stage.get("detail") or {}).get("p80_ms"),
