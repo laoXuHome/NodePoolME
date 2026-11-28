@@ -15,10 +15,11 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from backend import config
 from backend.api import auth
 from backend.database import db
-from backend.models.schemas import (AirportIn, AirportPatch, GroupIn, GroupPatch, LoginIn,
-                                    NodePoolCompetitionIn, NodePoolHealthIn, NodePoolLayerIn,
-                                    NodePoolQualificationIn, NodeTestIn, PasswordIn, RunIn,
-                                    SettingsIn, SubSettings, SpeedSourcePatch, SpeedTestIn)
+from backend.models.schemas import (AirportIn, AirportPatch, FinalFilterRuleIn, FinalFilterRulePatch,
+                                    GroupIn, GroupPatch, LoginIn, NodePoolCompetitionIn,
+                                    NodePoolHealthIn, NodePoolLayerIn, NodePoolQualificationIn,
+                                    NodeTestIn, PasswordIn, RunIn, SettingsIn, SubSettings,
+                                    SpeedSourcePatch, SpeedTestIn)
 from backend.scheduler import manager
 from backend.services import fetcher
 from backend.services.speed_queue import queue as speed_queue, schedule_state
@@ -36,6 +37,8 @@ from backend.competition import store as competition_store
 from backend.competition.store import CompetitionError
 from backend.final_results import service as final_service
 from backend.final_results.store import FinalError
+from backend.final_filter import service as final_filter_service
+from backend.final_filter.store import FinalFilterError
 from backend.scoring import eligibility, sampler
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
@@ -564,6 +567,7 @@ async def dashboard(days: int = 7):
         "publish": publish_block,
         "competition": competition_service.dashboard_summary(),
         "final_result": final_service.dashboard_summary(),
+        "final_delivery": final_filter_service.dashboard_summary(),
         "publish_schedule": {
             "enabled": db.get("sub_publish_enabled", "0") == "1",
             "mode": db.get("sub_publish_mode", "time"),
@@ -2108,6 +2112,61 @@ def final_snapshot():
         return final_service.snapshot("manual")
     except FinalError as exc:
         raise HTTPException(exc.status, exc.message) from exc
+
+
+# ---------------------------------------------------------------------------- P6.2.1 keyword filter
+@api.get("/final-filter/summary", dependencies=protected)
+def final_filter_summary():
+    return final_filter_service.summary()
+
+
+@api.get("/final-filter/rules", dependencies=protected)
+def final_filter_rules():
+    return final_filter_service.rules()
+
+
+@api.get("/final-filter/preview", dependencies=protected)
+def final_filter_preview(category: str | None = None):
+    try:
+        return final_filter_service.preview(category=category)
+    except FinalFilterError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+
+
+@api.post("/final-filter/rules", dependencies=protected)
+def final_filter_create_rule(payload: FinalFilterRuleIn):
+    try:
+        return final_filter_service.create_rule(payload.keyword, enabled=payload.enabled)
+    except FinalFilterError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+
+
+@api.patch("/final-filter/rules/{rule_id}", dependencies=protected)
+def final_filter_update_rule(rule_id: int, payload: FinalFilterRulePatch):
+    try:
+        return final_filter_service.update_rule(
+            rule_id, keyword=payload.keyword, enabled=payload.enabled,
+        )
+    except FinalFilterError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+
+
+@api.delete("/final-filter/rules/{rule_id}", dependencies=protected)
+def final_filter_delete_rule(rule_id: int):
+    try:
+        return final_filter_service.delete_rule(rule_id)
+    except FinalFilterError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+
+
+@api.post("/final-filter/defaults", dependencies=protected)
+def final_filter_restore_defaults():
+    return final_filter_service.restore_defaults()
+
+
+@api.post("/final-filter/recompute", dependencies=protected)
+def final_filter_recompute():
+    return final_filter_service.recompute()
 
 
 # ---------------------------------------------------------------------------- P5 competition

@@ -68,6 +68,16 @@ class SubSettings(BaseModel):
     sub_filter_speed_levels: Optional[str] = Field(default=None, max_length=120)
 
 
+class FinalFilterRuleIn(BaseModel):
+    keyword: str = Field(min_length=1, max_length=80)
+    enabled: bool = True
+
+
+class FinalFilterRulePatch(BaseModel):
+    keyword: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    enabled: Optional[bool] = None
+
+
 class SettingsIn(BaseModel):
     global_concurrency: Optional[int] = Field(default=None, ge=1, le=300)
     group_concurrency: Optional[int] = Field(default=None, ge=1, le=100)

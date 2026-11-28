@@ -28,9 +28,10 @@ const menus = [
   { path: '/quality', label: '质量评价', short: '质量', code: '07', icon: 'DataAnalysis' },
   { path: '/competition', label: '智能竞争', short: '竞争', code: '08', icon: 'Trophy' },
   { path: '/final', label: '最终优选', short: '优选', code: '09', icon: 'CollectionTag' },
-  { path: '/groups', label: '检测标签', short: '标签', code: '10', icon: 'Aim' },
-  { path: '/subscription', label: '订阅分发', short: '订阅', code: '11', icon: 'Link' },
-  { path: '/settings', label: '系统设置', short: '设置', code: '12', icon: 'Setting' }
+  { path: '/final-filter', label: '最终过滤', short: '过滤', code: '10', icon: 'Filter' },
+  { path: '/groups', label: '检测标签', short: '标签', code: '11', icon: 'Aim' },
+  { path: '/subscription', label: '订阅分发', short: '订阅', code: '12', icon: 'Link' },
+  { path: '/settings', label: '系统设置', short: '设置', code: '13', icon: 'Setting' }
 ]
 
 const rail = reactive({

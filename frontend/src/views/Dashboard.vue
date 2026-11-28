@@ -9,6 +9,7 @@ const data = ref(null)
 const businessSummary = ref(null)
 const competition = computed(() => data.value?.competition || null)
 const finalResult = computed(() => data.value?.final_result || null)
+const finalDelivery = computed(() => data.value?.final_delivery || null)
 // 趋势图配色：深金、深绿、灰绿、铜棕、橄榄，和整页的磨砂评分室同一色域
 const AIRPORT_COLORS = ['#a8751c', '#2f6555', '#5d7f70', '#9a5a37', '#7c8b60',
   '#b58a3a', '#45685d', '#8a6a2f', '#3f6d68', '#b06a32', '#6f8078', '#c0a15a']
@@ -44,6 +45,7 @@ async function loadBusiness() {
 function goBusiness() { window.location.hash = '#/business' }
 function goCompetition() { window.location.hash = '#/competition' }
 function goFinal() { window.location.hash = '#/final' }
+function goFinalFilter() { window.location.hash = '#/final-filter' }
 
 async function load() {
   loading.value = true
@@ -720,6 +722,24 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
         <div><span>标准综合优选</span><b>{{ finalResult.preferred_standard || 0 }}</b><small>STANDARD</small></div>
         <div><span>五类业务优选</span><b>{{ Object.values(finalResult.preferred_business || {}).reduce((a, b) => a + Number(b || 0), 0) }}</b><small>GPT · YouTube · TG · GitHub · 国外</small></div>
         <div :class="{ 'is-pending': finalResult.pending }"><span>名单状态</span><b>{{ finalResult.pending ? '待同步' : '已同步' }}</b><small>{{ finalResult.pending ? 'P5 有新变化' : '与 P5 当前优选一致' }}</small></div>
+      </div>
+    </section>
+
+    <section v-if="finalDelivery" class="dash-final dash-delivery">
+      <div class="dash-final-head">
+        <div>
+          <h2>最终下发过滤 · P6.2.1</h2>
+          <p>关键词规则只在最终出口做匹配预览；当前 {{ finalDelivery.enabled_rules || 0 }} 条启用规则，命中节点仍保留在 P5 与 P6.1 内部结果。</p>
+        </div>
+        <button class="dash-final-link" @click="goFinalFilter">查看最终过滤 →</button>
+      </div>
+      <div class="dash-final-grid dash-delivery-grid">
+        <div class="is-total"><span>内部智能优选</span><b>{{ finalDelivery.internal || 0 }}</b><small>六类内部条目</small></div>
+        <div class="is-filtered"><span>关键词过滤</span><b>{{ finalDelivery.filtered || 0 }}</b><small>命中启用规则</small></div>
+        <div class="is-allowed"><span>最终允许下发</span><b>{{ finalDelivery.allowed || 0 }}</b><small>仅预览，未发布</small></div>
+        <div><span>启用关键词</span><b>{{ finalDelivery.enabled_rules || 0 }} / {{ finalDelivery.total_rules || 0 }}</b><small>{{ finalDelivery.matched_rules || 0 }} 条有命中</small></div>
+        <div class="is-version"><span>来源版本</span><b>{{ finalDelivery.version_no || '尚未生成' }}</b><small>复用 P6.1，不新建</small></div>
+        <div class="is-note"><span>重算时间</span><b>{{ finalDelivery.computed_at ? formatTs(finalDelivery.computed_at).slice(5, 16) : '—' }}</b><small>仅过滤预览</small></div>
       </div>
     </section>
 

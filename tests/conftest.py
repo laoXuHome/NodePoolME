@@ -33,6 +33,9 @@ _P5_TABLES = (
 _P6_TABLES = (
     "np6_versions", "np6_entries", "np6_changes", "np6_events",
 )
+_P621_TABLES = (
+    "np621_rules", "np621_state", "np621_results", "np621_events",
+)
 _ORIGINAL_ENGINE = None
 
 
@@ -52,7 +55,8 @@ def clean_database():
     db.init_db()
     # P1 tables are created lazily. Drop them so every test still starts from
     # the frozen baseline structure (migration/backup tests depend on that).
-    for table in _P1_TABLES + _P2_TABLES + _P3_TABLES + _P4_TABLES + _P5_TABLES + _P6_TABLES:
+    for table in (_P1_TABLES + _P2_TABLES + _P3_TABLES + _P4_TABLES + _P5_TABLES
+              + _P6_TABLES + _P621_TABLES):
         db.execute(f'DROP TABLE IF EXISTS "{table}"')
     for table in _TABLES:
         db.execute(f"DELETE FROM {table}")
