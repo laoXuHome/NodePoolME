@@ -103,6 +103,10 @@ SUPPORTED_STRUCTURE_PROFILES: dict[str, str] = {
     # 这两种形态是 17 张冻结业务表分别叠加 P1+P2 后的摘要；未登记形态仍拒绝。
     "alter_history_p1p2": "5ad814131eec19eb624050a63915cb8de0182ec684969675ff0a737f1a2d144d",
     "fresh_init_p1p2": "5abfa990ffcfd3f5617ebc563228511d25f30212c59681b4ded5c87ece3c4358",
+    # P3 业务专项检测的 7 张旁路表；与 P1、P2 一并建立后的两种基线形态。
+    # 未登记形态仍拒绝；17 张冻结业务表不受影响。
+    "alter_history_p1p2p3": "9d27387982ded6573475b7bea8a70acab0f36df314cf10e0792f601009f4d894",
+    "fresh_init_p1p2p3": "826b8799a382fbdfa41a8a666dad8dd8e331c131a0bd3282e705162c3218d04b",
 }
 
 # 兼容别名：默认取历史 ALTER 形态（生产端最可能的形态，但**仍待 NAS 只读实测确认**，

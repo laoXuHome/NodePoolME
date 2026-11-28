@@ -296,11 +296,13 @@ async def _tls_https(*, target: dict, timeout: float, deadline: float,
             key, _, value = line.decode("latin-1", "replace").partition(":")
             if key:
                 headers[key.strip().lower()] = value.strip()
-        ok = status in EXPECTED_HTTPS
+        expected = target.get("expected") or EXPECTED_HTTPS
+        ok = status in expected
+        expected_text = target.get("expected_status") or "200-399"
         return tls_stage, _stage(
             "https", executed=True, status="success" if ok else "failure",
             latency_ms=latency, ok=ok, slow=latency > HTTPS_NORMAL_MS,
-            detail={"status": status, "expected": "200-399", "normal_ms": HTTPS_NORMAL_MS,
+            detail={"status": status, "expected": expected_text, "normal_ms": HTTPS_NORMAL_MS,
                     "headers": {k: headers.get(k) for k in ("content-type", "content-length",
                                                             "location") if k in headers}},
         )

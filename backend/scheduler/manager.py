@@ -11,6 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from backend.database import db
 from backend.database import gate as maint_gate
 from backend.health import service as health_service
+from backend.business import service as business_service
 from backend.services import fetcher
 from backend.services.runtime_gate import gate
 from backend.subscriptions import builder
@@ -912,6 +913,13 @@ async def job_health_p2() -> None:
     await health_service.tick()
 
 
+async def job_business_p3() -> None:
+    """P3 tick: independently schedule node/business capability checks."""
+    if maintenance_hold():
+        return
+    await business_service.tick()
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         return
@@ -937,6 +945,11 @@ def start_scheduler() -> None:
         scheduler.add_job(job_health_p2, "interval", seconds=5, id="p2_health",
                           max_instances=1, coalesce=True,
                           next_run_time=datetime.now() + timedelta(seconds=10))
+    if os.getenv("NODEPOOL_P3_SCHEDULER", "1") == "1" and "pytest" not in sys.modules:
+        business_service.startup_reset()
+        scheduler.add_job(job_business_p3, "interval", seconds=10, id="p3_business",
+                          max_instances=1, coalesce=True,
+                          next_run_time=datetime.now() + timedelta(seconds=20))
     scheduler.start()
     db.append_log("INFO", "调度", "调度器已启动")
 

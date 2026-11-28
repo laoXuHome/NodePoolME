@@ -6,6 +6,7 @@ import TrendChart from '../components/TrendChart.vue'
 import OperationsMap from '../components/OperationsMap.vue'
 
 const data = ref(null)
+const businessSummary = ref(null)
 // 趋势图配色：深金、深绿、灰绿、铜棕、橄榄，和整页的磨砂评分室同一色域
 const AIRPORT_COLORS = ['#a8751c', '#2f6555', '#5d7f70', '#9a5a37', '#7c8b60',
   '#b58a3a', '#45685d', '#8a6a2f', '#3f6d68', '#b06a32', '#6f8078', '#c0a15a']
@@ -34,6 +35,12 @@ async function loadLogs() {
 
 const trendFetchDays = computed(() => trendRange.value === '30d' ? 30 : 7)
 
+async function loadBusiness() {
+  try { businessSummary.value = await api.get('/api/business/summary') }
+  catch { businessSummary.value = null }
+}
+function goBusiness() { window.location.hash = '#/business' }
+
 async function load() {
   loading.value = true
   try {
@@ -41,6 +48,7 @@ async function load() {
     running.value = data.value.runtime.running
     rt.value = null
     window.dispatchEvent(new CustomEvent('np:dashboard', { detail: data.value }))
+    loadBusiness()
   } catch (err) {
     ElMessage.error(err.message)
   } finally {
@@ -635,7 +643,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
   <div class="np-page frostdash-page" v-loading="loading">
     <header v-if="data" class="dash-headline">
       <div class="dash-headline-copy">
-        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V2.034 · FROST</span></div>
+        <div class="dash-eyebrow"><b>SCORE ROOM</b><i></i><span>V{{ state.version || '—' }} · FROST</span></div>
         <h1>节点池 <span>评分室</span></h1>
         <p>机场订阅在本地汇聚成节点资产，经过双阶段检测、评分与成熟度筛选后，统一交付给客户端。</p>
       </div>
@@ -647,6 +655,29 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
         </button>
       </div>
     </header>
+
+    <section v-if="businessSummary" class="dash-business">
+      <div class="dash-business-head">
+        <div>
+          <h2>业务专项检测 · P3</h2>
+          <p>五类业务独立资格，来自节点自身代理出口的真实 HTTPS 访问；Unknown 不计失败，不等于节点不可用。</p>
+        </div>
+        <button class="dash-business-link" @click="goBusiness">查看业务台 →</button>
+      </div>
+      <div class="dash-business-grid">
+        <div v-for="b in businessSummary.businesses" :key="b.code" class="dash-bbiz" :class="`is-${b.code}`">
+          <span>{{ b.label }} 有资格</span>
+          <b>{{ b.stats.qualified }}</b>
+          <small>待确认 {{ b.stats.pending }} · 暂停 {{ b.stats.suspended }}</small>
+        </div>
+      </div>
+      <div class="dash-business-side">
+        <div><span>待确认节点</span><b>{{ businessSummary.pending_nodes }}</b><small>不足阈值</small></div>
+        <div><span>Unknown 节点</span><b>{{ businessSummary.unknown_nodes }}</b><small>目标或责任不明</small></div>
+        <div><span>检测队列</span><b>{{ businessSummary.queue.total }}</b><small>排队 {{ businessSummary.queue.pending }}</small></div>
+        <div><span>P2 健康参考</span><b>{{ businessSummary.p2_health?.healthy || 0 }}</b><small>只读，不由 P3 修改</small></div>
+      </div>
+    </section>
 
     <section v-if="data" class="dash-grid">
       <article class="frostcard scorecard theme-dark span12 scorecard-merged">

@@ -26,6 +26,8 @@ from backend.services.runtime_gate import gate
 from backend.nodepool import store as nodepool_store
 from backend.health import service as health_service
 from backend.health import store as health_store
+from backend.business import service as business_service
+from backend.business import store as business_store
 from backend.scoring import eligibility, sampler
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
@@ -1668,6 +1670,116 @@ def health_update_settings(payload: dict):
         )
     except health_store.HealthError as exc:
         _raise_health(exc)
+
+
+# ---------------------------------------------------------------- P3 business capability
+def _raise_business(exc: business_store.BusinessError):
+    raise HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc)})
+
+
+@api.get("/business/summary", dependencies=protected)
+def business_summary():
+    try:
+        with db.transaction() as conn:
+            business_store.ensure_defaults(conn)
+        return business_store.summary()
+    except business_store.BusinessError as exc:
+        _raise_business(exc)
+
+
+@api.get("/business/targets", dependencies=protected)
+def business_targets():
+    try:
+        with db.transaction() as conn:
+            business_store.ensure_defaults(conn)
+        return {"items": business_store.list_targets()}
+    except business_store.BusinessError as exc:
+        _raise_business(exc)
+
+
+@api.patch("/business/targets/{business}", dependencies=protected)
+def business_target_update(business: str, payload: dict):
+    try:
+        return business_store.update_target(
+            business,
+            name=payload.get("name"),
+            url=payload.get("url"),
+            expected_status=payload.get("expected_status"),
+            enabled=payload.get("enabled"),
+            interval_minutes_value=payload.get("interval_minutes"),
+        )
+    except business_store.BusinessError as exc:
+        _raise_business(exc)
+
+
+@api.post("/business/targets/{business}/test", dependencies=protected)
+async def business_target_test(business: str):
+    try:
+        return await business_service.test_target(business)
+    except business_store.BusinessError as exc:
+        _raise_business(exc)
+
+
+@api.post("/business/targets/defaults", dependencies=protected)
+def business_target_defaults():
+    try:
+        return {"items": business_store.restore_defaults()}
+    except business_store.BusinessError as exc:
+        _raise_business(exc)
+
+
+@api.get("/business/nodes", dependencies=protected)
+def business_nodes(page: int = 1, per_page: int = 20, q: str | None = None,
+                   business: str | None = None, state: str | None = None):
+    try:
+        return business_store.node_rows(page=page, per_page=per_page, q=q,
+                                        business=business, state=state)
+    except business_store.BusinessError as exc:
+        _raise_business(exc)
+
+
+@api.get("/business/nodes/{node_id}", dependencies=protected)
+def business_node_detail(node_id: int):
+    try:
+        return business_store.node_detail(node_id)
+    except business_store.BusinessError as exc:
+        _raise_business(exc)
+    except nodepool_store.NodePoolError as exc:
+        _raise_nodepool(exc)
+
+
+@api.post("/business/nodes/{node_id}/check", dependencies=protected)
+def business_node_check(node_id: int, payload: dict | None = None):
+    try:
+        code = (payload or {}).get("business")
+        return business_service.enqueue_manual([node_id], business=code)
+    except business_store.BusinessError as exc:
+        _raise_business(exc)
+
+
+@api.post("/business/check", dependencies=protected)
+def business_check_all():
+    try:
+        return business_service.enqueue_all()
+    except business_store.BusinessError as exc:
+        _raise_business(exc)
+
+
+@api.get("/business/settings", dependencies=protected)
+def business_get_settings():
+    return business_store.settings_snapshot()
+
+
+@api.patch("/business/settings", dependencies=protected)
+def business_update_settings(payload: dict):
+    try:
+        return business_store.update_settings(
+            interval_minutes_value=payload.get("interval_minutes"),
+            valid_hours_value=payload.get("valid_hours"),
+            concurrency_value=payload.get("concurrency"),
+        )
+    except business_store.BusinessError as exc:
+        _raise_business(exc)
 
 
 sub_router = APIRouter()
