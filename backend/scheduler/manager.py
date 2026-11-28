@@ -1,13 +1,16 @@
 """Pull / test orchestration: discrete batches, dispersion, concurrency limits, publishing."""
 import asyncio
 import ipaddress
+import os
 import random
+import sys
 from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from backend.database import db
 from backend.database import gate as maint_gate
+from backend.health import service as health_service
 from backend.services import fetcher
 from backend.services.runtime_gate import gate
 from backend.subscriptions import builder
@@ -902,6 +905,13 @@ async def job_maintenance() -> None:
     db.append_log("INFO", "维护", f"已清理 {cutoff} 之前的历史记录")
 
 
+async def job_health_p2() -> None:
+    """P2 tick: enqueue due nodes and start a bounded probe batch."""
+    if maintenance_hold():
+        return
+    await health_service.tick()
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         return
@@ -919,6 +929,14 @@ def start_scheduler() -> None:
     scheduler.add_job(job_publish, "interval", minutes=1, id="publish", max_instances=1,
                       coalesce=True, next_run_time=datetime.now() + timedelta(seconds=50))
     scheduler.add_job(job_maintenance, "interval", hours=6, id="maintenance", max_instances=1)
+    # P2 runs on a five-second dispatcher so 15/30-second rechecks are reachable.
+    # It still starts one bounded batch at a time and never duplicates a node.
+    # Tests drive tick() directly; never let a wall-clock probe alter fixtures.
+    if os.getenv("NODEPOOL_P2_SCHEDULER", "1") == "1" and "pytest" not in sys.modules:
+        health_service.startup_reset()
+        scheduler.add_job(job_health_p2, "interval", seconds=5, id="p2_health",
+                          max_instances=1, coalesce=True,
+                          next_run_time=datetime.now() + timedelta(seconds=10))
     scheduler.start()
     db.append_log("INFO", "调度", "调度器已启动")
 

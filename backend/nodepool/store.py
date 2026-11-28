@@ -416,6 +416,63 @@ def _target_layer(health: str, data_status: str, source_active: int) -> str:
     return "observation"
 
 
+def apply_probe_health(node_id: int, *, health: str, data_status: str,
+                       layer: str | None = None, reason: str | None = None,
+                       observation_reason: str | None = None,
+                       last_error: str | None = None, actor: str = "p2") -> dict:
+    """Apply a P2 health round without touching the P5 competition axis.
+
+    P1's admin ``set_health`` deliberately also normalises competition state.
+    P2 is forbidden from changing competition rules, so its scheduled rounds
+    use this entry instead: health/data/layer change, competition is preserved.
+    """
+    with db.transaction() as conn:
+        apply_probe_health_conn(
+            conn, node_id, health=health, data_status=data_status, layer=layer,
+            reason=reason, observation_reason=observation_reason,
+            last_error=last_error, actor=actor,
+        )
+        return detail(node_id, conn=conn)
+
+
+def apply_probe_health_conn(conn: sqlite3.Connection, node_id: int, *, health: str,
+                            data_status: str, layer: str | None = None,
+                            reason: str | None = None,
+                            observation_reason: str | None = None,
+                            last_error: str | None = None, actor: str = "p2") -> dict:
+    if health not in HEALTH_STATES:
+        raise NodePoolError("invalid_health", f"基础健康状态必须是 {HEALTH_STATES}")
+    if data_status not in DATA_STATES:
+        raise NodePoolError("invalid_data_status", f"数据状态必须是 {DATA_STATES}")
+    ensure_schema(conn)
+    node = _existing_node(conn, node_id)
+    before = dict(node)
+    if layer is None:
+        layer = _target_layer(health, data_status, int(node["source_active"]))
+    if layer not in LAYERS:
+        raise NodePoolError("invalid_layer", f"管理层必须是 {LAYERS}")
+    if layer == "healthy" and (health != "healthy" or data_status != "sufficient"
+                               or not int(node["source_active"])):
+        raise NodePoolError("not_health_eligible",
+                            "进入健康池需要基础健康=健康、数据充足且来源有效")
+    if layer == "healthy":
+        observation_reason = None
+    elif observation_reason is None:
+        observation_reason = reason or "health_unknown"
+    conn.execute(
+        """UPDATE np_nodes SET base_health=?, data_status=?, management_layer=?,
+           observation_reason=?, last_error=?, last_test_at=?, updated_at=? WHERE id=?""",
+        (health, data_status, layer, observation_reason, last_error,
+         _now(), _now(), node_id),
+    )
+    after = _existing_node(conn, node_id)
+    _event(conn, node_id, "health_update", before=before, after=after,
+           reason=reason or observation_reason, actor=actor,
+           detail={"health": health, "data_status": data_status,
+                   "competition_preserved": True})
+    return {"before": before, "after": after}
+
+
 def set_health(node_id: int, *, health: str, data_status: str | None = None,
                reason: str | None = None, observation_reason: str | None = None,
                actor: str = "admin", last_error: str | None = None) -> dict:

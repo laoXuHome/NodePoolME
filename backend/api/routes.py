@@ -24,6 +24,8 @@ from backend.services import fetcher
 from backend.services.speed_queue import queue as speed_queue, schedule_state
 from backend.services.runtime_gate import gate
 from backend.nodepool import store as nodepool_store
+from backend.health import service as health_service
+from backend.health import store as health_store
 from backend.scoring import eligibility, sampler
 from backend.subscriptions import builder
 from backend.testers import engine as engine_mod
@@ -1541,6 +1543,131 @@ def nodepool_revoke(node_id: int, qualification: str, reason: str | None = None)
         return nodepool_store.revoke_qualification(node_id, qualification, reason=reason)
     except nodepool_store.NodePoolError as exc:
         _raise_nodepool(exc)
+
+
+# ---------------------------------------------------------------- P2 health
+def _raise_health(exc: health_store.HealthError):
+    raise HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc)})
+
+
+@api.get("/health/summary", dependencies=protected)
+def health_summary():
+    try:
+        return health_store.summary()
+    except health_store.HealthError as exc:
+        _raise_health(exc)
+
+
+@api.get("/health/targets", dependencies=protected)
+def health_targets():
+    try:
+        with db.transaction() as conn:
+            health_store.ensure_defaults(conn)
+        return {"items": health_store.list_targets()}
+    except health_store.HealthError as exc:
+        _raise_health(exc)
+
+
+@api.post("/health/targets", dependencies=protected)
+def health_target_create(payload: dict):
+    try:
+        return health_store.create_target(payload.get("name") or "",
+                                          payload.get("url") or "",
+                                          enabled=bool(payload.get("enabled", True)))
+    except health_store.HealthError as exc:
+        _raise_health(exc)
+
+
+@api.patch("/health/targets/{target_id}", dependencies=protected)
+def health_target_update(target_id: int, payload: dict):
+    try:
+        return health_store.update_target(
+            target_id,
+            name=payload.get("name"),
+            url=payload.get("url"),
+            enabled=payload.get("enabled"),
+            sort_order=payload.get("sort_order"),
+        )
+    except health_store.HealthError as exc:
+        _raise_health(exc)
+
+
+@api.delete("/health/targets/{target_id}", dependencies=protected)
+def health_target_delete(target_id: int):
+    try:
+        return health_store.delete_target(target_id)
+    except health_store.HealthError as exc:
+        _raise_health(exc)
+
+
+@api.post("/health/targets/{target_id}/test", dependencies=protected)
+async def health_target_test(target_id: int):
+    try:
+        return await health_service.test_target(target_id)
+    except health_store.HealthError as exc:
+        _raise_health(exc)
+
+
+@api.post("/health/targets/defaults", dependencies=protected)
+def health_target_defaults():
+    try:
+        return {"items": health_store.restore_defaults()}
+    except health_store.HealthError as exc:
+        _raise_health(exc)
+
+
+@api.get("/health/nodes", dependencies=protected)
+def health_nodes(page: int = 1, per_page: int = 20, q: str | None = None,
+                 state: str | None = None, classification: str | None = None,
+                 layer: str | None = None):
+    try:
+        return health_store.list_nodes(page=page, per_page=per_page, q=q,
+                                       state=state, classification=classification,
+                                       layer=layer)
+    except health_store.HealthError as exc:
+        _raise_health(exc)
+
+
+@api.get("/health/nodes/{node_id}", dependencies=protected)
+def health_node_detail(node_id: int):
+    try:
+        return health_store.node_detail(node_id)
+    except health_store.HealthError as exc:
+        _raise_health(exc)
+    except nodepool_store.NodePoolError as exc:
+        _raise_nodepool(exc)
+
+
+@api.post("/health/nodes/{node_id}/check", dependencies=protected)
+def health_node_check(node_id: int):
+    try:
+        return health_service.enqueue_manual([node_id])
+    except health_store.HealthError as exc:
+        _raise_health(exc)
+
+
+@api.post("/health/check", dependencies=protected)
+def health_check_all():
+    try:
+        return health_service.enqueue_all()
+    except health_store.HealthError as exc:
+        _raise_health(exc)
+
+
+@api.get("/health/settings", dependencies=protected)
+def health_get_settings():
+    return health_service.get_settings()
+
+
+@api.patch("/health/settings", dependencies=protected)
+def health_update_settings(payload: dict):
+    try:
+        return health_service.update_settings(
+            interval_minutes_value=payload.get("interval_minutes"),
+            concurrency_value=payload.get("concurrency"),
+        )
+    except health_store.HealthError as exc:
+        _raise_health(exc)
 
 
 sub_router = APIRouter()

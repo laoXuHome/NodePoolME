@@ -99,6 +99,10 @@ SUPPORTED_STRUCTURE_PROFILES: dict[str, str] = {
     # 继续通过 structure_profile_for 校验，而无需改写已冻结的 17 表基线。
     "alter_history_p1": "45c47bc76ac0c91b93133246a2a641d58103d931d32a9c97d7f6fa28efcaef7d",
     "fresh_init_p1": "598f93950df9e021710e668296394595b0fdc8afd783213818b3ed431dd3c2e0",
+    # P2 基础健康检测的 9 张旁路表同样懒创建，且总是连同 P1 表一起建立。
+    # 这两种形态是 17 张冻结业务表分别叠加 P1+P2 后的摘要；未登记形态仍拒绝。
+    "alter_history_p1p2": "5ad814131eec19eb624050a63915cb8de0182ec684969675ff0a737f1a2d144d",
+    "fresh_init_p1p2": "5abfa990ffcfd3f5617ebc563228511d25f30212c59681b4ded5c87ece3c4358",
 }
 
 # 兼容别名：默认取历史 ALTER 形态（生产端最可能的形态，但**仍待 NAS 只读实测确认**，
