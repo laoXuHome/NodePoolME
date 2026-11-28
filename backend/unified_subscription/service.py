@@ -91,7 +91,7 @@ def _enrich(conn: sqlite3.Connection, nodes: list[dict]) -> dict[int, dict]:
     if not ids:
         return {}
     rows = conn.execute(
-        "SELECT id, protocol, params FROM np_nodes WHERE id IN (%s)"
+        "SELECT id, protocol, server, port, params FROM np_nodes WHERE id IN (%s)"
         % ",".join("?" for _ in ids),
         tuple(ids),
     ).fetchall()
@@ -99,9 +99,67 @@ def _enrich(conn: sqlite3.Connection, nodes: list[dict]) -> dict[int, dict]:
     for row in rows:
         out[int(row["id"])] = {
             "protocol": row["protocol"],
+            "server": row["server"],
+            "port": row["port"],
             "params": store.loads(row["params"], {}) or {},
         }
     return out
+
+
+def _normalise_param(value):
+    """Canonicalise effective values without changing their meaning."""
+    if isinstance(value, dict):
+        out = {}
+        for key in sorted(value, key=lambda x: str(x)):
+            item = _normalise_param(value[key])
+            if item is not None and item != "":
+                out[str(key)] = item
+        return out
+    if isinstance(value, (list, tuple)):
+        items = [_normalise_param(v) for v in value]
+        return [v for v in items if v is not None and v != ""]
+    if isinstance(value, str):
+        # Connection strings (passwords, UUIDs, paths) are case/space sensitive;
+        # only structural emptiness is removed.
+        return value
+    if isinstance(value, (bool, int, float)):
+        return value
+    if value is None:
+        return None
+    return str(value)
+
+
+def _normalise_params(value) -> dict:
+    if isinstance(value, str):
+        value = store.loads(value, {})
+    if not isinstance(value, dict):
+        return {}
+    result = _normalise_param(value)
+    return result if isinstance(result, dict) else {}
+
+
+def connection_config(node: dict) -> dict:
+    """All effective connection fields used to render a client profile."""
+    try:
+        port = int(node.get("port") or 0)
+    except (TypeError, ValueError):
+        port = 0
+    return {
+        "protocol": str(node.get("protocol") or "").strip().lower(),
+        "server": str(node.get("server") or "").strip(),
+        "port": port,
+        "params": _normalise_params(node.get("params") or {}),
+    }
+
+
+def connection_fingerprint(node: dict) -> str:
+    return store.sha256(store.canonical_json(connection_config(node)))
+
+
+def batch_config_fingerprint(nodes: list[dict]) -> str:
+    parts = [f"{int(n['node_id'])}:{n.get('config_sha256')}" for n in
+             sorted(nodes, key=lambda x: int(x["node_id"]))]
+    return store.sha256("\n".join(parts))
 
 
 def _display_name(node: dict) -> str:
@@ -144,6 +202,7 @@ def _make_snapshot(conn: sqlite3.Connection) -> dict:
         raise UnifiedError("filter_result_missing",
                            f"P6.2.1 过滤结果缺失 {len(missing)} 个节点，请重新计算后再生成。")
     enrichment = _enrich(conn, merged_nodes)
+    missing_config = []
     for node in merged_nodes:
         rows_for_node = filter_map.get(int(node["node_id"]), [])
         node["filtered"] = any(r["status"] == "filtered" for r in rows_for_node)
@@ -153,13 +212,30 @@ def _make_snapshot(conn: sqlite3.Connection) -> dict:
         node["labels"] = [_label for code, _label in BUSINESS_LABELS
                           if code in categories]
         node["label_codes"] = _label_codes(categories)
-        meta = enrichment.get(int(node["node_id"]), {})
-        node["protocol"] = meta.get("protocol")
-        node["params"] = meta.get("params") or {}
-        node["server"] = node.get("server")
-        node["port"] = node.get("port")
+        meta = enrichment.get(int(node["node_id"]))
+        node["config_available"] = meta is not None
+        if meta:
+            # Endpoint and protocol belong to the connection snapshot, not to the
+            # immutable P6.1 ranking record.  P1 is read-only here.
+            node["protocol"] = meta.get("protocol")
+            node["server"] = meta.get("server")
+            node["port"] = meta.get("port")
+            node["params"] = meta.get("params") or {}
+        else:
+            node["protocol"] = None
+            node["server"] = None
+            node["port"] = None
+            node["params"] = {}
+            missing_config.append(int(node["node_id"]))
+        node["params"] = _normalise_params(node.get("params") or {})
+        node["config_sha256"] = connection_fingerprint(node)
         node["display_name"] = _display_name(node)
         node["unsupported"] = formats.unsupported_reasons(node)
+        if not meta:
+            node["unsupported"] = {
+                fmt: {"code": "config_missing", "label": "节点连接配置不存在"}
+                for fmt in formats.FORMAT_KEYS
+            }
     # A client profile cannot contain duplicate names; suffix is applied only to the
     # final display name and is shared by all four formats.
     used: dict[str, int] = {}
@@ -191,6 +267,7 @@ def _make_snapshot(conn: sqlite3.Connection) -> dict:
     node_set_sha = store.sha256("\n".join(
         f"{n['node_id']}:{n['display_name']}" for n in output
     ))
+    config_sha = batch_config_fingerprint(merged_nodes)
     return {
         "version": ver,
         "state": state,
@@ -212,6 +289,9 @@ def _make_snapshot(conn: sqlite3.Connection) -> dict:
         "output": output,
         "unsupported": unsupported,
         "node_set_sha256": node_set_sha,
+        "config_sha256": config_sha,
+        "config_node_count": len(merged_nodes),
+        "config_missing_ids": missing_config,
     }
 
 
@@ -235,24 +315,98 @@ def _public_snapshot(snapshot: dict) -> dict:
                    "multi": snapshot["multi_label_count"]},
         "unsupported": snapshot["unsupported"],
         "node_set_sha256": snapshot["node_set_sha256"],
+        "config_sha256": snapshot["config_sha256"],
+        "config_node_count": snapshot["config_node_count"],
+        "config_missing_count": len(snapshot["config_missing_ids"]),
         "nodes": [store.node_payload(n) for n in snapshot["nodes"]],
     }
 
 
-def _batch_is_current(batch: dict | None, snapshot: dict) -> bool:
-    if not batch:
-        return False
-    return (int(batch["p6_version_id"]) == int(snapshot["version"]["id"])
-            and int(batch.get("p621_revision") or 0)
-            == int(snapshot["state"].get("rule_revision") or 0))
+def _batch_stale_details(conn: sqlite3.Connection, batch: dict,
+                         snapshot: dict | None = None) -> dict:
+    """Compare batch-bound versions and the full P1 connection snapshot."""
+    codes: list[str] = []
+    reasons: list[str] = []
+    if snapshot is not None:
+        if int(batch["p6_version_id"]) != int(snapshot["version"]["id"]):
+            codes.append("p6_version_changed")
+            reasons.append("P6.1 最终优选版本已变化")
+        if int(batch.get("p621_revision") or 0) != int(
+                snapshot["state"].get("rule_revision") or 0):
+            codes.append("p621_revision_changed")
+            reasons.append("P6.2.1 关键词规则修订号已变化")
+    nodes = store.nodes_of(conn, int(batch["id"]))
+    if not batch.get("config_sha256") or int(batch.get("config_node_count") or 0) != len(nodes):
+        codes.append("config_snapshot_missing")
+        reasons.append("该批次缺少完整连接配置快照")
+        return _stale_payload(codes, reasons, nodes, [], [])
+    if any(not n.get("config_sha256") or n.get("params_json") is None for n in nodes):
+        codes.append("config_snapshot_missing")
+        reasons.append("该批次存在未固化连接配置的节点")
+        return _stale_payload(codes, reasons, nodes, [], [])
+    stored_fingerprint = batch_config_fingerprint(nodes)
+    if stored_fingerprint != batch.get("config_sha256"):
+        codes.append("config_snapshot_invalid")
+        reasons.append("批次连接配置快照校验不一致")
+        return _stale_payload(codes, reasons, nodes, [], [])
+    current = _enrich(conn, nodes)
+    changed: list[int] = []
+    missing: list[int] = []
+    for node in nodes:
+        node_id = int(node["node_id"])
+        meta = current.get(node_id)
+        if not meta:
+            missing.append(node_id)
+            continue
+        current_fp = connection_fingerprint({
+            "protocol": meta.get("protocol"), "server": meta.get("server"),
+            "port": meta.get("port"), "params": meta.get("params") or {},
+        })
+        if current_fp != node.get("config_sha256"):
+            changed.append(node_id)
+    if changed:
+        codes.append("node_config_changed")
+        reasons.append(f"{len(changed)} 个节点的连接配置已变化")
+    if missing:
+        codes.append("node_config_missing")
+        reasons.append(f"{len(missing)} 个节点的当前连接配置已缺失")
+    return _stale_payload(codes, reasons, nodes, changed, missing)
+
+
+def _stale_payload(codes: list[str], reasons: list[str], nodes: list[dict],
+                   changed: list[int], missing: list[int]) -> dict:
+    stale = bool(codes)
+    reason = "；".join(reasons)
+    if stale:
+        reason = f"{reason}，请重新生成统一订阅。"
+    return {
+        "stale": stale,
+        "codes": codes,
+        "code": codes[0] if codes else None,
+        "reason": reason or None,
+        "config_changed_count": len(changed),
+        "config_changed_node_ids": changed,
+        "config_missing_count": len(missing),
+        "config_missing_node_ids": missing,
+        "config_checked_count": len(nodes),
+    }
+
+
+def _attach_stale(payload: dict, details: dict) -> dict:
+    payload["stale"] = details["stale"]
+    payload["stale_code"] = details["code"]
+    payload["stale_codes"] = details["codes"]
+    payload["stale_reason"] = details["reason"]
+    payload["config_changed_count"] = details["config_changed_count"]
+    payload["config_missing_count"] = details["config_missing_count"]
+    return payload
 
 
 def _batch_view(conn: sqlite3.Connection, batch: dict, snapshot: dict | None = None) -> dict:
     payload = store.batch_payload(batch)
     payload["outputs"] = [store.output_payload(o) for o in store.outputs_of(conn, batch["id"])]
-    if snapshot is not None:
-        payload["stale"] = not _batch_is_current(batch, snapshot)
-    return payload
+    details = _batch_stale_details(conn, batch, snapshot)
+    return _attach_stale(payload, details)
 
 
 def summary() -> dict:
@@ -264,7 +418,7 @@ def summary() -> dict:
         nodes = store.nodes_of(conn, batch["id"]) if batch else []
         status = "not_generated"
         if batch:
-            status = "stale" if not _batch_is_current(batch, snapshot) else batch["status"]
+            status = "stale" if batch_payload["stale"] else batch["status"]
         return {
             "status": status,
             "current": current,
@@ -275,9 +429,17 @@ def summary() -> dict:
                 {"key": key, "label": formats.FORMAT_LABELS[key]}
                 for key in formats.FORMAT_KEYS
             ],
+            "stale": batch_payload["stale"] if batch_payload else False,
+            "stale_code": batch_payload["stale_code"] if batch_payload else None,
+            "stale_reason": batch_payload["stale_reason"] if batch_payload else None,
+            "config_changed_count": (batch_payload["config_changed_count"]
+                                     if batch_payload else 0),
+            "config_missing_count": (batch_payload["config_missing_count"]
+                                     if batch_payload else 0),
             "boundary": {
                 "source": "P6.1 六类最终优选",
                 "keyword_gate": "P6.2.1 当前规则预览",
+                "connection": "P1 当前协议、服务器、端口与参数，生成时冻结",
                 "public_subscription": False,
                 "client_pull": False,
             },
@@ -287,6 +449,11 @@ def summary() -> dict:
 def generate(trigger: str = "manual") -> dict:
     with db.transaction() as conn:
         snapshot = _make_snapshot(conn)
+        if snapshot["config_missing_ids"]:
+            raise UnifiedError(
+                "node_config_missing",
+                f"{len(snapshot['config_missing_ids'])} 个节点缺少当前连接配置，禁止生成统一订阅。",
+            )
         batch_no = store.next_batch_no(conn)
         sub_name = db.get("sub_name", "NodePoolME 统一订阅") or "NodePoolME 统一订阅"
         stamp = store.now()
@@ -346,6 +513,8 @@ def generate(trigger: str = "manual") -> dict:
             "is_empty": not output_nodes, "status": batch_status,
             "status_reason": reason, "unsupported": snapshot["unsupported"],
             "node_set_sha256": snapshot["node_set_sha256"],
+            "config_sha256": snapshot["config_sha256"],
+            "config_node_count": snapshot["config_node_count"],
         })
         for fmt in formats.FORMAT_KEYS:
             item = built[fmt]
@@ -386,8 +555,9 @@ def format_content(fmt: str, batch_id: int | None = None) -> dict:
         if not output:
             raise UnifiedError("output_missing", "该批次缺少所请求的格式记录", status=404)
         payload = store.output_payload(output, include_content=True)
-        payload["batch"] = store.batch_payload(batch)
-        payload["stale"] = not _batch_is_current(batch, snapshot)
+        details = _batch_stale_details(conn, batch, snapshot)
+        _attach_stale(payload, details)
+        payload["batch"] = _attach_stale(store.batch_payload(batch), details)
         return payload
 
 
@@ -399,9 +569,12 @@ def download(fmt: str) -> dict:
         batch = store.latest_batch(conn)
         if not batch:
             raise UnifiedError("not_generated", "尚未生成统一订阅", status=404)
-        if not _batch_is_current(batch, snapshot):
-            raise UnifiedError("stale_generation",
-                               "P6.1 版本或关键词规则已变化，请先重新生成统一订阅。")
+        details = _batch_stale_details(conn, batch, snapshot)
+        if details["stale"]:
+            raise UnifiedError(
+                "stale_generation",
+                details["reason"] or "批次已过期，请先重新生成统一订阅。",
+            )
         output = store.output_of(conn, int(batch["id"]), fmt)
         if not output:
             raise UnifiedError("output_missing", "当前批次缺少该格式", status=404)
@@ -422,11 +595,14 @@ def history(limit: int = 20) -> dict:
     with db.transaction() as conn:
         snapshot = _make_snapshot(conn)
         rows = store.history(conn, limit)
+        items = []
+        for batch in rows:
+            payload = store.batch_payload(batch)
+            payload["outputs"] = [store.output_payload(o) for o in batch["outputs"]]
+            _attach_stale(payload, _batch_stale_details(conn, batch, snapshot))
+            items.append(payload)
         return {
-            "items": [store.batch_payload(b) | {
-                "outputs": [store.output_payload(o) for o in b["outputs"]],
-                "stale": not _batch_is_current(b, snapshot),
-            } for b in rows],
+            "items": items,
             "current": _public_snapshot(snapshot),
         }
 
@@ -457,8 +633,9 @@ def dashboard() -> dict:
                 "formats": {k: "not_generated" for k in formats.FORMAT_KEYS},
             }
         outputs = store.outputs_of(conn, batch["id"])
+        details = _batch_stale_details(conn, batch, snapshot)
         return {
-            "status": "stale" if not _batch_is_current(batch, snapshot) else batch["status"],
+            "status": "stale" if details["stale"] else batch["status"],
             "nodes": int(batch.get("output_count") or 0),
             "filtered": int(batch.get("filtered_count") or 0),
             "labels": {"gpt": int(batch.get("gpt_count") or 0),
@@ -466,7 +643,11 @@ def dashboard() -> dict:
                        "tg": int(batch.get("tg_count") or 0),
                        "gh": int(batch.get("gh_count") or 0)},
             "last_generated": batch.get("created_at"),
-            "stale": not _batch_is_current(batch, snapshot),
+            "stale": details["stale"],
+            "stale_code": details["code"],
+            "stale_reason": details["reason"],
+            "config_changed_count": details["config_changed_count"],
+            "config_missing_count": details["config_missing_count"],
             "p6_version_no": batch.get("p6_version_no"),
             "revision": int(batch.get("p621_revision") or 0),
             "formats": {o["format"]: o["status"] for o in outputs},

@@ -41,7 +41,9 @@ _DDL = (
         status TEXT NOT NULL,
         status_reason TEXT,
         unsupported_json TEXT,
-        node_set_sha256 TEXT
+        node_set_sha256 TEXT,
+        config_sha256 TEXT,
+        config_node_count INTEGER NOT NULL DEFAULT 0
     )""",
     """CREATE TABLE IF NOT EXISTS np622_outputs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,6 +80,8 @@ _DDL = (
         unsupported_json TEXT,
         score REAL,
         p80_ms INTEGER,
+        params_json TEXT,
+        config_sha256 TEXT,
         PRIMARY KEY (batch_id, node_id)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_np622_nodes_status ON np622_nodes (batch_id, status)",
@@ -94,6 +98,12 @@ _DDL = (
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def canonical_json(value: Any) -> str:
+    """Stable JSON for fingerprints; sorted keys, no insignificant spacing."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":"))
 
 
 def loads(value: str | None, default: Any = None) -> Any:
@@ -116,6 +126,27 @@ def sha256(text: str) -> str:
 def ensure_schema(conn: sqlite3.Connection) -> None:
     for sql in _DDL:
         conn.execute(sql)
+    _ensure_r1_columns(conn)
+
+
+def _ensure_r1_columns(conn: sqlite3.Connection) -> None:
+    """Add R1 snapshot columns to databases created before v2.048."""
+    additions = {
+        "np622_batches": (
+            ("config_sha256", "TEXT"),
+            ("config_node_count", "INTEGER NOT NULL DEFAULT 0"),
+        ),
+        "np622_nodes": (
+            ("params_json", "TEXT"),
+            ("config_sha256", "TEXT"),
+        ),
+    }
+    for table, columns in additions.items():
+        existing = {row["name"] for row in conn.execute(
+            f"PRAGMA table_info({table})").fetchall()}
+        for column, ddl in columns:
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
 def next_batch_no(conn: sqlite3.Connection) -> str:
@@ -132,8 +163,8 @@ def insert_batch(conn: sqlite3.Connection, payload: dict) -> int:
             p621_computed_at,category_counts_json,merged_count,unique_count,duplicate_count,
             filtered_count,candidate_count,compatibility_excluded_count,output_count,
             gpt_count,yt_count,tg_count,gh_count,multi_label_count,is_empty,status,
-            status_reason,unsupported_json,node_set_sha256)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            status_reason,unsupported_json,node_set_sha256,config_sha256,config_node_count)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (payload["batch_no"], stamp, payload.get("trigger"), int(payload["p6_version_id"]),
          payload.get("p6_version_no"), int(payload.get("p621_revision") or 0),
          payload.get("p621_computed_at"), _json(payload.get("category_counts") or {}),
@@ -146,7 +177,8 @@ def insert_batch(conn: sqlite3.Connection, payload: dict) -> int:
          int(payload.get("gh_count") or 0), int(payload.get("multi_label_count") or 0),
          1 if payload.get("is_empty") else 0, payload.get("status") or "success",
          payload.get("status_reason"), _json(payload.get("unsupported") or {}),
-         payload.get("node_set_sha256")),
+         payload.get("node_set_sha256"), payload.get("config_sha256"),
+         int(payload.get("config_node_count") or 0)),
     )
     return int(cur.lastrowid)
 
@@ -172,15 +204,16 @@ def insert_node(conn: sqlite3.Connection, batch_id: int, payload: dict) -> None:
         """INSERT INTO np622_nodes
            (batch_id,node_id,node_name,airport_id,airport_name,server,port,protocol,
             speed_grade,display_name,labels_json,categories_json,status,hits_json,
-            unsupported_json,score,p80_ms)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            unsupported_json,score,p80_ms,params_json,config_sha256)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (int(batch_id), int(payload["node_id"]), payload.get("node_name"),
          payload.get("airport_id"), payload.get("airport_name"), payload.get("server"),
          payload.get("port"), payload.get("protocol"), payload.get("speed_grade"),
          payload.get("display_name"), _json(payload.get("labels") or []),
          _json(payload.get("categories") or []), payload.get("status") or "allowed",
          _json(payload.get("hits") or []), _json(payload.get("unsupported") or {}),
-         payload.get("score"), payload.get("p80_ms")),
+         payload.get("score"), payload.get("p80_ms"),
+         _json(payload.get("params") or {}), payload.get("config_sha256")),
     )
 
 
@@ -265,6 +298,8 @@ def batch_payload(batch: dict) -> dict:
         "status_reason": batch.get("status_reason"),
         "unsupported": loads(batch.get("unsupported_json"), {}) or {},
         "node_set_sha256": batch.get("node_set_sha256"),
+        "config_sha256": batch.get("config_sha256"),
+        "config_node_count": int(batch.get("config_node_count") or 0),
     }
 
 
@@ -305,4 +340,6 @@ def node_payload(node: dict) -> dict:
         "unsupported": loads(node.get("unsupported_json"), {}) or {},
         "score": node.get("score"),
         "p80_ms": node.get("p80_ms"),
+        "config_sha256": node.get("config_sha256"),
+        "has_config_snapshot": bool(node.get("config_sha256")),
     }

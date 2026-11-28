@@ -46,6 +46,19 @@ const stats = computed(() => batch.value || current.value || {
   output_count: 0, labels: { gpt: 0, yt: 0, tg: 0, gh: 0, multi: 0 }, p6: {}, p621: {}
 })
 const isStale = computed(() => s.value.status === 'stale')
+const staleReason = computed(() => batch.value?.stale_reason || s.value.stale_reason || '')
+const staleTitle = computed(() => {
+  const code = batch.value?.stale_code || s.value.stale_code
+  if (code === 'node_config_changed') return '节点连接配置已变化，当前批次已过期。'
+  if (code === 'node_config_missing') return '节点当前连接配置缺失，当前批次已过期。'
+  if (code === 'config_snapshot_missing' || code === 'config_snapshot_invalid') {
+    return '批次连接配置快照不完整，当前批次已过期。'
+  }
+  if (code === 'p6_version_changed') return 'P6.1 最终优选版本已变化，当前批次已过期。'
+  if (code === 'p621_revision_changed') return '关键词规则修订号已变化，当前批次已过期。'
+  return '版本或配置已变化，当前批次已过期。'
+})
+const configFingerprint = computed(() => batch.value?.config_sha256 || current.value?.config_sha256)
 const statusKey = computed(() => s.value.status || 'not_generated')
 const statusText = computed(() => STATUS_TEXT[statusKey.value] || statusKey.value)
 const outputs = computed(() => s.value.formats || [])
@@ -186,7 +199,7 @@ onMounted(loadAll)
     <header class="p622-head">
       <div class="p622-head-note">
         <b>一份统一订阅，四种客户端表达</b>
-        <span>六类 P6.1 优选合并去重 → P6.2.1 关键词过滤 → Clash / sing-box / Base64 / Loon</span>
+        <span>六类 P6.1 优选合并去重 → P6.2.1 关键词过滤 → 连接配置冻结与指纹 → Clash / sing-box / Base64 / Loon</span>
       </div>
       <div class="p622-head-actions">
         <el-tag :type="isStale ? 'warning' : statusKey === 'success' ? 'success' : 'info'"
@@ -203,13 +216,14 @@ onMounted(loadAll)
     <section class="p622-boundary" :class="{ 'is-stale': isStale }">
       <div class="p622-boundary-mark">ONE<br>SUB</div>
       <div>
-        <b>{{ isStale ? '版本或规则已变化，当前批次已过期。' : '只做后台预览与管理员下载，不开放客户端订阅入口。' }}</b>
+        <b>{{ isStale ? staleTitle : '只做后台预览与管理员下载，不开放客户端订阅入口。' }}</b>
         <p v-if="isStale">
+          {{ staleReason || '批次版本或连接配置已变化，需重新生成。' }}
           当前 P6.1 为 {{ current?.p6?.version_no || '—' }}、规则 R{{ current?.p621?.revision ?? '—' }}；
-          本批次仍绑定旧版本。旧过滤结果不得用于新订阅，请重新生成。
+          本批次仍绑定生成时的版本、规则和完整连接配置快照。旧批次不得继续下载。
         </p>
         <p v-else>
-          节点选择只来自 P6.1，关键词只来自 P6.2.1；重新计算不会触发 P2/P3/P4/P5，不创建 P6.1 新版本，不写回过滤结果。
+          节点选择只来自 P6.1，关键词只来自 P6.2.1；协议、服务器、端口与参数取自 P1 当前连接数据，并在生成时冻结为不可变快照。重新计算不会触发 P2/P3/P4/P5。
         </p>
       </div>
       <span class="p622-boundary-chip">PREVIEW · ADMIN ONLY</span>
@@ -249,6 +263,7 @@ onMounted(loadAll)
       <div><span>最近生成</span><b>{{ timeText(batch?.created_at) }}</b></div>
       <div><span>批次</span><b>{{ batch?.batch_no || '未生成' }}</b></div>
       <div><span>节点集合 SHA</span><b class="mono">{{ shortHash(stats.node_set_sha256) }}</b></div>
+      <div><span>连接配置 SHA</span><b class="mono">{{ shortHash(configFingerprint) }}</b></div>
     </section>
 
     <section class="p622-card">
@@ -301,7 +316,7 @@ onMounted(loadAll)
       <div class="p622-card-head">
         <div>
           <h3>客户端格式</h3>
-          <p>四种格式共用同一最终节点集合、数量与展示名称；切换只改变表达方式，不重新选择节点。</p>
+          <p>四种格式共用同一最终节点集合、数量、展示名称与生成时冻结的连接配置；切换只改变表达方式，不重新读取节点。</p>
         </div>
         <div class="p622-format-tabs">
           <button v-for="item in FORMATS" :key="item.key"
@@ -353,7 +368,7 @@ onMounted(loadAll)
       <div class="p622-card-head">
         <div>
           <h3>节点预览</h3>
-          <p>展示最终名称、机场、服务器、协议、速度、业务标签与过滤状态；被过滤节点仅在此管理预览出现。</p>
+          <p>展示最终名称、机场、服务器、协议、速度、业务标签、配置指纹与过滤状态；不展示密码、UUID 等连接参数。被过滤节点仅在此管理预览出现。</p>
         </div>
         <el-checkbox v-model="showFiltered" size="small">显示被过滤节点</el-checkbox>
       </div>
@@ -370,7 +385,7 @@ onMounted(loadAll)
         </div>
         <div class="p622-node-origin">
           <b>{{ node.airport_name || '—' }}</b>
-          <small>{{ node.server }}:{{ node.port }}</small>
+          <small :title="node.config_sha256">{{ node.server }}:{{ node.port }} · cfg {{ shortHash(node.config_sha256) }}</small>
         </div>
         <div class="p622-node-proto"><b>{{ protocolText(node.protocol) }}</b><small>{{ node.categories?.join(' / ') || '—' }}</small></div>
         <div class="p622-node-speed"><b>{{ speedText(node.speed_grade) }}</b><small>{{ node.p80_ms ? `${Math.round(node.p80_ms)} ms` : '—' }}</small></div>
@@ -413,7 +428,13 @@ onMounted(loadAll)
             {{ formatLabel(out.format) }} · {{ out.status === 'success' ? out.node_count : out.status }}
           </span>
         </div>
-        <el-tag v-if="item.stale" size="small" type="warning" effect="plain">版本已过期</el-tag>
+        <el-tag v-if="item.stale" size="small" type="warning" effect="plain"
+                :title="item.stale_reason">
+          {{ item.stale_code === 'node_config_changed' ? '配置已变化'
+            : item.stale_code === 'p6_version_changed' ? '版本已过期'
+              : item.stale_code === 'p621_revision_changed' ? '规则已变化'
+                : '需重新生成' }}
+        </el-tag>
         <el-tag v-else size="small" :type="item.status === 'success' ? 'success' : 'info'" effect="plain">
           {{ STATUS_TEXT[item.status] || item.status }}
         </el-tag>

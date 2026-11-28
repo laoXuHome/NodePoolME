@@ -761,7 +761,7 @@ onUnmounted(() => { clearInterval(timer.value); clearInterval(liveTimer.value); 
         <div><span>TG 标签</span><b>{{ unifiedSubscription.labels?.tg || 0 }}</b><small>Telegram</small></div>
         <div><span>GH 标签</span><b>{{ unifiedSubscription.labels?.gh || 0 }}</b><small>GitHub</small></div>
         <div class="is-time"><span>最近生成</span><b>{{ unifiedSubscription.last_generated ? formatTs(unifiedSubscription.last_generated).slice(5, 16) : '尚未生成' }}</b><small>{{ unifiedSubscription.p6_version_no || '—' }} / R{{ unifiedSubscription.revision || 0 }}</small></div>
-        <div :class="{ 'is-pending': unifiedSubscription.stale }"><span>批次状态</span><b class="is-state">{{ unifiedSubscription.stale ? '已过期' : unifiedSubscription.status === 'success' ? '已生成' : unifiedSubscription.status === 'empty' ? '空订阅' : unifiedSubscription.status === 'not_generated' ? '未生成' : unifiedSubscription.status }}</b><small>{{ unifiedSubscription.stale ? '需重新生成' : '版本一致' }}</small></div>
+        <div :class="{ 'is-pending': unifiedSubscription.stale }"><span>批次状态</span><b class="is-state">{{ unifiedSubscription.stale ? '已过期' : unifiedSubscription.status === 'success' ? '已生成' : unifiedSubscription.status === 'empty' ? '空订阅' : unifiedSubscription.status === 'not_generated' ? '未生成' : unifiedSubscription.status }}</b><small>{{ unifiedSubscription.stale ? (unifiedSubscription.config_changed_count ? `${unifiedSubscription.config_changed_count} 个连接配置变化` : '需重新生成') : '版本与配置一致' }}</small></div>
       </div>
       <div class="dash-unified-formats">
         <span v-for="key in ['clash', 'singbox', 'base64', 'loon']" :key="key" :class="`st-${unifiedSubscription.formats?.[key] || 'not_generated'}`">

@@ -401,3 +401,268 @@ def test_stale_download_is_blocked_by_api():
         assert summary["status"] == "stale"
         download = client.get("/api/unified-subscription/download/clash")
         assert download.status_code == 409
+
+
+# ------------------------------------------------------------------- P6.2.2-R1
+def _set_node_config(node_id: int, **fields) -> None:
+    allowed = {"protocol", "server", "port"}
+    values = {k: v for k, v in fields.items() if k in allowed}
+    if not values:
+        return
+    sql = ", ".join(f"{key}=?" for key in values)
+    with db.transaction() as conn:
+        conn.execute(f"UPDATE np_nodes SET {sql}, updated_at=? WHERE id=?",
+                     (*values.values(), _stamp(), int(node_id)))
+
+
+def _set_node_params(node_id: int, params: dict) -> None:
+    with db.transaction() as conn:
+        conn.execute("UPDATE np_nodes SET params=?, updated_at=? WHERE id=?",
+                     (json.dumps(params, ensure_ascii=False), _stamp(), int(node_id)))
+
+
+def _all_downloads_rejected(client):
+    for fmt in formats.FORMAT_KEYS:
+        response = client.get(f"/api/unified-subscription/download/{fmt}")
+        assert response.status_code == 409
+        assert "重新生成" in response.json()["detail"]
+
+
+def test_r1_password_change_makes_batch_stale():
+    ids = seed_unified()
+    first = service.generate()["batch"]
+    _set_node_params(ids["n1"], {"cipher": "aes-256-gcm", "password": "p1-rotated"})
+    summary = service.summary()
+    assert summary["status"] == "stale"
+    assert summary["batch"]["stale"] is True
+    assert summary["batch"]["stale_code"] == "node_config_changed"
+    assert summary["batch"]["config_changed_count"] == 1
+    assert summary["config_changed_count"] == 1
+    assert summary["batch"]["id"] == first["id"]
+    for fmt in formats.FORMAT_KEYS:
+        with pytest.raises(UnifiedError) as err:
+            service.download(fmt)
+        assert err.value.code == "stale_generation"
+
+
+def test_r1_protocol_change_makes_batch_stale():
+    ids = seed_unified()
+    service.generate()
+    _set_node_config(ids["n4"], protocol="vless")
+    summary = service.summary()
+    assert summary["batch"]["stale"] is True
+    assert summary["batch"]["stale_code"] == "node_config_changed"
+    assert summary["batch"]["config_changed_count"] == 1
+
+
+def test_r1_tls_reality_and_transport_change_make_batch_stale():
+    ids = seed_unified()
+    service.generate()
+    n2 = {"uuid": "uuid-2", "alterId": 0, "cipher": "auto", "network": "ws",
+          "security": "tls", "host": "cdn.example.com", "path": "/ws",
+          "sni": "rotated.example.com", "alpn": "h2", "fingerprint": "chrome"}
+    n3 = {"uuid": "uuid-3", "network": "ws", "security": "reality",
+          "host": "reality.example.com", "path": "/r", "sni": "reality.example.com",
+          "publicKey": "pbk-rotated", "shortId": "sid-test", "fingerprint": "chrome",
+          "alpn": "h2"}
+    n4 = {"password": "trojan-pass", "network": "ws", "sni": "trojan.example.com",
+          "alpn": "h2,http/1.1"}
+    _set_node_params(ids["n2"], n2)
+    _set_node_params(ids["n3"], n3)
+    _set_node_params(ids["n4"], n4)
+    summary = service.summary()
+    assert summary["batch"]["stale"] is True
+    assert summary["batch"]["config_changed_count"] == 3
+
+
+def test_r1_server_or_port_change_makes_batch_stale():
+    ids = seed_unified()
+    service.generate()
+    _set_node_config(ids["n1"], server="10.99.0.1", port=8443)
+    _set_node_config(ids["n2"], server="10.99.0.2")
+    _set_node_config(ids["n3"], port=2053)
+    summary = service.summary()
+    assert summary["batch"]["stale"] is True
+    assert summary["batch"]["config_changed_count"] == 3
+    assert set(summary["batch"]["stale_codes"]) == {"node_config_changed"}
+
+
+def test_r1_repeated_reads_with_same_config_are_not_stale():
+    ids = seed_unified()
+    service.generate()
+    # Key order is not part of the fingerprint; rewriting the same values must not
+    # invalidate a healthy batch.
+    _set_node_params(ids["n1"], {"password": "p1", "cipher": "aes-256-gcm"})
+    for _ in range(3):
+        summary = service.summary()
+        assert summary["status"] == "success"
+        assert summary["batch"]["stale"] is False
+        assert summary["stale_code"] is None
+    for _ in range(2):
+        history = service.history()
+        assert all(item["stale"] is False for item in history["items"])
+    for fmt in formats.FORMAT_KEYS:
+        assert service.format_content(fmt)["stale"] is False
+    assert service.dashboard()["stale"] is False
+
+
+def test_r1_stale_batch_blocks_all_four_downloads_by_api():
+    ids = seed_unified()
+    with TestClient(app) as client:
+        client.post("/api/auth/login", json={"password": "test123"})
+        assert client.post("/api/unified-subscription/generate").status_code == 200
+        _set_node_params(ids["n1"], {"cipher": "aes-256-gcm",
+                                     "password": "secret-api-rotated"})
+        summary = client.get("/api/unified-subscription/summary").json()
+        assert summary["status"] == "stale"
+        assert summary["stale_reason"].find("连接配置已变化") >= 0
+        _all_downloads_rejected(client)
+        preview = client.get("/api/unified-subscription/formats/clash")
+        assert preview.status_code == 200
+        assert preview.json()["stale"] is True
+
+
+def test_r1_regenerate_uses_latest_config_in_all_four_formats():
+    ids = seed_unified()
+    first = service.generate()["batch"]
+    _set_node_config(ids["n1"], server="10.88.0.1", port=8443)
+    _set_node_params(ids["n1"], {"cipher": "aes-256-gcm", "password": "p1-new"})
+    _set_node_params(ids["n2"], {"uuid": "uuid-2-new", "alterId": 0, "cipher": "auto",
+                                 "network": "ws", "security": "tls",
+                                 "host": "cdn.example.com", "path": "/ws-new",
+                                 "sni": "new.example.com", "alpn": "h2,http/1.1",
+                                 "fingerprint": "chrome"})
+    second = service.generate()["batch"]
+    assert second["id"] != first["id"]
+    assert second["status"] == "success"
+    summary = service.summary()
+    assert summary["status"] == "success"
+    assert summary["batch"]["id"] == second["id"]
+    assert summary["batch"]["stale"] is False
+    assert summary["batch"]["config_sha256"] != first["config_sha256"]
+
+    clash = yaml.safe_load(service.format_content("clash")["content"])["proxies"]
+    by_server = {p["server"]: p for p in clash}
+    assert by_server["10.88.0.1"]["port"] == 8443
+    assert by_server["10.88.0.1"]["password"] == "p1-new"
+    n2 = next(p for p in clash if p.get("uuid") == "uuid-2-new")
+    assert n2["ws-opts"]["path"] == "/ws-new"
+    assert n2["servername"] == "new.example.com"
+
+    sing = json.loads(service.format_content("singbox")["content"])
+    n2_sing = next(o for o in sing["outbounds"] if o.get("uuid") == "uuid-2-new")
+    assert n2_sing["transport"]["path"] == "/ws-new"
+    assert n2_sing["tls"]["server_name"] == "new.example.com"
+
+    b64 = base64.b64decode(service.format_content("base64")["content"]).decode()
+    assert "10.88.0.1:8443" in b64
+    _vmess = json.loads(base64.b64decode(
+        next(line for line in b64.splitlines() if line.startswith("vmess://"))[8:]))
+    assert _vmess["id"] == "uuid-2-new" and _vmess["path"] == "/ws-new"
+    loon = service.format_content("loon")["content"]
+    assert "10.88.0.1:8443" in loon
+    assert "uuid-2-new" in loon or "uuid-2-new" in base64.b64decode(
+        next(line for line in loon.splitlines() if line.startswith("vmess://"))[8:]).decode()
+
+    # Names and order are still shared by all four formats.
+    names = {fmt: _content_lines(fmt, service.format_content(fmt)["content"])
+             for fmt in formats.FORMAT_KEYS}
+    assert all(value == names["clash"] for value in names.values())
+
+
+def test_r1_history_keeps_original_connection_snapshot():
+    ids = seed_unified()
+    first = service.generate()["batch"]
+    old_content = service.format_content("clash", batch_id=first["id"])["content"]
+    _set_node_config(ids["n1"], server="10.77.0.1", port=9443)
+    _set_node_params(ids["n1"], {"cipher": "aes-256-gcm", "password": "history-new"})
+    second = service.generate()["batch"]
+    assert second["id"] != first["id"]
+    assert service.format_content("clash", batch_id=first["id"])["content"] == old_content
+    assert service.format_content("clash", batch_id=first["id"])["stale"] is True
+    assert service.format_content("clash", batch_id=second["id"])["stale"] is False
+    with db.transaction() as conn:
+        old = dict(conn.execute(
+            "SELECT server,port,params_json,config_sha256 FROM np622_nodes "
+            "WHERE batch_id=? AND node_id=?", (first["id"], ids["n1"])).fetchone())
+        new = dict(conn.execute(
+            "SELECT server,port,params_json,config_sha256 FROM np622_nodes "
+            "WHERE batch_id=? AND node_id=?", (second["id"], ids["n1"])).fetchone())
+    assert old["server"] == "10.0.0.1" and old["port"] == 443
+    assert json.loads(old["params_json"])["password"] == "p1"
+    assert new["server"] == "10.77.0.1" and new["port"] == 9443
+    assert json.loads(new["params_json"])["password"] == "history-new"
+    assert old["config_sha256"] != new["config_sha256"]
+
+
+def test_r1_sensitive_params_do_not_leak_into_normal_views_or_logs(caplog, tmp_path):
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    ids = seed_unified()
+    secrets = {
+        "n1": "secret-ss-pass-9988",
+        "n2": "secret-vmess-uuid-7788",
+        "n4": "secret-trojan-pass-6677",
+        "n3": "secret-reality-pbk-5566",
+    }
+    _set_node_params(ids["n1"], {"cipher": "aes-256-gcm", "password": secrets["n1"]})
+    _set_node_params(ids["n2"], {"uuid": secrets["n2"], "alterId": 0, "cipher": "auto",
+                                 "network": "ws", "security": "tls",
+                                 "host": "cdn.example.com", "path": "/ws",
+                                 "sni": "cdn.example.com", "alpn": "h2",
+                                 "fingerprint": "chrome"})
+    _set_node_params(ids["n4"], {"password": secrets["n4"], "network": "tcp",
+                                 "sni": "trojan.example.com", "alpn": "h2"})
+    _set_node_params(ids["n3"], {"uuid": "uuid-3", "network": "ws",
+                                 "security": "reality", "host": "reality.example.com",
+                                 "path": "/r", "sni": "reality.example.com",
+                                 "publicKey": secrets["n3"], "shortId": "sid-test",
+                                 "fingerprint": "chrome", "alpn": "h2"})
+    service.generate()
+    normal_payloads = [service.summary(), service.history(), service.dashboard()]
+    with db.transaction() as conn:
+        events = [dict(r) for r in conn.execute(
+            "SELECT event, detail_json FROM np622_events").fetchall()]
+        node_rows = [dict(r) for r in conn.execute(
+            "SELECT node_name, params_json FROM np622_nodes").fetchall()]
+    serialised = json.dumps(normal_payloads, ensure_ascii=False)
+    serialised += json.dumps(events, ensure_ascii=False)
+    for secret in secrets.values():
+        assert secret not in serialised
+        assert secret not in caplog.text
+    for row in node_rows:
+        # The DB snapshot stores the client credential for rendering, but the
+        # normal node payload never exposes params_json.
+        assert row["params_json"] is not None
+    for node in service.summary()["nodes"]:
+        assert "params" not in node and "params_json" not in node
+        assert "password" not in json.dumps(node)
+        assert "uuid" not in json.dumps(node).lower()
+    log_dir = Path(os.environ["NODEPOOL_LOG_DIR"])
+    for file in log_dir.rglob("*") if log_dir.exists() else []:
+        if file.is_file():
+            text = file.read_text(errors="ignore")
+            for secret in secrets.values():
+                assert secret not in text
+
+
+def test_r1_existing_merge_filter_labels_and_four_format_rules_still_apply():
+    ids = seed_unified()
+    result = service.generate()
+    batch = result["batch"]
+    assert batch["status"] == "success"
+    assert batch["merged_count"] == 12
+    assert batch["unique_count"] == 6
+    assert batch["duplicate_count"] == 6
+    assert batch["filtered_count"] == 1
+    assert batch["output_count"] == 5
+    assert batch["labels"] == {"gpt": 2, "yt": 2, "tg": 1, "gh": 2, "multi": 2}
+    nodes = {n["node_id"]: n for n in service.summary()["nodes"]}
+    assert nodes[ids["n1"]]["labels"] == ["GPT", "YT", "TG", "GH"]
+    assert nodes[ids["n5"]]["status"] == "filtered"
+    names = {fmt: _content_lines(fmt, service.format_content(fmt)["content"])
+             for fmt in formats.FORMAT_KEYS}
+    assert all(value == names["clash"] for value in names.values())
+    assert len(names["clash"]) == 5
+    assert nodes[ids["n6"]]["display_name"] != nodes[ids["n1"]]["display_name"]
