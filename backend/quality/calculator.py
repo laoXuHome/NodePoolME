@@ -169,7 +169,6 @@ def quality_from_checks(checks: Iterable[dict], settings: dict | None = None,
 
     success = [row for row in valid if row["status"] == "success"]
     failures = [row for row in valid if row["status"] == "failure"]
-    availability = len(success) / len(valid) * 100 if valid else None
 
     p80_values = [(row["band"], float(row["p80_ms"])) for row in success
                   if row.get("p80_ms") is not None]
@@ -219,6 +218,16 @@ def quality_from_checks(checks: Iterable[dict], settings: dict | None = None,
                                       {band: 1}) or 0, 1) if rows and any(
                 r["status"] == "success" and r.get("p80_ms") is not None for r in rows) else None,
         }
+
+    # Availability is a weighted mean of each band's own success rate.  A band
+    # with no definitive snapshots is absent, not a zero, so the remaining
+    # bands are re-normalized by their configured weights.
+    availability = _weighted(
+        [(band, band_stats[band]["availability"] / 100.0)
+         for band in BANDS if band_stats[band]["availability"] is not None],
+        weights,
+    )
+    availability = availability * 100.0 if availability is not None else None
 
     components = {
         "available": (availability, QUALITY_WEIGHTS["available"]),

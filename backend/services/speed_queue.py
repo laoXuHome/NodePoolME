@@ -5,7 +5,6 @@ uses its own speed_parallel_nodes limit, duplicate node jobs are rejected, and t
 Mihomo config is prepared once for a batch (the process has one core instance).
 """
 import asyncio
-import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -198,24 +197,13 @@ class SpeedQueue:
         self._wake.set()
         return job, True
 
-    def enqueue_many(self, node_ids: list[int], trigger: str, *,
-                     spread: tuple[float, float] | None = None) -> dict:
+    def enqueue_many(self, node_ids: list[int], trigger: str) -> dict:
+        """Queue all nodes now; the dispatcher alone applies the batch limit."""
         created = duplicate = excluded = 0
-        starts: list[float] = []
-        if spread:
-            left, right = spread
-            count = max(1, len(node_ids))
-            slot = max(1.0, (right - left) / (count + 1))
-            for index in range(count):
-                center = left + slot * (index + 1)
-                starts.append(max(left, min(right - 1, center + random.uniform(-slot * .3, slot * .3))))
-            starts.sort()
-        for index, node_id in enumerate(node_ids):
+        started = time.time()
+        for node_id in node_ids:
             try:
-                _, fresh = self.enqueue(
-                    node_id, trigger,
-                    not_before=(starts[index] if spread else time.time()),
-                )
+                _, fresh = self.enqueue(node_id, trigger, not_before=started)
                 created += int(fresh)
                 duplicate += int(not fresh)
             except ValueError:
@@ -281,7 +269,7 @@ class SpeedQueue:
                     await asyncio.sleep(3)
                     continue
                 # 测速批次自己的并发，复用节点检测的 global_concurrency 会让两套任务互相影响
-                limit = max(1, min(db.get_int("speed_parallel_nodes", 4), 8))
+                limit = self._parallel_limit()
                 batch = ready[:limit]
                 self._batch_task = asyncio.create_task(self._run_batch(batch),
                                                        name=f"speed-batch-{batch[0].id}")
@@ -291,6 +279,9 @@ class SpeedQueue:
             except Exception as exc:
                 db.append_log("WARN", "测速", f"测速队列异常：{type(exc).__name__}: {exc}")
                 await asyncio.sleep(3)
+
+    def _parallel_limit(self) -> int:
+        return max(1, min(db.get_int("speed_parallel_nodes", 4), 8))
 
     def _job_still_valid(self, job: SpeedJob) -> str | None:
         if db.get("speed_enabled", "1") != "1":
@@ -422,44 +413,59 @@ class SpeedQueue:
                                       f"{len(expired)} 个节点的测速结果已超过 {ttl} 天有效期，"
                                       "显示待测速（不判故障、不自动补测）")
                     db.set_setting("speed_expiry_log_date", today)
-                if db.get("speed_enabled", "1") != "1":
-                    continue
-                if db.get("speed_schedule_enabled", "1") != "1":
-                    continue
-                current, start, end = window_bounds()
-                if not (start <= current < end):
-                    continue
-                window_date = start.date().isoformat()
-                last = db.get("speed_schedule_last_date") or ""
-                if last == window_date:
-                    continue
-                every = max(1, min(db.get_int("speed_schedule_every_days", 1), 30))
-                if last:
-                    try:
-                        gap = (start.date() - datetime.strptime(last, "%Y-%m-%d").date()).days
-                        if gap < every:
-                            continue
-                    except ValueError:
-                        pass
-                node_ids = speedtest.eligible_node_ids()
-                if not node_ids:
-                    db.append_log("INFO", "测速", "定时计划没有可测节点")
-                    db.set_setting("speed_schedule_last_date", window_date)
-                    continue
-                left = max(time.time(), current.timestamp())
-                right = end.timestamp()
-                if right - left < 5:
-                    continue
-                result = self.enqueue_many(node_ids, "schedule", spread=(left, right))
-                db.set_setting("speed_schedule_last_date", window_date)
-                db.append_log("INFO", "测速",
-                              f"定时计划已创建：{len(node_ids)} 个节点，"
-                              f"{start.strftime('%H:%M')}—{end.strftime('%H:%M')} "
-                              f"随机分散，新建 {result['created']}，跳过 {result['duplicate']}")
+                self.schedule_once()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 db.append_log("WARN", "测速", f"定时计划异常：{type(exc).__name__}: {exc}")
+
+    def schedule_once(self, now: datetime | None = None) -> dict:
+        """Create at most one fixed batch for the current schedule window.
+
+        The batch is queued immediately in node order; the dispatcher takes
+        ``speed_parallel_nodes`` at a time.  There is no random not-before,
+        no per-node spread, and a window date is stamped once it is handled.
+        """
+        if db.get("speed_enabled", "1") != "1":
+            return {"created": 0, "duplicate": 0, "excluded": 0, "skipped": "disabled"}
+        if db.get("speed_schedule_enabled", "1") != "1":
+            return {"created": 0, "duplicate": 0, "excluded": 0, "skipped": "schedule_off"}
+        current, start, end = window_bounds(now)
+        if not (start <= current < end):
+            return {"created": 0, "duplicate": 0, "excluded": 0,
+                    "skipped": "outside_window"}
+        window_date = start.date().isoformat()
+        last = db.get("speed_schedule_last_date") or ""
+        if last == window_date:
+            return {"created": 0, "duplicate": 0, "excluded": 0,
+                    "skipped": "already_ran", "window_date": window_date}
+        every = max(1, min(db.get_int("speed_schedule_every_days", 1), 7))
+        if last:
+            try:
+                gap = (start.date() - datetime.strptime(last, "%Y-%m-%d").date()).days
+                if gap < every:
+                    return {"created": 0, "duplicate": 0, "excluded": 0,
+                            "skipped": "not_due", "window_date": window_date}
+            except ValueError:
+                pass
+        if end.timestamp() - current.timestamp() < 5:
+            return {"created": 0, "duplicate": 0, "excluded": 0,
+                    "skipped": "window_too_short", "window_date": window_date}
+        node_ids = speedtest.eligible_node_ids()
+        if not node_ids:
+            db.set_setting("speed_schedule_last_date", window_date)
+            db.append_log("INFO", "测速", "定时计划没有可测节点")
+            return {"created": 0, "duplicate": 0, "excluded": 0,
+                    "skipped": "no_nodes", "window_date": window_date}
+        result = self.enqueue_many(node_ids, "schedule")
+        db.set_setting("speed_schedule_last_date", window_date)
+        db.append_log("INFO", "测速",
+                      f"定时计划已创建：{len(node_ids)} 个节点，"
+                      f"{start.strftime('%H:%M')}—{end.strftime('%H:%M')} "
+                      f"固定队列，并发 {self._parallel_limit()}，"
+                      f"新建 {result['created']}，跳过 {result['duplicate']}")
+        return {**result, "window_date": window_date,
+                "concurrency": self._parallel_limit(), "node_ids": node_ids}
 
     # ------------------------------------------------------------------ trim
     def _trim(self) -> None:

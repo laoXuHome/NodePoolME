@@ -134,11 +134,10 @@ def evaluate_all(*, force: bool = False, now: datetime | None = None) -> dict:
     settings = store.get_settings()
     nodes = store.node_inventory()
     count = 0
-    with db.transaction() as conn:
-        for node in nodes:
-            evaluate_node(int(node["id"]), settings=settings, now=at, save=True,
-                          sync_speed=False)
-            count += 1
+    for node in nodes:
+        evaluate_node(int(node["id"]), settings=settings, now=at, save=True,
+                      sync_speed=False)
+        count += 1
     _log(f"P4 七天质量评价刷新完成：{count} 个节点")
     return {"evaluated": count, "skipped": False,
             "at": at.strftime("%Y-%m-%d %H:%M:%S")}

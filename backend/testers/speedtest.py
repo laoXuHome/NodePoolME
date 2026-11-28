@@ -45,6 +45,24 @@ class SourceCheck:
     message: str | None = None
 
 
+class _ByteBudget:
+    """One shared byte allowance for all workers of a single source.
+
+    The allowance is consumed as bytes are actually received.  Ranges are also
+    clipped to their share, so a worker cannot finish by sending more than the
+    caller's total budget.
+    """
+
+    def __init__(self, limit: int):
+        self.limit = max(0, int(limit))
+        self.remaining = self.limit
+
+    def take(self, received: int) -> int:
+        granted = min(max(0, int(received)), self.remaining)
+        self.remaining -= granted
+        return granted
+
+
 @dataclass
 class WorkerSample:
     ok: bool
@@ -391,6 +409,8 @@ async def _worker(client: httpx.AsyncClient, url: str, window: tuple[int, int],
                   warmup: float, sample: float, conn_timeout: float,
                   total_deadline: float, max_bytes: int | None = None) -> WorkerSample:
     start, end = window
+    budget = (max_bytes if isinstance(max_bytes, _ByteBudget)
+              else _ByteBudget(max_bytes) if max_bytes is not None else None)
     request = client.build_request("GET", url, headers={"Range": f"bytes={start}-{end}"})
     marks = _timings(request)
     sent = time.perf_counter()
@@ -426,29 +446,35 @@ async def _worker(client: httpx.AsyncClient, url: str, window: tuple[int, int],
             elapsed = time.perf_counter() - began
             if elapsed >= total_deadline:
                 break
-            if max_bytes is not None and total_bytes >= max_bytes:
+            if budget is not None and budget.remaining <= 0:
                 traffic_limited = True
                 break
             try:
                 chunk = await asyncio.wait_for(anext(iterator), timeout=conn_timeout)
             except StopAsyncIteration:
-                range_limited = True
+                range_limited = budget is None
                 break
             except asyncio.TimeoutError:
                 if measure_start is None:
                     return WorkerSample(False, status_code=status, range_ok=True,
+                                        bytes=total_bytes, traffic_bytes=total_bytes,
                                         connect_ms=connect_ms, tls_ms=tls_ms, ttfb_ms=ttfb,
                                         error_type="node_connect", message="等待首字节超时")
                 return WorkerSample(False, status_code=status, range_ok=True,
-                                    bytes=measured_bytes, connect_ms=connect_ms,
-                                    tls_ms=tls_ms, ttfb_ms=ttfb,
+                                    bytes=total_bytes, traffic_bytes=total_bytes,
+                                    connect_ms=connect_ms, tls_ms=tls_ms, ttfb_ms=ttfb,
                                     error_type="node_interrupted", message="下载中途断流")
             if not chunk:
                 continue
-            if max_bytes is not None and total_bytes + len(chunk) > max_bytes:
-                chunk = chunk[:max(0, max_bytes - total_bytes)]
-                traffic_limited = True
-            total_bytes += len(chunk)
+            if budget is not None:
+                # Ranges are clipped below, but count every received byte even
+                # for the last chunk; never silently discard pre-warmup data.
+                granted = budget.take(len(chunk))
+                if granted < len(chunk):
+                    traffic_limited = True
+                total_bytes += len(chunk)
+            else:
+                total_bytes += len(chunk)
             last_data = time.perf_counter()
             if measure_start is None:
                 if last_data - began < warmup:
@@ -482,7 +508,8 @@ async def _worker(client: httpx.AsyncClient, url: str, window: tuple[int, int],
                             ttfb_ms=ttfb, range_limited=range_limited,
                             traffic_limited=traffic_limited)
     except httpx.HTTPError as exc:
-        return WorkerSample(False, error_type="node_connect",
+        return WorkerSample(False, bytes=total_bytes, traffic_bytes=total_bytes,
+                            error_type="node_connect",
                             message=f"代理连接失败：{type(exc).__name__}")
     finally:
         if response is not None:
@@ -498,20 +525,34 @@ async def _test_source(source: dict, proxy_port: int, node: dict,
     total_timeout = settings["total_timeout"]
     size = int(source.get("size_bytes") or 100 * 1024 * 1024)
     windows = range_windows(size, connections)
-    per_worker = None
-    if max_bytes is not None:
-        per_worker = max(1, int(max_bytes) // max(1, len(windows)))
+    budget = _ByteBudget(max_bytes) if max_bytes is not None else None
+    if budget is not None:
+        # Clip each range to an exact slice of the total allowance.  The slices
+        # sum to the source allowance, while one shared budget stops all
+        # workers collectively as soon as it is consumed.
+        worker_count = min(len(windows), max(1, budget.limit))
+        base, extra = divmod(budget.limit, worker_count)
+        clipped = []
+        for index, (start, end) in enumerate(windows[:worker_count]):
+            length = base + (1 if index < extra else 0)
+            if length:
+                clipped.append((start, min(end, start + length - 1)))
+        windows = clipped
+    if not windows:
+        return SourceResult(source, False, bytes=0, error_type="source_error",
+                            message="测速流量预算为 0")
     proxy = f"socks5://127.0.0.1:{proxy_port}"
     client = _client(proxy, conn_timeout)
     try:
         tasks = [_worker(client, source["url"], w, warmup, sample, conn_timeout,
-                         total_timeout, per_worker) for w in windows]
+                         total_timeout, budget) for w in windows]
         results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True),
                                          timeout=total_timeout)
     except asyncio.TimeoutError:
-        # Tasks were cancelled without a final byte count; charge the whole
-        # source budget so a timed-out source can never create extra traffic.
-        return SourceResult(source, False, bytes=int(max_bytes or 0), error_type="node_connect",
+        # Tasks were cancelled without a final byte count; conservatively
+        # charge the whole source allowance instead of restoring it.
+        return SourceResult(source, False, bytes=budget.limit if budget else 0,
+                            error_type="node_connect",
                             message=f"整轮测速超过 {total_timeout:g} 秒")
     finally:
         await client.aclose()

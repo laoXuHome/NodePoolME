@@ -196,3 +196,75 @@ def test_settings_validation_rejects_conflicting_thresholds():
         calculator.validate_settings({"speed_window_end": "25:00"})
     ok = calculator.validate_settings({"speed_window_start": "17:00", "speed_window_end": "24:00"})
     assert ok["speed_window_end"] == "24:00"
+
+
+def _band_mix_checks(*, include_night=True, peak_unknown=False):
+    """peak 50%, night 100%, day 75% across three different local bands."""
+    checks = [
+        {"status": "success", "p80_ms": 120, "finished_at": "2026-11-27 19:00:00"},
+        {"status": "failure", "p80_ms": None, "finished_at": "2026-11-27 21:00:00"},
+        {"status": "success", "p80_ms": 120, "finished_at": "2026-11-25 10:00:00"},
+        {"status": "success", "p80_ms": 120, "finished_at": "2026-11-25 13:00:00"},
+        {"status": "success", "p80_ms": 120, "finished_at": "2026-11-25 15:00:00"},
+        {"status": "failure", "p80_ms": None, "finished_at": "2026-11-25 16:00:00"},
+    ]
+    if include_night:
+        checks += [
+            {"status": "success", "p80_ms": 120, "finished_at": "2026-11-26 03:00:00"},
+            {"status": "success", "p80_ms": 120, "finished_at": "2026-11-26 06:00:00"},
+        ]
+    if peak_unknown:
+        checks += [
+            {"status": "unknown", "p80_ms": None, "finished_at": "2026-11-27 18:00:00"},
+            {"status": "unknown", "p80_ms": None, "finished_at": "2026-11-27 23:00:00"},
+        ]
+    return checks
+
+
+def test_availability_is_weighted_by_three_time_bands():
+    cfg = {**calculator.DEFAULT_SETTINGS}
+    result = calculator.quality_from_checks(_band_mix_checks(), cfg, NOW)
+    # peak 50% * 50 + night 100% * 15 + day 75% * 35 = 66.25
+    assert abs(result["band_stats"]["peak"]["availability"] - 50.0) <= 0.1
+    assert abs(result["band_stats"]["night"]["availability"] - 100.0) <= 0.1
+    assert abs(result["band_stats"]["day"]["availability"] - 75.0) <= 0.1
+    assert abs(result["available_score"] - 66.25) <= 0.1
+    assert abs(result["quality_score"] - (66.25 * .5 + 100 * .3 + 100 * .2)) <= 0.1
+
+
+def test_availability_renormalizes_when_a_band_has_no_data():
+    cfg = {**calculator.DEFAULT_SETTINGS}
+    result = calculator.quality_from_checks(_band_mix_checks(include_night=False), cfg, NOW)
+    expected = (50 * 50 + 35 * 75) / (50 + 35)
+    assert result["band_stats"]["night"]["valid"] == 0
+    assert result["band_stats"]["night"]["availability"] is None
+    assert abs(result["available_score"] - expected) <= 0.1
+
+
+def test_unknown_never_enters_band_availability_denominator():
+    cfg = {**calculator.DEFAULT_SETTINGS}
+    with_unknown = calculator.quality_from_checks(_band_mix_checks(peak_unknown=True), cfg, NOW)
+    without_unknown = calculator.quality_from_checks(_band_mix_checks(), cfg, NOW)
+    assert with_unknown["band_stats"]["peak"]["valid"] == 2
+    assert with_unknown["band_stats"]["peak"]["availability"] == 50.0
+    assert with_unknown["available_score"] == without_unknown["available_score"]
+
+
+def test_changing_band_weights_changes_quality_score():
+    cfg = {**calculator.DEFAULT_SETTINGS}
+    before = calculator.quality_from_checks(_band_mix_checks(), cfg, NOW)
+    heavier_day = {**cfg, "weights": {"peak": 20, "night": 20, "day": 60}}
+    after = calculator.quality_from_checks(_band_mix_checks(), heavier_day, NOW)
+    assert abs(after["available_score"] - 75.0) <= 0.1
+    assert after["quality_score"] > before["quality_score"]
+    assert abs(after["quality_score"] - 87.5) <= 0.1
+
+
+def test_evaluate_all_refreshes_and_saves_every_node():
+    _, node_id = _prepare_node("批量01")
+    _insert_check(node_id, "2026-11-28 10:00:00", status="success", p80=150)
+    result = service.evaluate_all(force=True, now=NOW)
+    assert result["evaluated"] == 1
+    row = db.row("SELECT node_id, quality_score FROM np4_current WHERE node_id=?", (node_id,))
+    assert row and row["node_id"] == node_id
+    assert row["quality_score"] is not None
